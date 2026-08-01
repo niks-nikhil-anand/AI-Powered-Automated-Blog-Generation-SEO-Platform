@@ -10,151 +10,29 @@ export default function TrendResearchPage({ onOpenManualTopic }: TrendsPageProps
   const [activeFilter, setActiveFilter] = useState("All sources");
 
   const trendFilters = [
-    { label: "All sources", count: 42 },
-    { label: "Google Trends", count: 14 },
-    { label: "Hacker News", count: 11 },
-    { label: "GitHub Trending", count: 9 },
-    { label: "Reddit", count: 5 },
-    { label: "Product Hunt", count: 3 },
+    { label: "All sources", count: 0 },
+    { label: "Google Trends", count: 0 },
+    { label: "Hacker News", count: 0 },
+    { label: "GitHub Trending", count: 0 },
+    { label: "Reddit", count: 0 },
+    { label: "Product Hunt", count: 0 },
   ];
 
-  const trends = [
-    {
-      srcInitial: "GT",
-      source: "Google Trends",
-      srcColor: "var(--indigo)",
-      score: "98.5",
-      scoreBg: "rgba(16,185,129,0.14)",
-      scoreFg: "var(--emerald)",
-      title: "DeepSeek-V3 Architecture: Open-Weights Mixture of Experts Model",
-      cat: "AI Tooling",
-      rec: "Highly Recommended",
-      recBg: "rgba(16,185,129,0.12)",
-      recFg: "var(--emerald)",
-      volume: "125K searches/day",
-      scorePct: "98.5%",
-    },
-    {
-      srcInitial: "HN",
-      source: "Hacker News",
-      srcColor: "var(--amber)",
-      score: "96.4",
-      scoreBg: "rgba(16,185,129,0.14)",
-      scoreFg: "var(--emerald)",
-      title: "Next.js 15 Partial Prerendering: Hybrid Static-Dynamic Architecture",
-      cat: "Frameworks",
-      rec: "Recommended",
-      recBg: "rgba(16,185,129,0.12)",
-      recFg: "var(--emerald)",
-      volume: "482 points · 210 comments",
-      scorePct: "96.4%",
-    },
-    {
-      srcInitial: "GH",
-      source: "GitHub Trending",
-      srcColor: "#171717",
-      score: "91.2",
-      scoreBg: "rgba(16,185,129,0.14)",
-      scoreFg: "var(--emerald)",
-      title: "Bun 1.2 Native SQLite Driver with Zero Copy ArrayBuffer",
-      cat: "Runtime",
-      rec: "Recommended",
-      recBg: "rgba(16,185,129,0.12)",
-      recFg: "var(--emerald)",
-      volume: "1,420 stars today",
-      scorePct: "91.2%",
-    },
-    {
-      srcInitial: "RD",
-      source: "Reddit /r/programming",
-      srcColor: "var(--rose)",
-      score: "88.6",
-      scoreBg: "rgba(99,102,241,0.14)",
-      scoreFg: "var(--indigo)",
-      title: "Rust vs Go Microservices in 2026: Garbage Collection vs Borrow Checker",
-      cat: "Backend",
-      rec: "Good Potential",
-      recBg: "rgba(99,102,241,0.12)",
-      recFg: "var(--indigo)",
-      volume: "890 upvotes · 340 comments",
-      scorePct: "88.6%",
-    },
-    {
-      srcInitial: "GT",
-      source: "Google Trends",
-      srcColor: "var(--indigo)",
-      score: "86.0",
-      scoreBg: "rgba(99,102,241,0.14)",
-      scoreFg: "var(--indigo)",
-      title: "Tailwind CSS v4 Engine Deep Dive: CSS-First Configuration",
-      cat: "CSS",
-      rec: "Good Potential",
-      recBg: "rgba(99,102,241,0.12)",
-      recFg: "var(--indigo)",
-      volume: "45K searches/day",
-      scorePct: "86.0%",
-    },
-    {
-      srcInitial: "PH",
-      source: "Product Hunt",
-      srcColor: "var(--amber)",
-      score: "83.4",
-      scoreBg: "rgba(99,102,241,0.14)",
-      scoreFg: "var(--indigo)",
-      title: "PostgreSQL 17 Memory Management & Logical Replication Enhancements",
-      cat: "Database",
-      rec: "Consider Topic",
-      recBg: "var(--card2)",
-      recFg: "var(--fg2)",
-      volume: "620 upvotes",
-      scorePct: "83.4%",
-    },
-    {
-      srcInitial: "GH",
-      source: "GitHub Trending",
-      srcColor: "#171717",
-      score: "81.0",
-      scoreBg: "var(--card2)",
-      scoreFg: "var(--fg2)",
-      title: "Docker Multi-Stage Builds for Node.js Applications Optimization",
-      cat: "DevOps",
-      rec: "Consider Topic",
-      recBg: "var(--card2)",
-      recFg: "var(--fg2)",
-      volume: "980 stars today",
-      scorePct: "81.0%",
-    },
-    {
-      srcInitial: "HN",
-      source: "Hacker News",
-      srcColor: "var(--amber)",
-      score: "79.5",
-      scoreBg: "var(--card2)",
-      scoreFg: "var(--fg2)",
-      title: "TypeScript 5.6 Nullish Coalescing & Type Checking Performance",
-      cat: "TypeScript",
-      rec: "Consider Topic",
-      recBg: "var(--card2)",
-      recFg: "var(--fg2)",
-      volume: "310 points · 94 comments",
-      scorePct: "79.5%",
-    },
-    {
-      srcInitial: "RD",
-      source: "Reddit /r/node",
-      srcColor: "var(--rose)",
-      score: "76.2",
-      scoreBg: "var(--card2)",
-      scoreFg: "var(--fg2)",
-      title: "Vite 6 Environment API & Server-Side Rendering Improvements",
-      cat: "Tooling",
-      rec: "Low Priority",
-      recBg: "var(--card2)",
-      recFg: "var(--faint)",
-      volume: "240 upvotes",
-      scorePct: "76.2%",
-    },
-  ];
+  const trends: {
+    srcInitial: string;
+    source: string;
+    srcColor: string;
+    score: string;
+    scoreBg: string;
+    scoreFg: string;
+    title: string;
+    cat: string;
+    rec: string;
+    recBg: string;
+    recFg: string;
+    volume: string;
+    scorePct: string;
+  }[] = [];
 
   const filteredTrends = activeFilter === "All sources"
     ? trends
@@ -169,7 +47,7 @@ export default function TrendResearchPage({ onOpenManualTopic }: TrendsPageProps
             Trend Research & Topic Selection
           </h1>
           <p className="margin-0 text-[12px] text-[var(--mut)] mt-[3px]">
-            42 signals across 5 sources · last crawl 12 min ago
+            0 signals across 0 sources · no crawls yet
           </p>
         </div>
         <div className="flex gap-[7px]">
@@ -216,7 +94,7 @@ export default function TrendResearchPage({ onOpenManualTopic }: TrendsPageProps
 
       {/* Trends Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-[12px]">
-        {filteredTrends.map((t, idx) => (
+        {filteredTrends.length > 0 ? filteredTrends.map((t, idx) => (
           <div
             key={idx}
             className="bg-[var(--card)] border border-[var(--bd)] rounded-[12px] p-[13px] shadow-[var(--shadow)] flex flex-col gap-[9px] hover:border-[var(--bd2)] transition-colors"
@@ -287,7 +165,11 @@ export default function TrendResearchPage({ onOpenManualTopic }: TrendsPageProps
               </button>
             </div>
           </div>
-        ))}
+        )) : (
+          <div className="sm:col-span-2 lg:col-span-3 bg-[var(--card)] border border-[var(--bd)] rounded-[12px] p-[32px] text-center text-[12px] text-[var(--mut)] shadow-[var(--shadow)]">
+            No trend signals yet.
+          </div>
+        )}
       </div>
     </div>
   );
