@@ -1,6 +1,15 @@
 "use client";
 
 import React, { useState } from "react";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 export default function SettingsPage() {
   const [dailyLimit, setDailyLimit] = useState(14);
@@ -158,16 +167,30 @@ export default function SettingsPage() {
                 <span className="w-[88px] flex-none text-[11.5px] font-semibold text-[var(--fg)]">
                   {m.stage}
                 </span>
-                <select
-                  aria-label="Select model for stage"
-                  defaultValue={m.model}
-                  className="flex-1 h-[29px] px-[8px] rounded-[8px] border border-[var(--bd)] bg-[var(--card2)] text-[var(--fg)] font-mono font-semibold text-[11.5px] outline-none"
-                >
-                  <option value="gemini-2.5-pro">gemini-2.5-pro</option>
-                  <option value="gemini-2.5-flash">gemini-2.5-flash</option>
-                  <option value="imagen-4.0">imagen-4.0</option>
-                  <option value="system-auto">system-auto</option>
-                </select>
+                <Select defaultValue={m.model}>
+                  <SelectTrigger className="flex-1 h-[29px] text-[11.5px] font-semibold font-mono border-[var(--bd)] bg-[var(--card2)] text-[var(--fg)] outline-none rounded-[8px]">
+                    <SelectValue placeholder="Select model" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-[var(--card)] border border-[var(--bd)] text-[var(--fg)]">
+                    <SelectGroup>
+                      <SelectLabel className="text-[10px] uppercase tracking-wider text-[var(--mut)] px-2 py-1">Text Models</SelectLabel>
+                      <SelectItem value="gemini-2.5-pro">Gemini 2.5 Pro</SelectItem>
+                      <SelectItem value="gemini-2.5-flash">Gemini 2.5 Flash</SelectItem>
+                      <SelectItem value="gemini-2.5-flash-lite">Gemini 2.5 Flash-Lite</SelectItem>
+                    </SelectGroup>
+                    <SelectGroup>
+                      <SelectLabel className="text-[10px] uppercase tracking-wider text-[var(--mut)] px-2 py-1">Image Models</SelectLabel>
+                      <SelectItem value="gemini-2.5-flash-image">Gemini 2.5 Flash Image</SelectItem>
+                      <SelectItem value="imagen-4.0">Imagen 4.0</SelectItem>
+                      <SelectItem value="imagen-4-fast">Imagen 4 Fast</SelectItem>
+                      <SelectItem value="imagen-4-ultra">Imagen 4 Ultra</SelectItem>
+                    </SelectGroup>
+                    <SelectGroup>
+                      <SelectLabel className="text-[10px] uppercase tracking-wider text-[var(--mut)] px-2 py-1">System</SelectLabel>
+                      <SelectItem value="system-auto">system-auto</SelectItem>
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
                 <span className="flex-none w-[58px] text-right font-mono text-[10.5px] text-[var(--mut)]">
                   {m.cost}
                 </span>
