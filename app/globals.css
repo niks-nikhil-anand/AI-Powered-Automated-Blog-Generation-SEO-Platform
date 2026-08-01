@@ -1,26 +1,109 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+@layer base {
+  :root, [data-theme="light"] {
+    --bg: #f8fafc;
+    --card: #ffffff;
+    --card2: #f1f5f9;
+    --bd: #e2e8f0;
+    --bd2: #cbd5e1;
+    --fg: #0f172a;
+    --fg2: #334155;
+    --mut: #64748b;
+    --faint: #94a3b8;
+    --indigo: #6366f1;
+    --emerald: #10b981;
+    --amber: #f59e0b;
+    --rose: #f43f5e;
+    --sky: #0ea5e9;
+    --glass: rgba(255, 255, 255, 0.72);
+    --shadow: 0 1px 2px rgba(15, 23, 42, 0.06), 0 8px 24px -12px rgba(15, 23, 42, 0.12);
+    --tint: rgba(99, 102, 241, 0.08);
+    --grid: rgba(15, 23, 42, 0.07);
+  }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+  .dark, [data-theme="dark"] {
+    --bg: #09090b;
+    --card: #18181b;
+    --card2: #212124;
+    --bd: #27272a;
+    --bd2: #3f3f46;
+    --fg: #fafafa;
+    --fg2: #d4d4d8;
+    --mut: #a1a1aa;
+    --faint: #71717a;
+    --glass: rgba(24, 24, 27, 0.72);
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 8px 30px -12px rgba(0, 0, 0, 0.7);
+    --tint: rgba(99, 102, 241, 0.16);
+    --grid: rgba(250, 250, 250, 0.08);
+  }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+  * {
+    box-sizing: border-box;
+  }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: "Plus Jakarta Sans", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  a {
+    color: var(--indigo);
+    text-decoration: none;
+  }
+  a:hover {
+    color: #818cf8;
+  }
+
+  button {
+    font-family: inherit;
+    cursor: pointer;
+  }
+
+  input, select, textarea {
+    font-family: inherit;
+  }
+
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--bd2);
+    border-radius: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+@keyframes dkpulse {
+  0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.55); }
+  70% { box-shadow: 0 0 0 7px rgba(16, 185, 129, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+}
+
+@keyframes dkflow {
+  to { stroke-dashoffset: -24; }
+}
+
+@keyframes dkfade {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+.animate-dkpulse {
+  animation: dkpulse 2s infinite;
+}
+
+.animate-dkflow {
+  animation: dkflow 1s linear infinite;
+}
+
+.animate-dkfade {
+  animation: dkfade 0.16s ease forwards;
 }
