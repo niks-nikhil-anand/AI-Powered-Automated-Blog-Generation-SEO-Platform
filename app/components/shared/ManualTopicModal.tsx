@@ -58,7 +58,7 @@ export function ManualTopicModal({ isOpen, onClose, onSubmit }: ManualTopicModal
               required
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="e.g. Bun 1.2 Native SQLite Driver Performance"
+              placeholder="Enter a topic title"
               className="w-full h-[34px] px-[10px] rounded-[8px] border border-[var(--bd)] bg-[var(--card2)] text-[12px] text-[var(--fg)] outline-none focus:border-[var(--indigo)]"
             />
           </div>
