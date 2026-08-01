@@ -5,20 +5,13 @@ import React, { useState } from "react";
 export default function SystemLogsPage() {
   const [levelFilter, setLevelFilter] = useState("All levels");
 
-  const logs = [
-    { time: "11:42:15.102", level: "INFO", worker: "publish_worker", msg: "Blog successfully published to DevKit Market CMS (id: b-4910)", color: "var(--emerald)" },
-    { time: "11:42:14.890", level: "INFO", worker: "publish_worker", msg: "Pinged Google Search Console Indexing API (URL: https://devkit.market/blog/nextjs-15-ppr)", color: "var(--emerald)" },
-    { time: "11:42:10.450", level: "INFO", worker: "quality_worker", msg: "Quality Analysis completed for b-4910. Score: 94/100 -> Gate Passed", color: "var(--emerald)" },
-    { time: "11:41:58.210", level: "WARN", worker: "quality_worker", msg: "Flesch Reading Ease score 62/100 slightly below recommended threshold 70", color: "var(--amber)" },
-    { time: "11:41:45.312", level: "INFO", worker: "image_worker", msg: "Vertex Imagen 4 image generation complete: hero.webp (1920x1080, 342KB)", color: "var(--emerald)" },
-    { time: "11:41:12.801", level: "INFO", worker: "image_worker", msg: "Uploading generated image to GCS bucket gs://devkit-market-media/blogs/2026/08/", color: "var(--indigo)" },
-    { time: "11:41:02.110", level: "INFO", worker: "writing_worker", msg: "Gemini 2.5 Pro completed article synthesis (2,840 words, 14,200 tokens)", color: "var(--emerald)" },
-    { time: "11:40:48.904", level: "ERROR", worker: "image_worker", msg: "Imagen API Rate Limit Exceeded (429 Too Many Requests) - Retrying job 89239 in 30s", color: "var(--rose)" },
-    { time: "11:40:32.400", level: "INFO", worker: "outline_worker", msg: "Generated 6 H2 headings and FAQ section for 'Next.js 15 PPR'", color: "var(--indigo)" },
-    { time: "11:40:14.220", level: "INFO", worker: "planning_worker", msg: "Planned SEO metadata: title, description, and keywords extracted", color: "var(--indigo)" },
-    { time: "11:40:02.100", level: "INFO", worker: "research_worker", msg: "Crawled 42 signals across Google Trends, HN, GitHub Trending, and Reddit", color: "var(--emerald)" },
-    { time: "11:39:45.090", level: "INFO", worker: "cron_scheduler", msg: "Cron job 'daily_blog_generator' triggered scheduled pipeline run", color: "var(--mut)" },
-  ];
+  const logs: {
+    time: string;
+    level: string;
+    worker: string;
+    msg: string;
+    color: string;
+  }[] = [];
 
   const filteredLogs = levelFilter === "All levels"
     ? logs
@@ -32,7 +25,7 @@ export default function SystemLogsPage() {
           System Logs
         </h1>
         <p className="margin-0 text-[12px] text-[var(--mut)] mt-[3px]">
-          Streaming · pipeline namespace · 1,204 lines buffered
+          Streaming · pipeline namespace · 0 lines buffered
         </p>
       </div>
 
@@ -60,7 +53,7 @@ export default function SystemLogsPage() {
 
         {/* Console Stream */}
         <div className="p-[10px_0] max-h-[540px] overflow-y-auto bg-[var(--card)] font-mono text-[11px] leading-relaxed">
-          {filteredLogs.map((l, idx) => (
+          {filteredLogs.length > 0 ? filteredLogs.map((l, idx) => (
             <div
               key={idx}
               className="flex gap-[10px] p-[4px_14px] hover:bg-[var(--card2)] transition-colors border-b border-transparent"
@@ -77,7 +70,11 @@ export default function SystemLogsPage() {
               </span>
               <span className="text-[var(--fg2)] min-w-0 flex-1">{l.msg}</span>
             </div>
-          ))}
+          )) : (
+            <div className="p-[32px_14px] text-center text-[12px] text-[var(--mut)]">
+              No log entries yet.
+            </div>
+          )}
         </div>
       </div>
     </div>

@@ -15,155 +15,61 @@ export default function ExecutiveDashboard({ onOpenBlogModal }: DashboardPagePro
   const metrics = [
     {
       label: "Daily Blogs",
-      value: "14 / 20",
+      value: "0 / 20",
       suffix: "published",
-      delta: "+3 vs yest",
+      delta: "0 vs yest",
       deltaBg: "rgba(16,185,129,0.12)",
       deltaFg: "var(--emerald)",
-      pct: "70%",
+      pct: "0%",
       color: "var(--indigo)",
       foot: "Goal: 20 blogs / day",
     },
     {
       label: "Success Rate",
-      value: "94.2%",
+      value: "0%",
       suffix: "passed QA",
-      delta: "+1.8%",
+      delta: "No runs",
       deltaBg: "rgba(16,185,129,0.12)",
       deltaFg: "var(--emerald)",
-      pct: "94%",
+      pct: "0%",
       color: "var(--emerald)",
-      foot: "1 failure re-routed to retry queue",
+      foot: "No QA runs yet",
     },
     {
       label: "AI Cost Today",
-      value: "$3.42",
+      value: "$0.00",
       suffix: "total",
-      delta: "-12% cost/blog",
+      delta: "No spend",
       deltaBg: "rgba(99,102,241,0.12)",
       deltaFg: "var(--indigo)",
-      pct: "45%",
+      pct: "0%",
       color: "var(--sky)",
-      foot: "Avg $0.244 per 3,000-word post",
+      foot: "Avg $0.00 per post",
     },
     {
       label: "Quality Score",
-      value: "92",
+      value: "0",
       suffix: "/100 avg",
-      delta: "gate ≥ 90",
+      delta: "No scores",
       deltaBg: "rgba(16,185,129,0.12)",
       deltaFg: "var(--emerald)",
-      pct: "92%",
+      pct: "0%",
       color: "var(--amber)",
-      foot: "Highest score: 98 (PPR Guide)",
+      foot: "No scored articles yet",
     },
   ];
 
   const stages = [
-    { name: "Research", count: "42", state: "crawling", rate: "12/min", pct: "100%", dot: "var(--emerald)", anim: "animate-dkpulse", bg: "var(--card2)", bd: "var(--bd)", arrow: "block" },
-    { name: "Planning", count: "6", state: "queued", rate: "4/min", pct: "75%", dot: "var(--indigo)", anim: "none", bg: "var(--card2)", bd: "var(--bd)", arrow: "block" },
-    { name: "Outline", count: "2", state: "active", rate: "2/min", pct: "50%", dot: "var(--indigo)", anim: "animate-dkpulse", bg: "var(--tint)", bd: "rgba(99,102,241,0.3)", arrow: "block" },
-    { name: "Writing", count: "3", state: "active", rate: "1/min", pct: "85%", dot: "var(--indigo)", anim: "animate-dkpulse", bg: "var(--tint)", bd: "rgba(99,102,241,0.3)", arrow: "block" },
-    { name: "Image", count: "1", state: "active", rate: "3/min", pct: "40%", dot: "var(--sky)", anim: "animate-dkpulse", bg: "var(--card2)", bd: "var(--bd)", arrow: "block" },
-    { name: "Quality QA", count: "2", state: "evaluating", rate: "5/min", pct: "60%", dot: "var(--amber)", anim: "none", bg: "var(--card2)", bd: "var(--bd)", arrow: "block" },
-    { name: "Publish", count: "14", state: "completed", rate: "daily 20", pct: "100%", dot: "var(--emerald)", anim: "none", bg: "var(--card2)", bd: "var(--bd)", arrow: "none" },
+    { name: "Research", count: "0", state: "idle", rate: "0/min", pct: "0%", dot: "var(--mut)", anim: "none", bg: "var(--card2)", bd: "var(--bd)", arrow: "block" },
+    { name: "Planning", count: "0", state: "idle", rate: "0/min", pct: "0%", dot: "var(--mut)", anim: "none", bg: "var(--card2)", bd: "var(--bd)", arrow: "block" },
+    { name: "Outline", count: "0", state: "idle", rate: "0/min", pct: "0%", dot: "var(--mut)", anim: "none", bg: "var(--card2)", bd: "var(--bd)", arrow: "block" },
+    { name: "Writing", count: "0", state: "idle", rate: "0/min", pct: "0%", dot: "var(--mut)", anim: "none", bg: "var(--card2)", bd: "var(--bd)", arrow: "block" },
+    { name: "Image", count: "0", state: "idle", rate: "0/min", pct: "0%", dot: "var(--mut)", anim: "none", bg: "var(--card2)", bd: "var(--bd)", arrow: "block" },
+    { name: "Quality QA", count: "0", state: "idle", rate: "0/min", pct: "0%", dot: "var(--mut)", anim: "none", bg: "var(--card2)", bd: "var(--bd)", arrow: "block" },
+    { name: "Publish", count: "0", state: "idle", rate: "daily 20", pct: "0%", dot: "var(--mut)", anim: "none", bg: "var(--card2)", bd: "var(--bd)", arrow: "none" },
   ];
 
-  const recentBlogs: BlogItem[] = [
-    {
-      title: "Next.js 15 Partial Prerendering: Production Architecture & Optimization",
-      slug: "nextjs-15-partial-prerendering-production-guide",
-      cat: "Frameworks",
-      trend: "96.4",
-      quality: "94",
-      cost: "$0.24",
-      status: "Published",
-      words: "2,840",
-      updated: "12m ago",
-      qBg: "rgba(16,185,129,0.14)",
-      qFg: "var(--emerald)",
-      sBg: "rgba(16,185,129,0.12)",
-      sFg: "var(--emerald)",
-      sBd: "rgba(16,185,129,0.3)",
-    },
-    {
-      title: "Rust vs Go in 2026: Microservices Benchmarks and Memory Safety Analysis",
-      slug: "rust-vs-go-microservices-benchmarks-2026",
-      cat: "Backend",
-      trend: "91.8",
-      quality: "84",
-      cost: "$0.29",
-      status: "Failed QA",
-      words: "3,120",
-      updated: "24m ago",
-      qBg: "rgba(244,63,94,0.14)",
-      qFg: "var(--rose)",
-      sBg: "rgba(244,63,94,0.12)",
-      sFg: "var(--rose)",
-      sBd: "rgba(244,63,94,0.3)",
-    },
-    {
-      title: "Bun 1.2 Native SQLite & Postgres Drivers: Low-Latency Database Layer",
-      slug: "bun-1-2-native-sqlite-postgres-drivers",
-      cat: "Runtime",
-      trend: "88.2",
-      quality: "92",
-      cost: "$0.21",
-      status: "Published",
-      updated: "1h ago",
-      qBg: "rgba(16,185,129,0.14)",
-      qFg: "var(--emerald)",
-      sBg: "rgba(16,185,129,0.12)",
-      sFg: "var(--emerald)",
-      sBd: "rgba(16,185,129,0.3)",
-    },
-    {
-      title: "DeepSeek-V3 Open-Weights LLM: Self-Hosting Guide with Ollama & vLLM",
-      slug: "deepseek-v3-open-weights-self-hosting-vllm",
-      cat: "AI Tooling",
-      trend: "98.5",
-      quality: "96",
-      cost: "$0.32",
-      status: "Published",
-      words: "3,400",
-      updated: "2h ago",
-      qBg: "rgba(16,185,129,0.14)",
-      qFg: "var(--emerald)",
-      sBg: "rgba(16,185,129,0.12)",
-      sFg: "var(--emerald)",
-      sBd: "rgba(16,185,129,0.3)",
-    },
-    {
-      title: "Tailwind CSS v4 Engine Deep Dive: CSS-First Configuration & Oxide Compiler",
-      slug: "tailwind-css-v4-engine-oxide-compiler-guide",
-      cat: "CSS",
-      trend: "85.0",
-      quality: "91",
-      cost: "$0.19",
-      status: "Writing",
-      updated: "In progress",
-      qBg: "var(--card2)",
-      qFg: "var(--fg2)",
-      sBg: "rgba(99,102,241,0.12)",
-      sFg: "var(--indigo)",
-      sBd: "rgba(99,102,241,0.3)",
-    },
-    {
-      title: "Docker Multi-Stage Builds for Node.js: Reducing Image Size from 1GB to 80MB",
-      slug: "docker-multi-stage-builds-nodejs-optimization",
-      cat: "DevOps",
-      trend: "82.4",
-      quality: "90",
-      cost: "$0.22",
-      status: "Published",
-      updated: "4h ago",
-      qBg: "rgba(16,185,129,0.14)",
-      qFg: "var(--emerald)",
-      sBg: "rgba(16,185,129,0.12)",
-      sFg: "var(--emerald)",
-      sBd: "rgba(16,185,129,0.3)",
-    },
-  ];
+  const recentBlogs: BlogItem[] = [];
 
   return (
     <div className="flex flex-col gap-[14px]">
@@ -220,7 +126,7 @@ export default function ExecutiveDashboard({ onOpenBlogModal }: DashboardPagePro
             BullMQ · Redis
           </span>
           <span className="ml-auto text-[11px] text-[var(--mut)]">
-            Updated 4s ago
+            No active jobs
           </span>
           <Link
             href="/dashboard/workers"
@@ -298,7 +204,7 @@ export default function ExecutiveDashboard({ onOpenBlogModal }: DashboardPagePro
               Recent AI generations
             </span>
             <span className="ml-auto text-[11px] text-[var(--mut)]">
-              Today · 14 runs
+              Today · 0 runs
             </span>
             <Link
               href="/dashboard/blogs"
@@ -330,7 +236,7 @@ export default function ExecutiveDashboard({ onOpenBlogModal }: DashboardPagePro
                 </tr>
               </thead>
               <tbody>
-                {recentBlogs.map((b, idx) => (
+                {recentBlogs.length > 0 ? recentBlogs.map((b, idx) => (
                   <tr
                     key={idx}
                     className="border-b border-[var(--bd)] hover:bg-[var(--card2)] transition-colors"
@@ -377,7 +283,13 @@ export default function ExecutiveDashboard({ onOpenBlogModal }: DashboardPagePro
                       </button>
                     </td>
                   </tr>
-                ))}
+                )) : (
+                  <tr>
+                    <td colSpan={6} className="p-[32px_14px] text-center text-[12px] text-[var(--mut)]">
+                      No recent generations yet.
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
@@ -391,14 +303,14 @@ export default function ExecutiveDashboard({ onOpenBlogModal }: DashboardPagePro
                 Token & cost analytics
               </span>
               <span className="font-mono font-bold text-[13px] text-[var(--fg)]">
-                $47.86
+                $0.00
               </span>
             </div>
             <div className="flex gap-[12px] mt-[8px] flex-wrap">
               {[
-                { name: "Gemini 2.5 Pro", val: "$31.40", color: "var(--indigo)" },
-                { name: "Gemini 2.5 Flash", val: "$11.20", color: "var(--emerald)" },
-                { name: "Imagen 4", val: "$5.26", color: "var(--amber)" },
+                { name: "Gemini 2.5 Pro", val: "$0.00", color: "var(--indigo)" },
+                { name: "Gemini 2.5 Flash", val: "$0.00", color: "var(--emerald)" },
+                { name: "Imagen 4", val: "$0.00", color: "var(--amber)" },
               ].map((l, idx) => (
                 <span key={idx} className="flex items-center gap-[5px] text-[10.5px] text-[var(--mut)]">
                   <span
@@ -417,13 +329,13 @@ export default function ExecutiveDashboard({ onOpenBlogModal }: DashboardPagePro
             {/* Cost Analytics Bar Chart */}
             <div className="w-full h-[160px] flex items-end justify-between gap-[6px] pt-[10px] pb-[4px] border-b border-[var(--bd)]">
               {[
-                { day: "Mon", pro: 60, flash: 25, img: 15 },
-                { day: "Tue", pro: 75, flash: 30, img: 20 },
-                { day: "Wed", pro: 50, flash: 20, img: 12 },
-                { day: "Thu", pro: 90, flash: 40, img: 25 },
-                { day: "Fri", pro: 110, flash: 45, img: 30 },
-                { day: "Sat", pro: 85, flash: 35, img: 22 },
-                { day: "Sun", pro: 95, flash: 38, img: 24 },
+                { day: "Mon", pro: 0, flash: 0, img: 0 },
+                { day: "Tue", pro: 0, flash: 0, img: 0 },
+                { day: "Wed", pro: 0, flash: 0, img: 0 },
+                { day: "Thu", pro: 0, flash: 0, img: 0 },
+                { day: "Fri", pro: 0, flash: 0, img: 0 },
+                { day: "Sat", pro: 0, flash: 0, img: 0 },
+                { day: "Sun", pro: 0, flash: 0, img: 0 },
               ].map((bar, i) => (
                 <div key={i} className="flex-1 flex flex-col items-center gap-[4px] h-full justify-end">
                   <div className="w-full max-w-[24px] flex flex-col gap-[2px]">
@@ -443,7 +355,7 @@ export default function ExecutiveDashboard({ onOpenBlogModal }: DashboardPagePro
                   Input tokens
                 </div>
                 <div className="font-mono text-[14px] font-bold text-[var(--fg)] mt-[2px]">
-                  8.42M
+                  0
                 </div>
               </div>
               <div className="border border-[var(--bd)] rounded-[9px] p-[8px_10px] bg-[var(--card2)]">
@@ -451,7 +363,7 @@ export default function ExecutiveDashboard({ onOpenBlogModal }: DashboardPagePro
                   Output tokens
                 </div>
                 <div className="font-mono text-[14px] font-bold text-[var(--fg)] mt-[2px]">
-                  2.19M
+                  0
                 </div>
               </div>
               <div className="border border-[var(--bd)] rounded-[9px] p-[8px_10px] bg-[var(--card2)]">
@@ -459,7 +371,7 @@ export default function ExecutiveDashboard({ onOpenBlogModal }: DashboardPagePro
                   Cost / blog
                 </div>
                 <div className="font-mono text-[14px] font-bold text-[var(--fg)] mt-[2px]">
-                  $0.244
+                  $0.00
                 </div>
               </div>
               <div className="border border-[var(--bd)] rounded-[9px] p-[8px_10px] bg-[var(--card2)]">
@@ -467,7 +379,7 @@ export default function ExecutiveDashboard({ onOpenBlogModal }: DashboardPagePro
                   Imagen 4 calls
                 </div>
                 <div className="font-mono text-[14px] font-bold text-[var(--fg)] mt-[2px]">
-                  58
+                  0
                 </div>
               </div>
             </div>
