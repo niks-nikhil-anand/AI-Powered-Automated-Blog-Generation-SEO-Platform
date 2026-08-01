@@ -38,6 +38,54 @@ services:
       - redis_data:/data
     restart: always
 
+  # NOTE: if GOOGLE_APPLICATION_CREDENTIALS points to a service-account JSON
+  # file, mount it into the container (e.g. add a `volumes:` entry like
+  # `./gcp-key.json:/app/gcp-key.json:ro` and set the env var to
+  # /app/gcp-key.json) - an env var alone won't make a host file visible
+  # inside the container.
+  research-worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.worker
+    container_name: blog-agent-research-worker
+    command: ["node_modules/.bin/tsx", "workers/research-worker/index.ts"]
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/blog_agent?schema=public
+      - REDIS_URL=redis://redis:6379
+      - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT:-}
+      - GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS:-}
+      - VERTEX_LOCATION=${VERTEX_LOCATION:-us-central1}
+      - GOOGLE_TRENDS_GEO=${GOOGLE_TRENDS_GEO:-US}
+      - RESEARCH_CRON=${RESEARCH_CRON:-0 8 * * *}
+      - TIMEZONE=${TIMEZONE:-Asia/Kolkata}
+      - TRENDS_TO_WRITE_PER_RUN=${TRENDS_TO_WRITE_PER_RUN:-5}
+    depends_on:
+      - postgres
+      - redis
+    restart: always
+
+  writing-worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.worker
+    container_name: blog-agent-writing-worker
+    command: ["node_modules/.bin/tsx", "workers/writing-worker/index.ts"]
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/blog_agent?schema=public
+      - REDIS_URL=redis://redis:6379
+      - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT:-}
+      - GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS:-}
+      - VERTEX_LOCATION=${VERTEX_LOCATION:-us-central1}
+      - VERTEX_MODEL=${VERTEX_MODEL:-gemini-2.5-pro}
+      - BLOG_MIN_WORDS=${BLOG_MIN_WORDS:-1200}
+      - BLOG_MAX_WORDS=${BLOG_MAX_WORDS:-2000}
+    depends_on:
+      - postgres
+      - redis
+    restart: always
+
 volumes:
   postgres_data:
   redis_data:
