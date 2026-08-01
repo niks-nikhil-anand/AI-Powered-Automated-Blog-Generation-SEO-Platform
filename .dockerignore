@@ -1,0 +1,14 @@
+Dockerfile
+.dockerignore
+node_modules
+.next
+.git
+.env
+.env.*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.agents
+.claude
+.windsurf
+README.md
