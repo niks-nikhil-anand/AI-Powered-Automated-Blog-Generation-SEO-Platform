@@ -6,116 +6,15 @@ export default function AssetLibraryPage() {
   const [selectedMonth, setSelectedMonth] = useState("2026 / 08");
   const [selectedType, setSelectedType] = useState("All types");
 
-  const assets = [
-    {
-      name: "nextjs-15-ppr-hero.webp",
-      placeholder: "Hero WebP 1920×1080",
-      kind: "Hero",
-      dim: "1920×1080",
-      size: "342 KB",
-      kindBg: "rgba(99,102,241,0.14)",
-      kindFg: "var(--indigo)",
-    },
-    {
-      name: "nextjs-15-ppr-og.webp",
-      placeholder: "OG Image 1200×630",
-      kind: "OG Image",
-      dim: "1200×630",
-      size: "184 KB",
-      kindBg: "rgba(16,185,129,0.14)",
-      kindFg: "var(--emerald)",
-    },
-    {
-      name: "rust-vs-go-hero.webp",
-      placeholder: "Hero WebP 1920×1080",
-      kind: "Hero",
-      dim: "1920×1080",
-      size: "389 KB",
-      kindBg: "rgba(99,102,241,0.14)",
-      kindFg: "var(--indigo)",
-    },
-    {
-      name: "bun-sqlite-thumb.webp",
-      placeholder: "Thumbnail 512×512",
-      kind: "Thumbnail",
-      dim: "512×512",
-      size: "68 KB",
-      kindBg: "rgba(245,158,11,0.14)",
-      kindFg: "var(--amber)",
-    },
-    {
-      name: "deepseek-v3-banner.webp",
-      placeholder: "Social Banner 1200×630",
-      kind: "Social Banner",
-      dim: "1200×630",
-      size: "215 KB",
-      kindBg: "rgba(14,165,233,0.14)",
-      kindFg: "var(--sky)",
-    },
-    {
-      name: "tailwind-v4-hero.webp",
-      placeholder: "Hero WebP 1920×1080",
-      kind: "Hero",
-      dim: "1920×1080",
-      size: "298 KB",
-      kindBg: "rgba(99,102,241,0.14)",
-      kindFg: "var(--indigo)",
-    },
-    {
-      name: "docker-multistage-og.webp",
-      placeholder: "OG Image 1200×630",
-      kind: "OG Image",
-      dim: "1200×630",
-      size: "192 KB",
-      kindBg: "rgba(16,185,129,0.14)",
-      kindFg: "var(--emerald)",
-    },
-    {
-      name: "postgres-17-hero.webp",
-      placeholder: "Hero WebP 1920×1080",
-      kind: "Hero",
-      dim: "1920×1080",
-      size: "360 KB",
-      kindBg: "rgba(99,102,241,0.14)",
-      kindFg: "var(--indigo)",
-    },
-    {
-      name: "typescript-56-thumb.webp",
-      placeholder: "Thumbnail 512×512",
-      kind: "Thumbnail",
-      dim: "512×512",
-      size: "74 KB",
-      kindBg: "rgba(245,158,11,0.14)",
-      kindFg: "var(--amber)",
-    },
-    {
-      name: "vite-6-environment-hero.webp",
-      placeholder: "Hero WebP 1920×1080",
-      kind: "Hero",
-      dim: "1920×1080",
-      size: "310 KB",
-      kindBg: "rgba(99,102,241,0.14)",
-      kindFg: "var(--indigo)",
-    },
-    {
-      name: "dev-logo-avatar.webp",
-      placeholder: "Avatar 256×256",
-      kind: "Avatar",
-      dim: "256×256",
-      size: "32 KB",
-      kindBg: "var(--card2)",
-      kindFg: "var(--fg2)",
-    },
-    {
-      name: "redis-cluster-banner.webp",
-      placeholder: "Social Banner 1200×630",
-      kind: "Social Banner",
-      dim: "1200×630",
-      size: "240 KB",
-      kindBg: "rgba(14,165,233,0.14)",
-      kindFg: "var(--sky)",
-    },
-  ];
+  const assets: {
+    name: string;
+    placeholder: string;
+    kind: string;
+    dim: string;
+    size: string;
+    kindBg: string;
+    kindFg: string;
+  }[] = [];
 
   const filteredAssets = selectedType === "All types"
     ? assets
@@ -130,8 +29,8 @@ export default function AssetLibraryPage() {
             Asset Library & GCS Browser
           </h1>
           <p className="margin-0 text-[12px] text-[var(--mut)] mt-[3px]">
-            gs://devkit-market-media/
-            <span className="font-mono text-[var(--fg2)]">blogs/2026/08/</span> · 1,284 objects · 6.2 GB
+            gs://
+            <span className="font-mono text-[var(--fg2)]">blogs/2026/08/</span> · 0 objects · 0 B
           </p>
         </div>
         <div className="flex gap-[7px] flex-wrap">
@@ -165,11 +64,11 @@ export default function AssetLibraryPage() {
 
       {/* Asset Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-[12px]">
-        {filteredAssets.map((a, idx) => (
+        {filteredAssets.length > 0 ? filteredAssets.map((a, idx) => (
           <button
             key={idx}
             aria-label="Open asset preview"
-            onClick={() => alert(`Asset GCS path: gs://devkit-market-media/blogs/2026/08/${a.name}`)}
+            onClick={() => alert(`Asset path: ${a.name}`)}
             className="text-left p-0 bg-[var(--card)] border border-[var(--bd)] rounded-[12px] overflow-hidden shadow-[var(--shadow)] flex flex-col hover:border-[var(--indigo)] transition-colors group"
           >
             <div className="h-[118px] bg-[var(--card2)] border-b border-[var(--bd)] flex items-center justify-center relative p-[8px]">
@@ -194,7 +93,11 @@ export default function AssetLibraryPage() {
               </div>
             </div>
           </button>
-        ))}
+        )) : (
+          <div className="sm:col-span-2 md:col-span-3 lg:col-span-4 bg-[var(--card)] border border-[var(--bd)] rounded-[12px] p-[32px] text-center text-[12px] text-[var(--mut)] shadow-[var(--shadow)]">
+            No assets yet.
+          </div>
+        )}
       </div>
     </div>
   );

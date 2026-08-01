@@ -35,32 +35,12 @@ export function Navbar({ onOpenCmdk, onRunNow }: NavbarProps) {
     }
   };
 
-  const notifications = [
-    {
-      title: "Blog Published Successfully",
-      meta: "Next.js 15 Partial Prerendering Guide",
-      time: "2m ago",
-      color: "var(--emerald)",
-    },
-    {
-      title: "Quality Check Flagged Rejection",
-      meta: "Rust vs Go microservices article (score 84/100)",
-      time: "14m ago",
-      color: "var(--rose)",
-    },
-    {
-      title: "Imagen 4 Hero Generated",
-      meta: "gs://devkit-market-media/blogs/2026/08/hero.webp",
-      time: "28m ago",
-      color: "var(--indigo)",
-    },
-    {
-      title: "BullMQ Research Worker Started",
-      meta: "Crawled 42 signals from Google Trends & HN",
-      time: "1h ago",
-      color: "var(--amber)",
-    },
-  ];
+  const notifications: {
+    title: string;
+    meta: string;
+    time: string;
+    color: string;
+  }[] = [];
 
   return (
     <header className="sticky top-0 z-40 h-[56px] flex-none flex items-center gap-[12px] px-[18px] border-b border-[var(--bd)] bg-[var(--glass)] backdrop-blur-md">
@@ -98,10 +78,10 @@ export function Navbar({ onOpenCmdk, onRunNow }: NavbarProps) {
         <div className="flex items-center gap-[7px] h-[28px] px-[10px] rounded-full border border-[rgba(16,185,129,0.3)] bg-[rgba(16,185,129,0.10)]">
           <span className="w-[6px] h-[6px] rounded-full bg-[var(--emerald)] animate-dkpulse" />
           <span className="text-[11px] font-semibold text-[var(--emerald)] whitespace-nowrap">
-            Pipeline Running
+            Pipeline Idle
           </span>
           <span className="font-mono text-[10px] font-medium text-[var(--emerald)] opacity-80">
-            3 active
+            0 active
           </span>
         </div>
 
@@ -117,17 +97,19 @@ export function Navbar({ onOpenCmdk, onRunNow }: NavbarProps) {
               <path d="M6 9a6 6 0 1112 0c0 5 2 6 2 6H4s2-1 2-6z" />
               <path d="M10 20a2 2 0 004 0" />
             </svg>
-            <span className="absolute top-[5px] right-[6px] w-[6px] h-[6px] rounded-full bg-[var(--rose)]" />
+            {notifications.length > 0 && (
+              <span className="absolute top-[5px] right-[6px] w-[6px] h-[6px] rounded-full bg-[var(--rose)]" />
+            )}
           </button>
 
           {notifOpen && (
             <div className="absolute top-[38px] right-0 w-[330px] border border-[var(--bd)] rounded-[12px] bg-[var(--card)] shadow-[var(--shadow)] overflow-hidden animate-dkfade z-50">
               <div className="p-[10px_12px] border-b border-[var(--bd)] flex items-center justify-between">
                 <span className="text-[12px] font-bold text-[var(--fg)]">Notifications</span>
-                <span className="text-[10.5px] text-[var(--mut)]">4 new</span>
+                <span className="text-[10.5px] text-[var(--mut)]">0 new</span>
               </div>
               <div className="max-h-[300px] overflow-y-auto">
-                {notifications.map((n, idx) => (
+                {notifications.length > 0 ? notifications.map((n, idx) => (
                   <div
                     key={idx}
                     className="flex gap-[9px] p-[10px_12px] border-b border-[var(--bd)] hover:bg-[var(--card2)] transition-colors"
@@ -148,7 +130,11 @@ export function Navbar({ onOpenCmdk, onRunNow }: NavbarProps) {
                       {n.time}
                     </span>
                   </div>
-                ))}
+                )) : (
+                  <div className="p-[24px_12px] text-center text-[12px] text-[var(--mut)]">
+                    No notifications yet.
+                  </div>
+                )}
               </div>
               <div className="p-[8px_12px] text-center border-t border-[var(--bd)]">
                 <a href="/dashboard/logs" className="text-[11px] font-semibold text-[var(--indigo)] hover:underline">
