@@ -1,0 +1,119 @@
+import { Worker } from "bullmq";
+import { marked } from "marked";
+import { createRedisConnection } from "../shared/redis";
+import { QUEUE_NAMES, type WritingJobPayload } from "../shared/queues";
+import { prisma } from "../shared/prisma";
+import { generateBlogDraft } from "./vertex";
+import { logger } from "../shared/logger";
+import { env, isVertexConfigured } from "../shared/env";
+
+const log = logger.child({ worker: "writing-worker" });
+
+const DEFAULT_CATEGORY_SLUG = "general";
+
+async function getOrCreateCategory(name: string) {
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || DEFAULT_CATEGORY_SLUG;
+  const existing = await prisma.category.findUnique({ where: { slug } });
+  if (existing) return existing;
+  return prisma.category.create({ data: { name, slug } });
+}
+
+async function uniqueSlug(base: string): Promise<string> {
+  let slug = base || "untitled";
+  let suffix = 0;
+  while (await prisma.blog.findUnique({ where: { slug } })) {
+    suffix += 1;
+    slug = `${base}-${suffix}`;
+  }
+  return slug;
+}
+
+/** Rough placeholder quality score until Worker 6 (quality-worker) exists. */
+function heuristicScore(markdown: string): number {
+  const words = markdown.split(/\s+/).filter(Boolean).length;
+  let score = 60;
+  if (words >= env.BLOG_MIN_WORDS) score += 15;
+  if (/```/.test(markdown)) score += 10;
+  if (/\|.+\|/.test(markdown)) score += 10; // has a markdown table
+  if (/##\s+faq/i.test(markdown)) score += 5;
+  return Math.min(100, score);
+}
+
+async function generateBlogForTrend(trendId: string, topic: string, description: string) {
+  const trend = await prisma.trend.findUnique({ where: { id: trendId } });
+  if (!trend) throw new Error(`Trend ${trendId} not found`);
+
+  log.info(`Generating blog for trend "${topic}"`, {
+    trendId,
+    mode: isVertexConfigured ? "vertex" : "mock",
+  });
+
+  const draft = await generateBlogDraft(topic, description);
+  const html = await marked.parse(draft.markdown);
+  const slug = await uniqueSlug(draft.slug);
+  const category = await getOrCreateCategory(trend.category || "General");
+  const score = heuristicScore(draft.markdown);
+
+  const blog = await prisma.blog.create({
+    data: {
+      title: draft.title,
+      slug,
+      excerpt: draft.excerpt,
+      content: draft.markdown,
+      html,
+      categoryId: category.id,
+      status: "DRAFT", // no quality/publish worker yet - stays DRAFT for manual review
+      seo: {
+        create: {
+          metaTitle: draft.metaTitle,
+          metaDescription: draft.metaDescription,
+          keywords: draft.keywords,
+          schema: {
+            "@context": "https://schema.org",
+            "@type": "TechArticle",
+            headline: draft.title,
+            keywords: draft.keywords.join(", "),
+          },
+          score,
+        },
+      },
+    },
+  });
+
+  await prisma.aIUsage.create({
+    data: {
+      worker: "writing-worker",
+      model: isVertexConfigured ? env.VERTEX_MODEL : "mock",
+      promptTokens: draft.usage.promptTokens,
+      completionTokens: draft.usage.completionTokens,
+      cost: 0, // TODO: wire up real per-model $/token pricing
+      latency: 0,
+    },
+  });
+
+  await prisma.trend.update({ where: { id: trendId }, data: { status: "PROCESSED" } });
+
+  log.info(`Blog created: ${blog.slug}`, { blogId: blog.id, score });
+  return { blogId: blog.id, slug: blog.slug, score };
+}
+
+export function startWritingWorker() {
+  const worker = new Worker(
+    QUEUE_NAMES.writing,
+    async (job) => {
+      const { trendId, topic, description } = job.data as WritingJobPayload;
+      return generateBlogForTrend(trendId, topic, description);
+    },
+    { connection: createRedisConnection(), concurrency: 2 }
+  );
+
+  worker.on("completed", (job, result) => log.info(`Job ${job.id} completed`, result));
+  worker.on("failed", (job, err) => log.error(`Job ${job?.id ?? "?"} failed: ${err.message}`));
+
+  log.info(`Writing worker listening on "${QUEUE_NAMES.writing}"`);
+  return worker;
+}
+
+if (require.main === module) {
+  startWritingWorker();
+}
