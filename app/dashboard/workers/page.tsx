@@ -6,25 +6,28 @@ export default function WorkersPage() {
   const [selectedStack, setSelectedStack] = useState<string | null>(null);
 
   const queues = [
-    { name: "research_queue", waiting: "12", active: "2", completed: "142", failed: "0", dot: "var(--emerald)", anim: "animate-dkpulse", rate: "14/min", p95: "1.2s", failedColor: "var(--mut)" },
-    { name: "planning_queue", waiting: "4", active: "1", completed: "138", failed: "1", dot: "var(--indigo)", anim: "none", rate: "8/min", p95: "2.4s", failedColor: "var(--rose)" },
-    { name: "outline_queue", waiting: "2", active: "1", completed: "135", failed: "0", dot: "var(--indigo)", anim: "animate-dkpulse", rate: "6/min", p95: "4.8s", failedColor: "var(--mut)" },
-    { name: "writing_queue", waiting: "3", active: "2", completed: "130", failed: "2", dot: "var(--indigo)", anim: "animate-dkpulse", rate: "2/min", p95: "14.2s", failedColor: "var(--rose)" },
-    { name: "image_queue", waiting: "1", active: "1", completed: "128", failed: "0", dot: "var(--sky)", anim: "animate-dkpulse", rate: "4/min", p95: "8.1s", failedColor: "var(--mut)" },
-    { name: "quality_queue", waiting: "2", active: "0", completed: "125", failed: "1", dot: "var(--amber)", anim: "none", rate: "10/min", p95: "3.2s", failedColor: "var(--rose)" },
-    { name: "publish_queue", waiting: "0", active: "1", completed: "124", failed: "0", dot: "var(--emerald)", anim: "none", rate: "5/min", p95: "0.8s", failedColor: "var(--mut)" },
+    { name: "research_queue", waiting: "0", active: "0", completed: "0", failed: "0", dot: "var(--mut)", anim: "none", rate: "0/min", p95: "-", failedColor: "var(--mut)" },
+    { name: "planning_queue", waiting: "0", active: "0", completed: "0", failed: "0", dot: "var(--mut)", anim: "none", rate: "0/min", p95: "-", failedColor: "var(--mut)" },
+    { name: "outline_queue", waiting: "0", active: "0", completed: "0", failed: "0", dot: "var(--mut)", anim: "none", rate: "0/min", p95: "-", failedColor: "var(--mut)" },
+    { name: "writing_queue", waiting: "0", active: "0", completed: "0", failed: "0", dot: "var(--mut)", anim: "none", rate: "0/min", p95: "-", failedColor: "var(--mut)" },
+    { name: "image_queue", waiting: "0", active: "0", completed: "0", failed: "0", dot: "var(--mut)", anim: "none", rate: "0/min", p95: "-", failedColor: "var(--mut)" },
+    { name: "quality_queue", waiting: "0", active: "0", completed: "0", failed: "0", dot: "var(--mut)", anim: "none", rate: "0/min", p95: "-", failedColor: "var(--mut)" },
+    { name: "publish_queue", waiting: "0", active: "0", completed: "0", failed: "0", dot: "var(--mut)", anim: "none", rate: "0/min", p95: "-", failedColor: "var(--mut)" },
   ];
 
-  const jobs = [
-    { id: "job-89241", queue: "writing_queue", payload: '{"topic":"Next.js 15 PPR","words":3000,"model":"gemini-2.5-pro"}', attempts: 1, duration: "12.4s", state: "Active", sBg: "rgba(99,102,241,0.12)", sFg: "var(--indigo)", sBd: "rgba(99,102,241,0.3)", errBtn: "none" },
-    { id: "job-89240", queue: "quality_queue", payload: '{"blogId":"b-4912","threshold":90,"checks":["seo","grammar"]}', attempts: 1, duration: "2.8s", state: "Active", sBg: "rgba(99,102,241,0.12)", sFg: "var(--indigo)", sBd: "rgba(99,102,241,0.3)", errBtn: "none" },
-    { id: "job-89239", queue: "image_queue", payload: '{"prompt":"Hero image for Rust vs Go microservices","resolution":"1920x1080"}', attempts: 2, duration: "7.6s", state: "Failed", sBg: "rgba(244,63,94,0.12)", sFg: "var(--rose)", sBd: "rgba(244,63,94,0.3)", errBtn: "inline-block", stack: "Error: Imagen API Rate Limit Exceeded (429 Too Many Requests)\n    at VertexImagenService.generate (services/imagen.ts:42)\n    at ProcessJob (workers/image-worker.ts:18)" },
-    { id: "job-89238", queue: "publish_queue", payload: '{"blogId":"b-4910","target":"DevKit CMS","pingGoogle":true}', attempts: 1, duration: "0.6s", state: "Completed", sBg: "rgba(16,185,129,0.12)", sFg: "var(--emerald)", sBd: "rgba(16,185,129,0.3)", errBtn: "none" },
-    { id: "job-89237", queue: "research_queue", payload: '{"source":"Google Trends","category":"Frameworks"}', attempts: 1, duration: "1.1s", state: "Completed", sBg: "rgba(16,185,129,0.12)", sFg: "var(--emerald)", sBd: "rgba(16,185,129,0.3)", errBtn: "none" },
-    { id: "job-89236", queue: "planning_queue", payload: '{"topic":"Bun 1.2 SQLite","targetKeywords":["bun","sqlite"]}', attempts: 1, duration: "2.1s", state: "Completed", sBg: "rgba(16,185,129,0.12)", sFg: "var(--emerald)", sBd: "rgba(16,185,129,0.3)", errBtn: "none" },
-    { id: "job-89235", queue: "outline_queue", payload: '{"title":"DeepSeek-V3 Open Weights","sections":6}', attempts: 1, duration: "4.2s", state: "Completed", sBg: "rgba(16,185,129,0.12)", sFg: "var(--emerald)", sBd: "rgba(16,185,129,0.3)", errBtn: "none" },
-    { id: "job-89234", queue: "writing_queue", payload: '{"topic":"Tailwind CSS v4","words":2500}', attempts: 3, duration: "16.8s", state: "Failed", sBg: "rgba(244,63,94,0.12)", sFg: "var(--rose)", sBd: "rgba(244,63,94,0.3)", errBtn: "inline-block", stack: "Error: Gemini Pro Token Limit Timeout after 15000ms\n    at VertexAIProvider.complete (services/vertex.ts:88)" },
-  ];
+  const jobs: {
+    id: string;
+    queue: string;
+    payload: string;
+    attempts: number;
+    duration: string;
+    state: string;
+    sBg: string;
+    sFg: string;
+    sBd: string;
+    errBtn: string;
+    stack?: string;
+  }[] = [];
 
   return (
     <div className="flex flex-col gap-[13px]">
@@ -35,7 +38,7 @@ export default function WorkersPage() {
             Queue & Worker Operations
           </h1>
           <p className="margin-0 text-[12px] text-[var(--mut)] mt-[3px]">
-            BullMQ · redis://cache-prod-01:6379 · 7 queues · concurrency 4
+            BullMQ · 7 queues · concurrency 4
           </p>
         </div>
         <div className="flex gap-[7px]">
@@ -105,7 +108,7 @@ export default function WorkersPage() {
             Job inspector
           </span>
           <span className="text-[11px] text-[var(--mut)]">
-            latest 8 jobs
+            latest 0 jobs
           </span>
         </div>
         <div className="overflow-x-auto">
@@ -134,7 +137,7 @@ export default function WorkersPage() {
               </tr>
             </thead>
             <tbody>
-              {jobs.map((j) => (
+              {jobs.length > 0 ? jobs.map((j) => (
                 <tr
                   key={j.id}
                   className="border-b border-[var(--bd)] hover:bg-[var(--card2)] transition-colors"
@@ -183,7 +186,13 @@ export default function WorkersPage() {
                     </button>
                   </td>
                 </tr>
-              ))}
+              )) : (
+                <tr>
+                  <td colSpan={7} className="p-[32px_14px] text-center text-[12px] text-[var(--mut)]">
+                    No jobs yet.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>

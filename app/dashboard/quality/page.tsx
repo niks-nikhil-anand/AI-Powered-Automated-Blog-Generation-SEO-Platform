@@ -4,52 +4,26 @@ import React from "react";
 
 export default function QualityAuditPage() {
   const qualityStats = [
-    { label: "Median Quality", value: "93", foot: "target ≥ 90", color: "var(--emerald)" },
-    { label: "Articles Blocked", value: "5", foot: "needs review", color: "var(--rose)" },
-    { label: "Plagiarism Match", value: "0%", foot: "100% original", color: "var(--emerald)" },
-    { label: "SEO Indexing Ready", value: "98%", foot: "JSON-LD valid", color: "var(--indigo)" },
+    { label: "Median Quality", value: "0", foot: "target >= 90", color: "var(--mut)" },
+    { label: "Articles Blocked", value: "0", foot: "needs review", color: "var(--mut)" },
+    { label: "Plagiarism Match", value: "0%", foot: "no checks yet", color: "var(--mut)" },
+    { label: "SEO Indexing Ready", value: "0%", foot: "no checks yet", color: "var(--mut)" },
   ];
 
   const checkRates = [
-    { name: "Grammar & Structure", value: "99%", color: "var(--emerald)" },
-    { name: "SEO Meta & Keywords", value: "96%", color: "var(--emerald)" },
-    { name: "Code Example Verification", value: "94%", color: "var(--emerald)" },
-    { name: "Readability (Flesch Index)", value: "92%", color: "var(--emerald)" },
-    { name: "Image Alt Text Presence", value: "91%", color: "var(--emerald)" },
+    { name: "Grammar & Structure", value: "0%", color: "var(--mut)" },
+    { name: "SEO Meta & Keywords", value: "0%", color: "var(--mut)" },
+    { name: "Code Example Verification", value: "0%", color: "var(--mut)" },
+    { name: "Readability (Flesch Index)", value: "0%", color: "var(--mut)" },
+    { name: "Image Alt Text Presence", value: "0%", color: "var(--mut)" },
   ];
 
-  const failedChecks = [
-    {
-      score: "84",
-      scoreColor: "var(--rose)",
-      title: "Rust vs Go in 2026: Microservices Benchmarks and Memory Safety Analysis",
-      reasons: ["Low Keyword Density (0.4%)", "Flesch Reading Ease < 50 (Too Complex)"],
-    },
-    {
-      score: "89",
-      scoreColor: "var(--rose)",
-      title: "TypeScript 5.6 Nullish Coalescing Performance and Type Inference",
-      reasons: ["Image Alt Text Missing", "Meta Description > 160 Chars"],
-    },
-    {
-      score: "86",
-      scoreColor: "var(--rose)",
-      title: "Kubernetes 1.32 Ingress Controllers & Envoy Proxy Migration",
-      reasons: ["Code Snippet Syntax Error", "Duplicate Subheading H2"],
-    },
-    {
-      score: "88",
-      scoreColor: "var(--rose)",
-      title: "GraphQL vs REST in 2026: Caching & Payload Overhead Analysis",
-      reasons: ["Broken External Reference Link", "Low Word Count (1,200 words)"],
-    },
-    {
-      score: "82",
-      scoreColor: "var(--rose)",
-      title: "WebAssembly System Interface (WASM/WASI) Microservices Guide",
-      reasons: ["Fact Check Warning", "Missing JSON-LD Schema"],
-    },
-  ];
+  const failedChecks: {
+    score: string;
+    scoreColor: string;
+    title: string;
+    reasons: string[];
+  }[] = [];
 
   return (
     <div className="flex flex-col gap-[13px]">
@@ -59,7 +33,7 @@ export default function QualityAuditPage() {
           Quality & SEO Audit Hub
         </h1>
         <p className="margin-0 text-[12px] text-[var(--mut)] mt-[3px]">
-          Gate threshold: quality ≥ 90 · 5 articles currently blocked from publishing
+          Gate threshold: quality {" >= "} 90 · 0 articles currently blocked from publishing
         </p>
       </div>
 
@@ -72,7 +46,7 @@ export default function QualityAuditPage() {
               Quality score distribution
             </span>
             <span className="text-[11px] text-[var(--mut)]">
-              248 published articles · median 93
+              0 published articles · median 0
             </span>
           </div>
           <div className="p-[14px]">
@@ -86,14 +60,14 @@ export default function QualityAuditPage() {
               </div>
 
               {[
-                { label: "< 80", h: 20, fill: "var(--rose)" },
-                { label: "80-84", h: 35, fill: "var(--rose)" },
-                { label: "85-89", h: 50, fill: "var(--rose)" },
-                { label: "90-91", h: 80, fill: "var(--emerald)" },
-                { label: "92-93", h: 140, fill: "var(--emerald)" },
-                { label: "94-95", h: 120, fill: "var(--emerald)" },
-                { label: "96-97", h: 90, fill: "var(--emerald)" },
-                { label: "98-100", h: 45, fill: "var(--emerald)" },
+                { label: "< 80", h: 0, fill: "var(--rose)" },
+                { label: "80-84", h: 0, fill: "var(--rose)" },
+                { label: "85-89", h: 0, fill: "var(--rose)" },
+                { label: "90-91", h: 0, fill: "var(--emerald)" },
+                { label: "92-93", h: 0, fill: "var(--emerald)" },
+                { label: "94-95", h: 0, fill: "var(--emerald)" },
+                { label: "96-97", h: 0, fill: "var(--emerald)" },
+                { label: "98-100", h: 0, fill: "var(--emerald)" },
               ].map((bar, i) => (
                 <div key={i} className="flex-1 flex flex-col items-center gap-[4px] h-full justify-end">
                   <div
@@ -165,12 +139,12 @@ export default function QualityAuditPage() {
               Failed checks queue
             </span>
             <span className="font-mono text-[10px] font-semibold p-[2px_6px] rounded-[6px] bg-[rgba(244,63,94,0.14)] text-[var(--rose)]">
-              5 blocked
+              0 blocked
             </span>
           </div>
           <button
             aria-label="Auto-fix all with Gemini"
-            onClick={() => alert("Triggered Gemini auto-fix worker for 5 blocked articles!")}
+            onClick={() => alert("No blocked articles to auto-fix.")}
             className="h-[27px] px-[11px] rounded-[8px] border border-transparent bg-[var(--indigo)] text-white text-[11.5px] font-semibold hover:bg-[#4f46e5] transition-colors"
           >
             Auto-fix all with Gemini
@@ -178,7 +152,7 @@ export default function QualityAuditPage() {
         </div>
 
         <div className="flex flex-col">
-          {failedChecks.map((f, idx) => (
+          {failedChecks.length > 0 ? failedChecks.map((f, idx) => (
             <div
               key={idx}
               className="flex items-center gap-[12px] p-[11px_14px] border-b border-[var(--bd)] hover:bg-[var(--card2)] transition-colors"
@@ -224,7 +198,11 @@ export default function QualityAuditPage() {
                 </button>
               </div>
             </div>
-          ))}
+          )) : (
+            <div className="p-[32px_14px] text-center text-[12px] text-[var(--mut)]">
+              No failed checks yet.
+            </div>
+          )}
         </div>
       </div>
     </div>
