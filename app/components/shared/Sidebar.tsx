@@ -251,14 +251,14 @@ export function Sidebar({ collapsed: externalCollapsed, onToggleCollapse }: Side
                 Worker health
               </span>
               <span className="font-mono text-[10px] font-semibold text-[var(--emerald)]">
-                7 up
+                0 up
               </span>
             </div>
             <div className="flex gap-[3px]">
               {[...Array(7)].map((_, i) => (
                 <span
                   key={i}
-                  className="flex-1 h-[5px] rounded-[3px] bg-[var(--emerald)]"
+                  className="flex-1 h-[5px] rounded-[3px] bg-[var(--bd2)]"
                 />
               ))}
             </div>
@@ -267,12 +267,12 @@ export function Sidebar({ collapsed: externalCollapsed, onToggleCollapse }: Side
 
         <div className="flex items-center gap-[9px] p-[5px_4px]">
           <div className="w-[28px] h-[28px] flex-none rounded-full bg-gradient-to-br from-slate-700 to-slate-900 text-white flex items-center justify-center text-[11px] font-bold">
-            AR
+            --
           </div>
           {!isCollapsed && (
             <div className="min-w-0">
               <div className="text-[11.5px] font-semibold whitespace-nowrap overflow-hidden text-ellipsis text-[var(--fg)]">
-                Aarav Rubenius
+                Account
               </div>
               <div className="text-[10px] text-[var(--mut)]">Platform Owner</div>
             </div>

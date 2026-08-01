@@ -33,10 +33,10 @@ export function GlobalSearchModal({ isOpen, onClose }: GlobalSearchModalProps) {
 
   const quickLinks = [
     { label: "Content Pipeline", href: "/dashboard/blogs", category: "Blogs" },
-    { label: "Next.js 15 Partial Prerendering Guide", href: "/dashboard/blogs", category: "Published Blog" },
-    { label: "Gemini 2.5 Flash CLI Benchmarks", href: "/dashboard/trends", category: "Trend Signal" },
-    { label: "BullMQ writing_queue Worker", href: "/dashboard/workers", category: "Queue Job" },
-    { label: "Imagen 4 Hero Images", href: "/dashboard/assets", category: "GCS Asset" },
+    { label: "Trend Research", href: "/dashboard/trends", category: "Trends" },
+    { label: "Queue Operations", href: "/dashboard/workers", category: "Workers" },
+    { label: "Asset Library", href: "/dashboard/assets", category: "Assets" },
+    { label: "System Logs", href: "/dashboard/logs", category: "Logs" },
   ];
 
   const filteredLinks = query
@@ -96,7 +96,7 @@ export function GlobalSearchModal({ isOpen, onClose }: GlobalSearchModalProps) {
             ))
           ) : (
             <div className="p-[20px] text-center text-[12px] text-[var(--mut)]">
-              No matching records found for "{query}"
+              No matching records found for &quot;{query}&quot;
             </div>
           )}
         </div>
