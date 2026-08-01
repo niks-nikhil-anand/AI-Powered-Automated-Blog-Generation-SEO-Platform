@@ -14,151 +14,14 @@ export default function BlogManagementPage({ onOpenBlogModal }: BlogsPageProps) 
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
   const blogTabs = [
-    { key: "all", label: "All articles", count: "248" },
-    { key: "pipeline", label: "In Pipeline", count: "6" },
-    { key: "published", label: "Published", count: "232" },
-    { key: "drafts", label: "Drafts", count: "8" },
-    { key: "failed", label: "Failed QA", count: "2" },
+    { key: "all", label: "All articles", count: "0" },
+    { key: "pipeline", label: "In Pipeline", count: "0" },
+    { key: "published", label: "Published", count: "0" },
+    { key: "drafts", label: "Drafts", count: "0" },
+    { key: "failed", label: "Failed QA", count: "0" },
   ];
 
-  const blogRows: (BlogItem & { words: string; cost: string })[] = [
-    {
-      id: "1",
-      title: "Next.js 15 Partial Prerendering: Production Architecture & Optimization",
-      slug: "nextjs-15-partial-prerendering-production-guide",
-      cat: "Frameworks",
-      words: "2,840",
-      trend: "96.4",
-      quality: "94",
-      cost: "$0.24",
-      status: "Published",
-      updated: "12m ago",
-      qBg: "rgba(16,185,129,0.14)",
-      qFg: "var(--emerald)",
-      sBg: "rgba(16,185,129,0.12)",
-      sFg: "var(--emerald)",
-      sBd: "rgba(16,185,129,0.3)",
-    },
-    {
-      id: "2",
-      title: "Rust vs Go in 2026: Microservices Benchmarks and Memory Safety Analysis",
-      slug: "rust-vs-go-microservices-benchmarks-2026",
-      cat: "Backend",
-      words: "3,120",
-      trend: "91.8",
-      quality: "84",
-      cost: "$0.29",
-      status: "Failed QA",
-      updated: "24m ago",
-      qBg: "rgba(244,63,94,0.14)",
-      qFg: "var(--rose)",
-      sBg: "rgba(244,63,94,0.12)",
-      sFg: "var(--rose)",
-      sBd: "rgba(244,63,94,0.3)",
-    },
-    {
-      id: "3",
-      title: "Bun 1.2 Native SQLite & Postgres Drivers: Low-Latency Database Layer",
-      slug: "bun-1-2-native-sqlite-postgres-drivers",
-      cat: "Runtime",
-      words: "2,450",
-      trend: "88.2",
-      quality: "92",
-      cost: "$0.21",
-      status: "Published",
-      updated: "1h ago",
-      qBg: "rgba(16,185,129,0.14)",
-      qFg: "var(--emerald)",
-      sBg: "rgba(16,185,129,0.12)",
-      sFg: "var(--emerald)",
-      sBd: "rgba(16,185,129,0.3)",
-    },
-    {
-      id: "4",
-      title: "DeepSeek-V3 Open-Weights LLM: Self-Hosting Guide with Ollama & vLLM",
-      slug: "deepseek-v3-open-weights-self-hosting-vllm",
-      cat: "AI Tooling",
-      words: "3,400",
-      trend: "98.5",
-      quality: "96",
-      cost: "$0.32",
-      status: "Published",
-      updated: "2h ago",
-      qBg: "rgba(16,185,129,0.14)",
-      qFg: "var(--emerald)",
-      sBg: "rgba(16,185,129,0.12)",
-      sFg: "var(--emerald)",
-      sBd: "rgba(16,185,129,0.3)",
-    },
-    {
-      id: "5",
-      title: "Tailwind CSS v4 Engine Deep Dive: CSS-First Configuration & Oxide Compiler",
-      slug: "tailwind-css-v4-engine-oxide-compiler-guide",
-      cat: "CSS",
-      words: "2,100",
-      trend: "85.0",
-      quality: "91",
-      cost: "$0.19",
-      status: "Writing",
-      updated: "In progress",
-      qBg: "var(--card2)",
-      qFg: "var(--fg2)",
-      sBg: "rgba(99,102,241,0.12)",
-      sFg: "var(--indigo)",
-      sBd: "rgba(99,102,241,0.3)",
-    },
-    {
-      id: "6",
-      title: "Docker Multi-Stage Builds for Node.js: Reducing Image Size from 1GB to 80MB",
-      slug: "docker-multi-stage-builds-nodejs-optimization",
-      cat: "DevOps",
-      words: "2,600",
-      trend: "82.4",
-      quality: "90",
-      cost: "$0.22",
-      status: "Published",
-      updated: "4h ago",
-      qBg: "rgba(16,185,129,0.14)",
-      qFg: "var(--emerald)",
-      sBg: "rgba(16,185,129,0.12)",
-      sFg: "var(--emerald)",
-      sBd: "rgba(16,185,129,0.3)",
-    },
-    {
-      id: "7",
-      title: "PostgreSQL 17 Logical Replication & Memory Tuning Best Practices",
-      slug: "postgresql-17-logical-replication-memory-tuning",
-      cat: "Database",
-      words: "2,980",
-      trend: "83.4",
-      quality: "93",
-      cost: "$0.26",
-      status: "Published",
-      updated: "5h ago",
-      qBg: "rgba(16,185,129,0.14)",
-      qFg: "var(--emerald)",
-      sBg: "rgba(16,185,129,0.12)",
-      sFg: "var(--emerald)",
-      sBd: "rgba(16,185,129,0.3)",
-    },
-    {
-      id: "8",
-      title: "TypeScript 5.6 Nullish Coalescing Performance and Type Inference",
-      slug: "typescript-5-6-nullish-coalescing-type-inference",
-      cat: "TypeScript",
-      words: "1,950",
-      trend: "79.5",
-      quality: "89",
-      cost: "$0.18",
-      status: "Failed QA",
-      updated: "6h ago",
-      qBg: "rgba(244,63,94,0.14)",
-      qFg: "var(--rose)",
-      sBg: "rgba(244,63,94,0.12)",
-      sFg: "var(--rose)",
-      sBd: "rgba(244,63,94,0.3)",
-    },
-  ];
+  const blogRows: (BlogItem & { words: string; cost: string })[] = [];
 
   const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.checked) {
@@ -198,7 +61,7 @@ export default function BlogManagementPage({ onOpenBlogModal }: BlogsPageProps) 
             Blog Management & Pipeline
           </h1>
           <p className="margin-0 text-[12px] text-[var(--mut)] mt-[3px]">
-            248 articles · 6 in pipeline · 2 failed QA gate
+            0 articles · 0 in pipeline · 0 failed QA gate
           </p>
         </div>
         <div className="flex gap-[7px]">
@@ -331,7 +194,7 @@ export default function BlogManagementPage({ onOpenBlogModal }: BlogsPageProps) 
               </tr>
             </thead>
             <tbody>
-              {filteredRows.map((b) => (
+              {filteredRows.length > 0 ? filteredRows.map((b) => (
                 <tr
                   key={b.id}
                   className="border-b border-[var(--bd)] hover:bg-[var(--card2)] transition-colors"
@@ -395,14 +258,20 @@ export default function BlogManagementPage({ onOpenBlogModal }: BlogsPageProps) 
                     </button>
                   </td>
                 </tr>
-              ))}
+              )) : (
+                <tr>
+                  <td colSpan={10} className="p-[32px_14px] text-center text-[12px] text-[var(--mut)]">
+                    No articles yet.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
 
         {/* Footer Pagination */}
         <div className="flex items-center justify-between p-[9px_12px] text-[11px] text-[var(--mut)] border-t border-[var(--bd)]">
-          <span>Page 1 of 28</span>
+          <span>Page 1 of 1</span>
           <div className="flex gap-[6px]">
             <button
               aria-label="Previous page"

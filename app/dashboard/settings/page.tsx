@@ -17,9 +17,9 @@ export default function SettingsPage() {
   const [autoPublish, setAutoPublish] = useState(true);
   const [slackNotif, setSlackNotif] = useState(true);
   const [autoRetry, setAutoRetry] = useState(false);
-  const [gcsBucket, setGcsBucket] = useState("devkit-market-media");
-  const [cdnUrl, setCdnUrl] = useState("https://cdn.devkit.market");
-  const [redisUrl, setRedisUrl] = useState("redis://cache-prod-01:6379");
+  const [gcsBucket, setGcsBucket] = useState("");
+  const [cdnUrl, setCdnUrl] = useState("");
+  const [redisUrl, setRedisUrl] = useState("");
   const [redisTested, setRedisTested] = useState(false);
 
   const modelRows = [
@@ -40,7 +40,7 @@ export default function SettingsPage() {
           Settings & AI Models
         </h1>
         <p className="margin-0 text-[12px] text-[var(--mut)] mt-[3px]">
-          Pipeline configuration · last saved 2 hours ago by Aarav
+          Pipeline configuration · no saved configuration yet
         </p>
       </div>
 
