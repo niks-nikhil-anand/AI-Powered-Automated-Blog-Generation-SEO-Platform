@@ -1,0 +1,123 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "../app/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum BlogStatus {
+  DRAFT
+  PENDING_REVIEW
+  PUBLISHED
+  FAILED
+  ARCHIVED
+}
+
+enum TrendStatus {
+  NEW
+  PLANNED
+  PROCESSED
+  IGNORED
+  REJECTED
+}
+
+enum JobStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+model Category {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  slug      String   @unique
+  blogs     Blog[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Asset {
+  id        String   @id @default(cuid())
+  fileName  String
+  bucket    String
+  path      String
+  publicUrl String
+  mimeType  String
+  width     Int?
+  height    Int?
+  size      Int
+  blogs     Blog[]   @relation("FeaturedImage")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Blog {
+  id              String     @id @default(cuid())
+  title           String
+  slug            String     @unique
+  excerpt         String?
+  content         String
+  html            String
+  categoryId      String?
+  category        Category?  @relation(fields: [categoryId], references: [id])
+  status          BlogStatus @default(DRAFT)
+  featuredImageId String?
+  featuredImage   Asset?     @relation("FeaturedImage", fields: [featuredImageId], references: [id])
+  seo             BlogSEO?
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+}
+
+model BlogSEO {
+  id              String   @id @default(cuid())
+  blogId          String   @unique
+  blog            Blog     @relation(fields: [blogId], references: [id], onDelete: Cascade)
+  metaTitle       String
+  metaDescription String
+  canonical       String?
+  keywords        Json
+  schema          Json
+  score           Int
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model Trend {
+  id        String      @id @default(cuid())
+  topic     String
+  source    String
+  category  String
+  score     Float
+  status    TrendStatus @default(NEW)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+}
+
+model Job {
+  id        String    @id @default(cuid())
+  queue     String
+  status    JobStatus @default(PENDING)
+  attempts  Int       @default(0)
+  payload   Json
+  result    Json?
+  error     String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model AIUsage {
+  id               String   @id @default(cuid())
+  worker           String
+  model            String
+  promptTokens     Int
+  completionTokens Int
+  cost             Float
+  latency          Int
+  createdAt        DateTime @default(now())
+}
