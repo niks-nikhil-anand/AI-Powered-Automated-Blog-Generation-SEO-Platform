@@ -6,6 +6,7 @@ import { generateBlogDraft } from "./vertex";
 import { logger } from "../shared/logger";
 import { env, isVertexConfigured } from "../shared/env";
 import { workerOptions } from "../shared/worker-options";
+import { attachUsageToBlog, recordAIUsage } from "../shared/pricing";
 import {
   assertGate,
   failWorkerAttempt,
@@ -102,6 +103,7 @@ async function generateBlogForTrend(trendId: string, topic: string, description:
   });
 
   try {
+    const startedAt = Date.now();
     const draft = await generateBlogDraft(topic, description, {
       plan: outline?.plan,
       outline: outline
@@ -114,6 +116,17 @@ async function generateBlogForTrend(trendId: string, topic: string, description:
           }
         : undefined,
     });
+    const latencyMs = Date.now() - startedAt;
+
+    // Record spend before the gate: a rejected draft still burned tokens.
+    const usageRecord = await recordAIUsage({
+      worker: "writing-worker",
+      model: isVertexConfigured ? env.VERTEX_MODEL : "fallback",
+      usage: draft.usage,
+      latencyMs,
+      trendId,
+    });
+
     const gate = writingGate(draft.markdown);
     assertGate(gate);
     const html = await marked.parse(draft.markdown);
@@ -147,16 +160,7 @@ async function generateBlogForTrend(trendId: string, topic: string, description:
       },
     });
 
-    await prisma.aIUsage.create({
-      data: {
-        worker: "writing-worker",
-        model: isVertexConfigured ? env.VERTEX_MODEL : "fallback",
-        promptTokens: draft.usage.promptTokens,
-        completionTokens: draft.usage.completionTokens,
-        cost: 0, // TODO: wire up real per-model $/token pricing
-        latency: 0,
-      },
-    });
+    await attachUsageToBlog(usageRecord.id, blog.id);
 
     await prisma.trend.update({ where: { id: trendId }, data: { status: "PROCESSED" } });
     await imageQueue.add("generate_blog_image", {

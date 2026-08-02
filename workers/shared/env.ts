@@ -33,7 +33,22 @@ export const env = {
 
   // Research worker
   GOOGLE_TRENDS_GEO: optional("GOOGLE_TRENDS_GEO", "US"),
-  RESEARCH_CRON: optional("RESEARCH_CRON", "0 8 * * *"), // 8:00 AM daily
+
+  /**
+   * Three research slots per day, tuned so each lands on the news cycle it is
+   * named for (see SCHEDULING_PLAN.md). Times are in TIMEZONE.
+   *
+   *   06:30 IST = 17:00 PT (-1d) - sweeps the whole previous US working day
+   *   14:00 IST = 09:30 CET     - EU morning desk, Asia afternoon
+   *   23:30 IST = 10:00 PT      - peak US product-launch hour
+   */
+  RESEARCH_CRON_OVERNIGHT: optional("RESEARCH_CRON_OVERNIGHT", "30 6 * * *"),
+  RESEARCH_CRON_MIDDAY: optional("RESEARCH_CRON_MIDDAY", "0 14 * * *"),
+  RESEARCH_CRON_US_DAYTIME: optional("RESEARCH_CRON_US_DAYTIME", "30 23 * * *"),
+  /** @deprecated Superseded by the three RESEARCH_CRON_* slots. */
+  RESEARCH_CRON: required("RESEARCH_CRON"),
+  /** Only the process with this set registers job schedulers. */
+  SCHEDULER_ENABLED: optional("SCHEDULER_ENABLED", "true") !== "false",
   TIMEZONE: optional("TIMEZONE", "Asia/Kolkata"),
   TRENDS_TO_WRITE_PER_RUN: Number(optional("TRENDS_TO_WRITE_PER_RUN", "1")),
   RESEARCH_MAX_SIGNALS_PER_SOURCE: Number(optional("RESEARCH_MAX_SIGNALS_PER_SOURCE", "25")),
@@ -51,6 +66,9 @@ export const env = {
     .split(",")
     .map((query) => query.trim())
     .filter(Boolean),
+
+  /** Blogs/day the dashboard measures against. 3 slots x 1 topic per run. */
+  DAILY_BLOG_TARGET: Number(optional("DAILY_BLOG_TARGET", "3")),
 
   // Writing worker
   BLOG_MIN_WORDS: Number(optional("BLOG_MIN_WORDS", "1200")),
