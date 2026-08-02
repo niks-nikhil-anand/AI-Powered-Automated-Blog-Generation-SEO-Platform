@@ -9,6 +9,7 @@ import {
   researchQueue,
   writingQueue,
 } from "@/workers/shared/queues";
+import { queueCounts } from "@/lib/queues";
 
 export const dynamic = "force-dynamic";
 
@@ -182,24 +183,9 @@ function statusStyle(status: string) {
   };
 }
 
-async function queueCounts(queue: typeof researchQueue) {
-  const counts = await queue.getJobCounts(
-    "active",
-    "waiting",
-    "delayed",
-    "failed",
-    "completed"
-  );
-  return {
-    active: counts.active ?? 0,
-    waiting: counts.waiting ?? 0,
-    delayed: counts.delayed ?? 0,
-    failed: counts.failed ?? 0,
-    completed: counts.completed ?? 0,
-  };
-}
+type QueueCountsResult = Awaited<ReturnType<typeof queueCounts>>;
 
-function stageState(counts: Awaited<ReturnType<typeof queueCounts>>, total: number) {
+function stageState(counts: QueueCountsResult, total: number) {
   if (counts.active > 0) return "running";
   if (counts.waiting > 0) return "queued";
   if (counts.delayed > 0) return "scheduled";
@@ -208,7 +194,7 @@ function stageState(counts: Awaited<ReturnType<typeof queueCounts>>, total: numb
   return "idle";
 }
 
-function queueColor(counts: Awaited<ReturnType<typeof queueCounts>>, total: number, doneColor = "var(--emerald)") {
+function queueColor(counts: QueueCountsResult, total: number, doneColor = "var(--emerald)") {
   if (counts.active > 0) return "var(--indigo)";
   if (counts.waiting > 0 || counts.delayed > 0) return "var(--amber)";
   if (counts.failed > 0) return "var(--rose)";
