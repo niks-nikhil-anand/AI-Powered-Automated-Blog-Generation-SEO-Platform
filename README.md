@@ -1,849 +1,475 @@
-# DevKit Market - AI Daily Blog Generator
+# Auto-Blog: Automated Blog Generation Pipeline
 
-### Enterprise Architecture & Implementation Plan
+## Project Overview
 
-## Goal
+**Auto-Blog** is an end-to-end automated blog generation system that discovers trending topics, plans content, writes articles, generates images, performs quality checks, and publishes blogs. It uses **Google Trends**, **Google News**, and **GitHub Trending** as research sources, and **Vertex AI (Google's Gemini)** for content generation.
 
-Build a fully automated AI-powered content generation pipeline that publishes **1-20 SEO optimized technology blogs daily** on DevKit Market.
-
-The entire workflow should require **zero manual intervention**, while still supporting manual approval if needed.
+The system is built as a **Next.js application** with a **BullMQ-based job queue** (Redis), **Prisma ORM** for data persistence (PostgreSQL), and modular worker processes for each pipeline stage.
 
 ---
 
-# Technology Stack
+## Architecture Overview
 
-| Layer            | Technology                                |
-| ---------------- | ----------------------------------------- |
-| Frontend         | Next.js 15                                |
-| Backend          | Next.js API Routes / Route Handlers       |
-| ORM              | Prisma                                    |
-| Database         | PostgreSQL                                |
-| Queue            | BullMQ + Redis                            |
-| AI               | Google Vertex AI (Gemini 2.5 Pro / Flash) |
-| Image Generation | Vertex Imagen                             |
-| Image Storage    | Google Cloud Storage                      |
-| Scheduler        | BullMQ Cron Worker                        |
-| Container        | Docker                                    |
-| Deployment       | Cloud Run / ECS / Kubernetes              |
-| Monitoring       | OpenTelemetry + Grafana                   |
-| Logging          | Winston + Google Cloud Logging            |
-| Search           | Google Trends API + News API              |
-| SEO              | Automatic JSON-LD + Sitemap               |
+### Tech Stack
+- **Frontend/Framework**: Next.js 16.2 + React 19 + TypeScript
+- **Job Queue**: BullMQ + Redis
+- **Database**: PostgreSQL + Prisma ORM
+- **AI Models**: Google Vertex AI (Gemini 2.5 Pro/Flash, Imagen 4)
+- **Styling**: Tailwind CSS 4 + shadcn/ui components
+- **Logging**: Winston
+- **XML Parsing**: fast-xml-parser
+
+### Core Components
+1. **Next.js App** (`/app`) - Web UI dashboard & API endpoints
+2. **Workers** (`/workers`) - 7 autonomous processing stages
+3. **Shared Libraries** - Queue management, Prisma client, logging, environment config
+4. **Database Schema** - 11 models tracking trends, content, blogs, and metrics
 
 ---
 
-# High Level Architecture
+## Data Flow: The 7-Stage Pipeline
 
-```text
-                 Scheduler (Daily)
+The system runs a **continuous workflow loop** where each stage processes jobs from a queue, performs work, and passes results to the next stage.
 
-                        │
-                        ▼
-
-           Research Trending Topics Worker
-
-                        │
-
-                        ▼
-
-              Blog Planning Worker
-
-      (Title + Keywords + Category)
-
-                        │
-
-                        ▼
-
-             Blog Outline Worker
-
-                        │
-
-                        ▼
-
-              Blog Writing Worker
-
-                        │
-
-                        ▼
-
-             Image Generation Worker
-
-                        │
-
-                        ▼
-
-          Upload Image to Google Storage
-
-                        │
-
-                        ▼
-
-             SEO / QA Analysis Worker
-
-                        │
-
-          Pass / Fail Decision
-
-                        │
-
-         ┌──────────────┴──────────────┐
-
-         │                             │
-
-      Publish                     Retry
-
-         │
-
-         ▼
-
-     DevKit Market CMS
-
-         │
-
-         ▼
-
-     Search Engine Index
 ```
+Research → Planning → Outline → Writing → Image → Quality → Publish
+```
+
+### Stage 1: Research Worker
+**Purpose**: Discover trending topics and validate research signals
+
+**Input**: Cron trigger (every 2 hours: `0 */2 * * *`)
+
+**Process**:
+- Fetches trending topics from:
+  - **Google Trends** (via `sources/google-trends.ts`)
+  - **Google News** (via `sources/google-news.ts`)  
+  - **GitHub Trending** (via `sources/github-trending.ts`)
+- Normalizes raw signals into a unified shape (`pipeline/normalize.ts`)
+- Deduplicates signals within recent cutoff window (`pipeline/dedupe.ts`)
+- Scores clusters based on signal strength (`pipeline/score.ts`)
+- Promotes top N candidates as `Trend` rows (`pipeline/promote.ts`)
+
+**Output**: Creates `Trend` records with status `NEW`, dispatches to **Planning Queue**
+
+**Database Impact**:
+- Inserts `Trend` rows (topic, source, category, score, status=NEW)
+- Logs worker attempt in `WorkerAttempt`
+- Records AI usage metrics in `AIUsage`
 
 ---
 
-# Queue Architecture
+### Stage 2: Planning Worker
+**Purpose**: Develop content strategy for each trend
 
-```
-research_queue
+**Input**: Jobs from Planning Queue (one per Trend)
 
-↓
+**Process**:
+- Receives `trendId` + trend metadata
+- Calls **Vertex AI** (Gemini) to generate:
+  - Search intent analysis
+  - Target audience profile
+  - Content angle/hook
+  - Primary + secondary keywords
+  - Competitor research notes
+  - Internal notes for writers
 
-planning_queue
+**Output**: Creates `ContentPlan` row linked to Trend, dispatches to **Outline Queue**
 
-↓
-
-outline_queue
-
-↓
-
-writing_queue
-
-↓
-
-image_queue
-
-↓
-
-quality_queue
-
-↓
-
-publish_queue
-```
-
-Every queue should be independent.
-
-Workers communicate only through BullMQ.
+**Database Impact**:
+- Inserts `ContentPlan` with JSON fields (keywords, competitors, notes)
+- Updates `Trend.status` → `PLANNED`
 
 ---
 
-# Folder Structure
+### Stage 3: Outline Worker
+**Purpose**: Build detailed content structure
 
-```
-apps/
+**Input**: Jobs from Outline Queue (ContentPlan data)
 
-   web/
-      app/
-      components/
+**Process**:
+- Calls **Vertex AI** to generate:
+  - SEO-optimized title
+  - Meta description
+  - H2 sections (heading + intent + bullet points)
+  - FAQ section (questions + answer intents)
+  - Slug for blog URL
 
-packages/
+**Output**: Creates `ContentOutline` row with structured JSON sections, dispatches to **Writing Queue**
 
-   ai/
-   database/
-   queue/
-   storage/
-   seo/
-   logger/
-
-workers/
-
-   research-worker
-
-   planning-worker
-
-   outline-worker
-
-   writing-worker
-
-   image-worker
-
-   quality-worker
-
-   publish-worker
-
-docker/
-
-prisma/
-
-scripts/
-
-```
+**Database Impact**:
+- Inserts `ContentOutline` with sections and FAQ structure
 
 ---
 
-# Complete Flow
+### Stage 4: Writing Worker
+**Purpose**: Generate full blog post markdown
+
+**Input**: Jobs from Writing Queue (Outline + Plan data)
+
+**Process**:
+- Calls **Vertex AI** to expand outline into:
+  - Full-length markdown blog post (min 1000 words, target 2000+)
+  - SEO metadata (title, slug, category)
+  - HTML rendering
+- Applies **quality gate**:
+  - Checks for minimum word count
+  - Validates H1 presence + H2 count (≥8 sections)
+  - Confirms FAQ section exists
+  - Verifies call-to-action present
+  - Calculates heuristic score (0-100)
+- Creates `Blog` record + `BlogSEO` metadata
+- Converts markdown → HTML
+
+**Output**: Creates `Blog` + `BlogSEO` rows, dispatches to **Image Queue** if passed gate
+
+**Database Impact**:
+- Inserts `Blog` (title, slug, content, html, status=DRAFT)
+- Inserts `BlogSEO` (metaTitle, metaDescription, keywords, schema)
+- Inserts `Category` if new
+- Logs attempt with quality gate results
 
 ---
 
-## Worker 1
+### Stage 5: Image Worker
+**Purpose**: Generate feature images using AI
 
-## Research Worker
+**Input**: Jobs from Image Queue (Blog metadata)
 
-Runs every morning.
+**Process**:
+- Calls **Google Imagen 4** API to generate:
+  - Feature image based on blog title + topic
+  - 1200x630px optimal dimensions
+- Uploads to **cloud storage** (bucket path + public URL)
+- Links image to Blog as `featuredImage`
 
-Responsibilities
+**Output**: Updates Blog with `featuredImageId`, dispatches to **Quality Queue**
 
-* Fetch Google Trends
-* Fetch Hacker News
-* Fetch GitHub Trending
-* Fetch Reddit Programming
-* Fetch Product Hunt
-* Fetch Google Search Console Opportunities
-* Remove duplicates
-* Calculate Trend Score
-
-Output
-
-```
-Topic
-
-Description
-
-Popularity
-
-Source
-
-Category
-
-Trend Score
-```
-
-Example
-
-```
-Gemini CLI
-
-Trend Score 96
-
-Category
-
-AI Tools
-```
+**Database Impact**:
+- Inserts `Asset` (fileName, bucket, path, publicUrl, dimensions)
+- Updates `Blog.featuredImageId` foreign key
 
 ---
 
-# Worker 2
+### Stage 6: Quality Worker (QA Validator)
+**Purpose**: Comprehensive content quality scoring
 
-## Blog Planning Worker
+**Input**: Jobs from Quality Queue (published Blog)
 
-Uses Vertex AI
+**Process**:
+- Runs 10-point quality checklist:
+  1. SEO Structure (title, meta, keywords, schema)
+  2. Content Completeness (word count, sections, depth)
+  3. Readability (avg sentence length, passive voice %)
+  4. Content Quality (originality, relevance, depth)
+  5. Keyword Optimization (placement, density, LSI)
+  6. Technical SEO (headers, alt text, links)
+  7. Formatting & UX (spacing, lists, code blocks)
+  8. Media Quality (image resolution, compression)
+  9. AI Fact Quality (factual accuracy, citations)
+  10. Publishing Readiness (final gate check)
+- Generates overall score (0-100) and pass/fail recommendation
+- Detailed notes per check
 
-Input
+**Output**: Creates `QualityReport`, updates Blog status → `PUBLISHED` or `FAILED`
 
-Trending Topic
-
-Output
-
-```
-SEO Blog Title
-
-Slug
-
-Primary Keyword
-
-Secondary Keywords
-
-Long Tail Keywords
-
-Search Intent
-
-Target Audience
-
-Meta Title
-
-Meta Description
-
-Reading Time
-
-Category
-
-Tags
-
-```
+**Database Impact**:
+- Inserts `QualityReport` with individual scores + checks array
+- Updates `Blog.status` based on report.passed
 
 ---
 
-# Worker 3
+### Stage 7: Publish Worker
+**Purpose**: Deploy blog to production
 
-## Outline Generator
+**Input**: Jobs from Publish Queue (approved blogs)
 
-Vertex AI
+**Process**:
+- Validates Blog.status = `PUBLISHED`
+- Triggers external publishing API (e.g., CMS, CDN, webhook)
+- Records publish timestamp + URL
+- Marks job complete
 
-Produces
+**Output**: Blog is live on website
 
-```
-Introduction
-
-H2
-
-H2
-
-H2
-
-H2
-
-FAQ
-
-Summary
-
-CTA
-```
+**Database Impact**:
+- Final `Blog.status` update
+- WorkflowRun completion
 
 ---
 
-# Worker 4
+## Database Schema
 
-## Blog Writer
+### Key Models
 
-Uses Gemini 2.5 Pro
+**Trend** (discovered topics)
+- `id`, `topic`, `source` (google_trends|google_news|github_trending), `category`, `score`, `status` (NEW→PLANNED→PROCESSED)
 
-Creates
+**ContentPlan** (strategy)
+- `trendId` (FK), `searchIntent`, `audience`, `angle`, `primaryKeyword`, `secondaryKeywords` (JSON), `competitorNotes` (JSON)
 
-2500-4000 words
+**ContentOutline** (structure)
+- `trendId` (FK), `planId` (FK), `title`, `slug`, `metaTitle`, `metaDescription`, `sections` (JSON), `faqs` (JSON)
 
-Includes
+**Blog** (final article)
+- `title`, `slug`, `content` (markdown), `html`, `categoryId` (FK), `featuredImageId` (FK), `status` (DRAFT|PENDING_REVIEW|PUBLISHED|FAILED|ARCHIVED)
 
-* examples
-* code snippets
-* tables
-* comparison
-* best practices
-* FAQs
-* conclusion
+**BlogSEO** (metadata)
+- `blogId` (FK), `metaTitle`, `metaDescription`, `keywords` (JSON), `schema` (JSON), `score`
 
-Automatically generates
+**QualityReport** (validation)
+- `blogId` (FK), `overallScore`, 10 individual scores, `passed` (boolean), `checks` (JSON with details)
 
-```
-Markdown
+**Asset** (images)
+- `fileName`, `bucket`, `path`, `publicUrl`, `mimeType`, `width`, `height`, `size`
 
-HTML
+**WorkflowRun** (execution tracking)
+- `trendId` (FK), `blogId` (FK), `status`, `currentStage`
 
-JSON blocks
-```
+**WorkerAttempt** (per-stage audit)
+- `workflowRunId` (FK), `worker`, `status`, `input` (JSON), `output` (JSON), `error` (if failed)
+
+**AIUsage** (cost tracking)
+- `worker`, `model`, `promptTokens`, `completionTokens`, `cost`, `latency`
 
 ---
 
-# Worker 5
+## Queue Architecture (BullMQ + Redis)
 
-## Image Generator
+Each stage has its own **job queue**:
 
-Vertex Imagen
-
-Generate
-
-```
-Hero Image
-
-Social Image
-
-Twitter Banner
-
-OG Image
-
-Thumbnail
-
+```typescript
+researchQueue      // Trend discovery (cron-triggered)
+planningQueue      // Content strategy
+outlineQueue       // Structure generation
+writingQueue       // Blog draft creation
+imageQueue         // Feature image generation
+qualityQueue       // Quality validation
+publishQueue       // Publication
 ```
 
-After generation
+**Job Lifecycle**:
+1. Worker pushes job to queue with payload
+2. BullMQ worker process picks up job
+3. Worker executes; on success → passes to next queue
+4. On failure → retries or logs to `WorkerAttempt` with error
 
-Upload
+**Payload Types** (in `workers/shared/queues.ts`):
+- `ResearchJobPayload` - sources config
+- `PlanningJobPayload` - trendId
+- `OutlineJobPayload` - planId + content
+- `WritingJobPayload` - outlineId + trend data
+- `ImageJobPayload` - blogId + title + topic
+- `QualityJobPayload` - blogId
+- `PublishJobPayload` - blogId + publishUrl
 
+---
+
+## Dashboard & Monitoring
+
+### Executive Dashboard (`/app/dashboard/page.tsx`)
+
+**Real-time metrics** (polls `/api/dashboard` every 3 seconds):
+- Daily published count (goal: 20/day)
+- Success rate (% passed QA)
+- AI cost today (Gemini + Imagen spend)
+- Average quality score (0-100)
+
+**Pipeline visualization**:
+- Live stage status (Research → Publish)
+- Queue counts per stage
+- Active/waiting/failed/completed jobs
+- Animated progress bars + color-coded health states
+
+**Recent generations table**:
+- Latest 6 blogs with title, category, trend score, quality, status
+- Links to detailed blog view
+
+**Cost analytics**:
+- Daily spend breakdown (Gemini Pro, Flash, Imagen 4)
+- Input/output token counts
+- Cost per blog
+
+### Sub-pages
+- `/dashboard/blogs` - Browse all generated blogs (search, filter, detail modal)
+- `/dashboard/workers` - Queue inspector (active jobs, retry logs, dead-letter queue)
+- `/dashboard/trends` - Trend management (approve/reject, category assignment)
+- `/dashboard/quality` - QA report viewer (scores, checks, recommendations)
+- `/dashboard/assets` - Image gallery (generated feature images)
+- `/dashboard/settings` - Configuration (enabled sources, quality gates, publish endpoints)
+- `/dashboard/logs` - Worker execution logs (errors, gate failures, timing)
+
+---
+
+## API Endpoints
+
+**Dashboard Data**
+- `GET /api/dashboard` - Aggregate metrics, pipeline status, recent blogs
+
+**Trend Management**
+- `GET /api/trends/[id]` - Fetch trend details
+- `POST /api/trends/[id]/approve` - Promote trend to planning
+
+**Research Trigger**
+- `POST /api/research/run` - Manually trigger research cycle
+
+---
+
+## Worker Commands
+
+Start individual workers or all at once:
+
+```bash
+npm run worker:research      # Fetch trends from sources
+npm run worker:planning      # Generate content plans
+npm run worker:outline       # Build content structures
+npm run worker:writing       # Write full blog posts
+npm run worker:image         # Generate feature images
+npm run worker:quality       # Validate quality & assign scores
+npm run worker:publish       # Publish to production
+npm run worker:dev           # Start all workers concurrently
 ```
-Google Cloud Storage
 
-blogs/
-
-2026/
-
-08/
-
-blog-name/
-
-hero.webp
-
-thumbnail.webp
-
-og.webp
-```
-
-Return
-
-```
-Public URL
-
-Width
-
-Height
-
-Alt Text
+**Manual research trigger**:
+```bash
+npm run worker:research:once
 ```
 
 ---
 
-# Worker 6
+## Configuration & Environment
 
-## Quality Analysis
+Key environment variables (`workers/shared/env.ts`):
+- `GOOGLE_TRENDS_GEO` - Country code (e.g., "US")
+- `RESEARCH_MIN_SCORE_TO_WRITE` - Score threshold to generate blog
+- `RESEARCH_RECENT_DUPLICATE_DAYS` - Dedup cutoff window
+- `BLOG_MIN_WORDS` - Minimum word count for publishing
+- `VERTEX_API_KEY` - Google Cloud API credentials
+- `DATABASE_URL` - PostgreSQL connection
+- `REDIS_URL` - Redis connection for BullMQ
+- `STORAGE_BUCKET` - Cloud storage for images
+- `PUBLISH_WEBHOOK_URL` - External publish endpoint
 
-Gemini
+---
 
-Checks
+## Error Handling & Recovery
 
-Grammar
+**Quality Gates** (per stage):
+- Research: Score threshold
+- Writing: H1/H2/FAQ validation + word count
+- Quality: Multi-point checklist
 
-SEO
+**Failed Job Handling**:
+- `WorkerAttempt` logs error + attempt count
+- BullMQ auto-retries configurable times
+- Failed jobs visible in `/dashboard/workers` (dead-letter queue)
+- Manual retry option available
 
-Readability
+**Failure Tracking**:
+- `Blog.status = FAILED` if QA doesn't pass
+- `WorkflowRun.failureReason` stores error message
+- `AIUsage` tracks cost even on failed runs
 
-Plagiarism
+---
 
-AI hallucination
+## Key Features & Design Patterns
 
-Fact checking
+### 1. Idempotent Workers
+- Each worker can safely re-run on same input
+- Uses `WorkerAttempt` to prevent duplicate processing
+- Output stored in database before queue dispatch
 
-Broken markdown
+### 2. Multi-Source Research
+- Aggregates signals from 3+ sources
+- Deduplication logic prevents duplicate trends
+- Scoring model weights signals by source quality
 
-Accessibility
+### 3. Quality Gates at Each Stage
+- Writing validates structure (H1, H2s, FAQ, CTA)
+- Quality worker runs 10-point checklist
+- Failed articles marked FAILED, not published
 
-Image Alt
+### 4. Cost Transparency
+- `AIUsage` tracks every API call (model, tokens, cost)
+- Dashboard shows daily spend + cost per blog
+- Helps optimize prompts + batch operations
 
-Internal Links
+### 5. Audit Trail
+- `WorkflowRun` + `WorkerAttempt` track execution flow
+- `WorkerAttempt.input/output` store payloads for debugging
+- Timestamps enable latency analysis
 
-External Links
+### 6. SEO-First Content Generation
+- Planning stage develops keyword strategy
+- Outline stage includes meta descriptions + schema
+- Quality checker validates SEO metrics
+- BlogSEO model stores structured metadata
 
-Keyword Density
+---
 
-Heading Structure
-
-Duplicate Content
-
-Returns
+## Content Lifecycle States
 
 ```
-SEO Score
-
-Readability
-
-Grammar
-
-Quality Score
-
-Pass / Retry
+Trend (NEW)
+  ↓ [Planning Worker]
+Trend (PLANNED) + ContentPlan created
+  ↓ [Outline Worker]
+ContentOutline created
+  ↓ [Writing Worker]
+Blog (DRAFT) + BlogSEO created
+  ↓ [Image Worker]
+Blog + Asset (featured image) created
+  ↓ [Quality Worker]
+QualityReport created
+  ├→ PASSED: Blog.status = PUBLISHED
+  └→ FAILED: Blog.status = FAILED
+  ↓ [Publish Worker]
+Blog deployed to production
 ```
 
 ---
 
-# Worker 7
+## Next Steps (Potential Improvements)
 
-## Publisher
-
-If score >90
-
-Automatically
-
-* Save to Database
-* Publish
-* Generate Sitemap
-* Ping Google
-* Generate RSS
-
----
-
-# Prisma Models
-
-## Blog
-
-```prisma
-model Blog {
-  id                String   @id @default(cuid())
-
-  title             String
-  slug              String   @unique
-
-  excerpt           String?
-
-  content           String
-
-  html              String
-
-  categoryId        String?
-
-  category          Category? @relation(fields:[categoryId],references:[id])
-
-  status            BlogStatus
-
-  featuredImageId   String?
-
-  featuredImage     Asset? @relation(fields:[featuredImageId],references:[id])
-
-  seo               BlogSEO?
-
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-}
-```
+1. **Expand Research Sources** - RSS feeds, Substack, Product Hunt, HackerNews
+2. **A/B Testing** - Test multiple outlines per trend, publish top performer
+3. **Personalization** - Audience segmentation (tech vs business vs lifestyle)
+4. **Analytics Integration** - Track published blog performance (views, clicks)
+5. **Feedback Loop** - Low-performing blogs inform future research filters
+6. **Multi-language Support** - Generate blogs in Spanish, French, German
+7. **Monetization** - Ad placement, affiliate links, sponsored content hooks
+8. **Real-time Alerts** - Notify on viral trends before competitors
+9. **SEO Competitor Analysis** - Scrape SERP data to inform outlines
+10. **Custom Brand Voice** - Fine-tune prompts per publication brand
 
 ---
 
-## Blog SEO
+## Running the Project
 
-```prisma
-model BlogSEO {
+```bash
+# Install dependencies
+npm install
 
- id String @id @default(cuid())
+# Run migrations (if updating schema)
+npx prisma migrate dev
 
- blogId String @unique
+# Start Next.js dev server (dashboard UI)
+npm run dev
 
- blog Blog @relation(fields:[blogId],references:[id])
+# In separate terminals, start workers
+npm run worker:dev
 
- metaTitle String
-
- metaDescription String
-
- canonical String?
-
- keywords Json
-
- schema Json
-
- score Int
-
-}
+# Or individually:
+npm run worker:research
+npm run worker:planning
+# ... etc
 ```
+
+**Dashboard**: http://localhost:3000/dashboard
+**API**: http://localhost:3000/api/...
 
 ---
 
-## Asset
+## Summary
 
-```prisma
-model Asset {
-
- id String @id @default(cuid())
-
- fileName String
-
- bucket String
-
- path String
-
- publicUrl String
-
- mimeType String
-
- width Int?
-
- height Int?
-
- size Int
-
- createdAt DateTime @default(now())
-
-}
-```
-
----
-
-## Trend
-
-```prisma
-model Trend {
-
- id String @id @default(cuid())
-
- topic String
-
- source String
-
- category String
-
- score Float
-
- status TrendStatus
-
- createdAt DateTime @default(now())
-
-}
-```
-
----
-
-## Queue Job
-
-```prisma
-model Job {
-
- id String @id @default(cuid())
-
- queue String
-
- status JobStatus
-
- attempts Int
-
- payload Json
-
- result Json?
-
- error String?
-
- createdAt DateTime @default(now())
-
-}
-```
-
----
-
-## AI Usage
-
-```prisma
-model AIUsage {
-
- id String @id @default(cuid())
-
- worker String
-
- model String
-
- promptTokens Int
-
- completionTokens Int
-
- cost Float
-
- latency Int
-
- createdAt DateTime @default(now())
-
-}
-```
-
----
-
-# Google Cloud Storage
-
-Bucket Structure
-
-```
-devkit-market/
-
-blogs/
-
-2026/
-
-08/
-
-01/
-
-hero.webp
-
-thumbnail.webp
-
-og.webp
-
-inline/
-
-code/
-
-assets/
-
-authors/
-
-```
-
-Lifecycle
-
-```
-Raw Images
-
-↓
-
-Optimize
-
-↓
-
-WebP
-
-↓
-
-CDN Cache
-
-↓
-
-Public URL
-```
-
----
-
-# Vertex AI Models
-
-| Task                                | Model              |
-| ----------------------------------- | ------------------ |
-| Research                            | Gemini 2.5 Flash   |
-| Planning                            | Gemini 2.5 Flash   |
-| Outline                             | Gemini 2.5 Pro     |
-| Writing                             | Gemini 2.5 Pro     |
-| QA                                  | Gemini 2.5 Pro     |
-| Image                               | Imagen 4           |
-| Embeddings (future semantic search) | text-embedding-005 |
-
----
-
-# Docker Containers
-
-```
-next-app
-
-postgres
-
-redis
-
-research-worker
-
-planning-worker
-
-outline-worker
-
-writing-worker
-
-image-worker
-
-quality-worker
-
-publish-worker
-
-nginx
-```
-
-Each worker scales independently.
-
----
-
-# Environment Variables
-
-```env
-DATABASE_URL=
-
-REDIS_URL=
-
-GOOGLE_CLOUD_PROJECT=
-
-GOOGLE_APPLICATION_CREDENTIALS=
-
-VERTEX_LOCATION=us-central1
-
-VERTEX_MODEL=gemini-2.5-pro
-
-VERTEX_FLASH=gemini-2.5-flash
-
-VERTEX_IMAGE_MODEL=imagen-4
-
-GCS_BUCKET=devkit-market
-
-NEXT_PUBLIC_CDN=
-```
-
----
-
-# API Routes
-
-```
-POST /api/blogs/generate
-
-POST /api/blogs/publish
-
-GET /api/blogs
-
-GET /api/blog/:slug
-
-POST /api/webhooks/research
-
-POST /api/webhooks/publish
-```
-
----
-
-# Dashboard
-
-Provide an admin dashboard to monitor the pipeline in real time:
-
-* Queue health (waiting, active, failed, completed)
-* AI token usage and estimated cost by worker
-* Daily blog generation count
-* Trend discovery history and selected topics
-* Quality scores with pass/fail reasons
-* Image generation previews
-* Publishing status and retry controls
-* Google Cloud Storage asset browser
-* Search Console indexing status
-* SEO analytics and organic traffic trends
-* Worker logs and error traces
-* Manual approval/editing before publish (optional)
-
----
-
-# Phase-wise Implementation Roadmap
-
-### Phase 1 – Foundation (Week 1)
-
-* Initialize Next.js 15 monorepo
-* Configure Prisma + PostgreSQL
-* Set up Docker Compose (Next.js, PostgreSQL, Redis)
-* Integrate BullMQ
-* Configure Google Cloud Storage
-* Configure Vertex AI authentication
-* Build authentication and admin dashboard shell
-
-### Phase 2 – Content Generation Pipeline (Week 2)
-
-* Implement Research Worker with multiple trend sources
-* Build Planning Worker (SEO metadata)
-* Build Outline Worker
-* Build Writing Worker with Markdown/HTML generation
-* Add prompt versioning and AI usage tracking
-
-### Phase 3 – Media & QA (Week 3)
-
-* Integrate Imagen 4 for hero images
-* Upload and optimize assets in Google Cloud Storage
-* Implement Quality Analysis Worker
-* Add automatic retry logic for failed quality checks
-
-### Phase 4 – Publishing & SEO (Week 4)
-
-* Publish blogs to DevKit Market
-* Generate JSON-LD structured data
-* Update XML sitemap and RSS feed
-* Submit URLs for indexing
-* Add analytics, monitoring, alerts, and production deployment
-
----
-
-## Future Enhancements
-
-* Multi-language blog generation
-* Human approval workflow with version history
-* Auto-generation of LinkedIn, X, Facebook, and Instagram posts
-* Newsletter generation from published blogs
-* AI-powered internal linking between related articles
-* Retrieval-Augmented Generation (RAG) using previous DevKit Market content
-* Automatic YouTube script and narration generation
-* AI avatar video creation from blog posts
-* Semantic search using Vertex AI embeddings and a vector database
-* A/B testing for titles, meta descriptions, and featured images
-
-This architecture is modular, horizontally scalable, cloud-native, and designed to support thousands of blog-generation jobs per day by scaling individual BullMQ workers independently while keeping AI, storage, publishing, and monitoring concerns cleanly separated.
+**Auto-Blog** is a **production-grade automated content engine** that turns trending topics into publication-ready blogs through 7 autonomous pipeline stages. It combines multi-source research discovery with AI-powered content generation, rigorous quality validation, and real-time dashboarding. The modular BullMQ-based architecture scales horizontally, audit trails enable debugging, and transparent cost tracking ensures economic viability.
