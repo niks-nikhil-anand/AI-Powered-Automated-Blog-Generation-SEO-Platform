@@ -90,11 +90,11 @@ export function BlogDetailModal({ blog, isOpen, onClose }: BlogDetailModalProps)
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-[rgba(2,6,23,0.55)] backdrop-blur-[3px] flex items-center justify-center p-[26px] animate-dkfade"
+      className="fixed inset-0 z-50 bg-[rgba(2,6,23,0.55)] backdrop-blur-[3px] flex items-center justify-center p-[16px] sm:p-[26px] animate-dkfade overflow-y-auto"
       onClick={onClose}
     >
       <div
-        className="w-[min(1180px,100%)] h-[min(760px,100%)] bg-[var(--card)] border border-[var(--bd)] rounded-[14px] shadow-[var(--shadow)] flex flex-col overflow-hidden"
+        className="w-[min(1180px,100%)] h-[calc(100dvh-32px)] sm:h-[min(860px,calc(100dvh-52px))] bg-[var(--card)] border border-[var(--bd)] rounded-[14px] shadow-[var(--shadow)] flex flex-col overflow-hidden my-auto"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -146,9 +146,9 @@ export function BlogDetailModal({ blog, isOpen, onClose }: BlogDetailModalProps)
         </div>
 
         {/* Content Body Grid */}
-        <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-[1fr_400px]">
+        <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_400px] overflow-hidden">
           {/* Left Pane - Markdown Source */}
-          <div className="min-w-0 flex flex-col border-r border-[var(--bd)]">
+          <div className="min-w-0 min-h-0 flex flex-col border-r border-[var(--bd)]">
             <div className="flex-none flex items-center gap-[6px] p-[8px_12px] border-b border-[var(--bd)] bg-[var(--card2)]">
               <span className="text-[10.5px] font-bold tracking-wider uppercase text-[var(--mut)]">
                 Markdown Source
@@ -157,13 +157,13 @@ export function BlogDetailModal({ blog, isOpen, onClose }: BlogDetailModalProps)
                 No source generated yet
               </span>
             </div>
-            <div className="flex-1 overflow-y-auto p-[14px_16px] font-mono text-[12px] leading-[1.75] text-[var(--fg2)] whitespace-pre-wrap">
+            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-[14px_16px] font-mono text-[12px] leading-[1.75] text-[var(--fg2)] whitespace-pre-wrap">
               {markdownBody || "No markdown source yet."}
             </div>
           </div>
 
           {/* Right Pane - Inspection Details */}
-          <div className="min-w-0 flex flex-col bg-[var(--card)]">
+          <div className="min-w-0 min-h-0 flex flex-col bg-[var(--card)]">
             {/* Inspector Tabs */}
             <div className="flex-none flex border-b border-[var(--bd)] overflow-x-auto">
               {tabs.map((t) => (
@@ -182,7 +182,7 @@ export function BlogDetailModal({ blog, isOpen, onClose }: BlogDetailModalProps)
             </div>
 
             {/* Tab Panels */}
-            <div className="flex-1 overflow-y-auto p-[13px]">
+            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-[13px]">
               {activeTab === "overview" && (
                 <div className="flex flex-col gap-[11px]">
                   <div className="grid grid-cols-2 gap-[8px]">
