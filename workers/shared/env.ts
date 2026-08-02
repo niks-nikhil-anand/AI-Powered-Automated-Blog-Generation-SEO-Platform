@@ -22,10 +22,12 @@ export const env = {
 
   REDIS_URL: optional("REDIS_URL", "redis://localhost:6379"),
 
-  // Vertex AI / GCP
+  // Google Vertex AI via Google Gen AI SDK.
+  // This intentionally does not use GEMINI_API_KEY / VERTEX_API_KEY because
+  // API-key clients hit the AI Studio Gemini endpoint, not Vertex AI billing.
   GOOGLE_CLOUD_PROJECT: required("GOOGLE_CLOUD_PROJECT"),
   GOOGLE_APPLICATION_CREDENTIALS: required("GOOGLE_APPLICATION_CREDENTIALS"),
-  VERTEX_LOCATION: optional("VERTEX_LOCATION", "us-central1"),
+  VERTEX_LOCATION: optional("VERTEX_LOCATION", optional("GOOGLE_CLOUD_LOCATION", "us-central1")),
   VERTEX_MODEL: optional("VERTEX_MODEL", "gemini-2.5-pro"),
   VERTEX_FLASH: optional("VERTEX_FLASH", "gemini-2.5-flash"),
 
@@ -34,6 +36,20 @@ export const env = {
   RESEARCH_CRON: optional("RESEARCH_CRON", "0 8 * * *"), // 8:00 AM daily
   TIMEZONE: optional("TIMEZONE", "Asia/Kolkata"),
   TRENDS_TO_WRITE_PER_RUN: Number(optional("TRENDS_TO_WRITE_PER_RUN", "5")),
+  RESEARCH_MAX_SIGNALS_PER_SOURCE: Number(optional("RESEARCH_MAX_SIGNALS_PER_SOURCE", "25")),
+  RESEARCH_MIN_SCORE_TO_PROMOTE: Number(optional("RESEARCH_MIN_SCORE_TO_PROMOTE", "70")),
+  RESEARCH_RECENT_DUPLICATE_DAYS: Number(optional("RESEARCH_RECENT_DUPLICATE_DAYS", "30")),
+  RESEARCH_GOOGLE_NEWS_QUERY: optional(
+    "RESEARCH_GOOGLE_NEWS_QUERY",
+    "developer tools OR javascript OR typescript OR ai coding OR open source"
+  ),
+  RESEARCH_GITHUB_QUERIES: optional(
+    "RESEARCH_GITHUB_QUERIES",
+    "created:>2026-07-01 stars:>100 language:TypeScript,created:>2026-07-01 stars:>100 language:JavaScript,created:>2026-07-01 stars:>100 language:Python"
+  )
+    .split(",")
+    .map((query) => query.trim())
+    .filter(Boolean),
 
   // Writing worker
   BLOG_MIN_WORDS: Number(optional("BLOG_MIN_WORDS", "1200")),
@@ -43,11 +59,8 @@ export const env = {
 };
 
 /**
- * Whether real Vertex AI credentials are configured. When false, the
- * writing-worker falls back to a deterministic mock generator so the
- * research -> writing -> Postgres pipeline can still be exercised
- * end-to-end before real GCP credentials exist.
+ * Whether Vertex AI has the required routing config. Authentication is handled
+ * by Google ADC/service-account credentials, usually via
+ * GOOGLE_APPLICATION_CREDENTIALS or `gcloud auth application-default login`.
  */
-export const isVertexConfigured = Boolean(
-  env.GOOGLE_CLOUD_PROJECT && env.GOOGLE_APPLICATION_CREDENTIALS
-);
+export const isVertexConfigured = Boolean(env.GOOGLE_CLOUD_PROJECT && env.VERTEX_LOCATION);

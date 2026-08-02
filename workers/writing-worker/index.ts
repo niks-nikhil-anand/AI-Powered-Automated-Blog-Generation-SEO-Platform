@@ -1,11 +1,11 @@
 import { Worker } from "bullmq";
 import { marked } from "marked";
-import { createRedisConnection } from "../shared/redis";
 import { QUEUE_NAMES, type WritingJobPayload } from "../shared/queues";
 import { prisma } from "../shared/prisma";
 import { generateBlogDraft } from "./vertex";
 import { logger } from "../shared/logger";
 import { env, isVertexConfigured } from "../shared/env";
+import { workerOptions } from "../shared/worker-options";
 
 const log = logger.child({ worker: "writing-worker" });
 
@@ -39,16 +39,37 @@ function heuristicScore(markdown: string): number {
   return Math.min(100, score);
 }
 
-async function generateBlogForTrend(trendId: string, topic: string, description: string) {
+async function generateBlogForTrend(trendId: string, topic: string, description: string, outlineId?: string) {
   const trend = await prisma.trend.findUnique({ where: { id: trendId } });
   if (!trend) throw new Error(`Trend ${trendId} not found`);
+  const outline = outlineId
+    ? await prisma.contentOutline.findUnique({
+        where: { id: outlineId },
+        include: { plan: true },
+      })
+    : await prisma.contentOutline.findUnique({
+        where: { trendId },
+        include: { plan: true },
+      });
 
   log.info(`Generating blog for trend "${topic}"`, {
     trendId,
-    mode: isVertexConfigured ? "vertex" : "mock",
+    outlineId: outline?.id,
+    mode: isVertexConfigured ? "vertex" : "fallback",
   });
 
-  const draft = await generateBlogDraft(topic, description);
+  const draft = await generateBlogDraft(topic, description, {
+    plan: outline?.plan,
+    outline: outline
+      ? {
+          title: outline.title,
+          metaTitle: outline.metaTitle,
+          metaDescription: outline.metaDescription,
+          sections: outline.sections,
+          faqs: outline.faqs,
+        }
+      : undefined,
+  });
   const html = await marked.parse(draft.markdown);
   const slug = await uniqueSlug(draft.slug);
   const category = await getOrCreateCategory(trend.category || "General");
@@ -83,7 +104,7 @@ async function generateBlogForTrend(trendId: string, topic: string, description:
   await prisma.aIUsage.create({
     data: {
       worker: "writing-worker",
-      model: isVertexConfigured ? env.VERTEX_MODEL : "mock",
+      model: isVertexConfigured ? env.VERTEX_MODEL : "fallback",
       promptTokens: draft.usage.promptTokens,
       completionTokens: draft.usage.completionTokens,
       cost: 0, // TODO: wire up real per-model $/token pricing
@@ -101,10 +122,10 @@ export function startWritingWorker() {
   const worker = new Worker(
     QUEUE_NAMES.writing,
     async (job) => {
-      const { trendId, topic, description } = job.data as WritingJobPayload;
-      return generateBlogForTrend(trendId, topic, description);
+      const { trendId, topic, description, outlineId } = job.data as WritingJobPayload;
+      return generateBlogForTrend(trendId, topic, description, outlineId);
     },
-    { connection: createRedisConnection(), concurrency: 2 }
+    workerOptions(1)
   );
 
   worker.on("completed", (job, result) => log.info(`Job ${job.id} completed`, result));
