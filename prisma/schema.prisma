@@ -74,6 +74,38 @@ model Blog {
   updatedAt       DateTime   @updatedAt
 }
 
+model ContentPlan {
+  id                String         @id @default(cuid())
+  trendId           String         @unique
+  trend             Trend          @relation(fields: [trendId], references: [id], onDelete: Cascade)
+  searchIntent      String
+  audience          String
+  angle             String
+  primaryKeyword    String
+  secondaryKeywords Json
+  competitorNotes   Json
+  internalNotes     String?
+  outline           ContentOutline?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+}
+
+model ContentOutline {
+  id              String      @id @default(cuid())
+  trendId         String      @unique
+  trend           Trend       @relation(fields: [trendId], references: [id], onDelete: Cascade)
+  planId          String      @unique
+  plan            ContentPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  title           String
+  slug            String
+  metaTitle       String
+  metaDescription String
+  sections        Json
+  faqs            Json
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+}
+
 model BlogSEO {
   id              String   @id @default(cuid())
   blogId          String   @unique
@@ -95,6 +127,8 @@ model Trend {
   category  String
   score     Float
   status    TrendStatus @default(NEW)
+  plan      ContentPlan?
+  outline   ContentOutline?
   createdAt DateTime    @default(now())
   updatedAt DateTime    @updatedAt
 }
