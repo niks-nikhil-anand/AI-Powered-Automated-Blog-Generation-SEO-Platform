@@ -16,7 +16,6 @@ export default function SettingsPage() {
   const [cron, setCron] = useState("0 */2 * * *");
   const [autoPublish, setAutoPublish] = useState(true);
   const [slackNotif, setSlackNotif] = useState(true);
-  const [autoRetry, setAutoRetry] = useState(false);
   const [gcsBucket, setGcsBucket] = useState("");
   const [cdnUrl, setCdnUrl] = useState("");
   const [redisUrl, setRedisUrl] = useState("");
