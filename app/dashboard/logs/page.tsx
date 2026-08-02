@@ -1,17 +1,23 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 
 export default function SystemLogsPage() {
   const [levelFilter, setLevelFilter] = useState("All levels");
-
-  const logs: {
+  const [logs, setLogs] = useState<{
     time: string;
     level: string;
     worker: string;
     msg: string;
     color: string;
-  }[] = [];
+  }[]>([]);
+
+  useEffect(() => {
+    fetch("/api/dashboard")
+      .then((res) => res.json())
+      .then((data) => setLogs(data.logs ?? []))
+      .catch(() => setLogs([]));
+  }, []);
 
   const filteredLogs = levelFilter === "All levels"
     ? logs
@@ -25,7 +31,7 @@ export default function SystemLogsPage() {
           System Logs
         </h1>
         <p className="margin-0 text-[12px] text-[var(--mut)] mt-[3px]">
-          Streaming · pipeline namespace · 0 lines buffered
+          Streaming · pipeline namespace · {logs.length} lines buffered
         </p>
       </div>
 
