@@ -9,6 +9,30 @@ interface DashboardPageProps {
   onOpenBlogModal?: (blog: BlogItem) => void;
 }
 
+type StageKey = "research" | "planning" | "outline" | "writing" | "image" | "quality" | "publish";
+
+type StageStatus = {
+  total: number;
+  active: number;
+  waiting: number;
+  delayed: number;
+  failed: number;
+  completed: number;
+  state: "idle" | "running" | "queued" | "scheduled" | "failed" | "done";
+  dot: string;
+  anim: string;
+};
+
+const emptyStageStatus: Record<StageKey, StageStatus> = {
+  research: { total: 0, active: 0, waiting: 0, delayed: 0, failed: 0, completed: 0, state: "idle", dot: "var(--mut)", anim: "none" },
+  planning: { total: 0, active: 0, waiting: 0, delayed: 0, failed: 0, completed: 0, state: "idle", dot: "var(--mut)", anim: "none" },
+  outline: { total: 0, active: 0, waiting: 0, delayed: 0, failed: 0, completed: 0, state: "idle", dot: "var(--mut)", anim: "none" },
+  writing: { total: 0, active: 0, waiting: 0, delayed: 0, failed: 0, completed: 0, state: "idle", dot: "var(--mut)", anim: "none" },
+  image: { total: 0, active: 0, waiting: 0, delayed: 0, failed: 0, completed: 0, state: "idle", dot: "var(--mut)", anim: "none" },
+  quality: { total: 0, active: 0, waiting: 0, delayed: 0, failed: 0, completed: 0, state: "idle", dot: "var(--mut)", anim: "none" },
+  publish: { total: 0, active: 0, waiting: 0, delayed: 0, failed: 0, completed: 0, state: "idle", dot: "var(--mut)", anim: "none" },
+};
+
 export default function ExecutiveDashboard({ onOpenBlogModal }: DashboardPageProps) {
   const [range, setRange] = useState("24h");
   const [recentBlogs, setRecentBlogs] = useState<BlogItem[]>([]);
@@ -30,16 +54,37 @@ export default function ExecutiveDashboard({ onOpenBlogModal }: DashboardPagePro
     quality: 0,
     publish: 0,
   });
+  const [stageStatus, setStageStatus] = useState<Record<StageKey, StageStatus>>(emptyStageStatus);
+  const [pipeline, setPipeline] = useState({
+    active: 0,
+    waiting: 0,
+    delayed: 0,
+    failed: 0,
+    completed: 0,
+    state: "idle",
+  });
 
   useEffect(() => {
-    fetch("/api/dashboard")
-      .then((res) => res.json())
-      .then((data) => {
-        setDashboardMetrics(data.metrics);
-        setStageCounts(data.stages);
-        setRecentBlogs((data.blogs ?? []).slice(0, 6));
-      })
-      .catch(() => { });
+    let mounted = true;
+    const loadDashboard = () => {
+      fetch("/api/dashboard", { cache: "no-store" })
+        .then((res) => res.json())
+        .then((data) => {
+          if (!mounted) return;
+          setDashboardMetrics(data.metrics);
+          setStageCounts(data.stages);
+          setStageStatus({ ...emptyStageStatus, ...(data.stageStatus ?? {}) });
+          setPipeline(data.pipeline ?? { active: 0, waiting: 0, delayed: 0, failed: 0, completed: 0, state: "idle" });
+          setRecentBlogs((data.blogs ?? []).slice(0, 6));
+        })
+        .catch(() => { });
+    };
+    loadDashboard();
+    const timer = window.setInterval(loadDashboard, 3000);
+    return () => {
+      mounted = false;
+      window.clearInterval(timer);
+    };
   }, []);
 
   const metrics = [
@@ -89,15 +134,54 @@ export default function ExecutiveDashboard({ onOpenBlogModal }: DashboardPagePro
     },
   ];
 
-  const stages = [
-    { name: "Research", count: String(stageCounts.research), state: stageCounts.research ? "ready" : "idle", rate: "topics", pct: `${Math.min(100, stageCounts.research * 5)}%`, dot: stageCounts.research ? "var(--emerald)" : "var(--mut)", anim: "none", bg: "var(--card2)", bd: "var(--bd)", arrow: "block" },
-    { name: "Planning", count: String(stageCounts.planning), state: stageCounts.planning ? "planned" : "idle", rate: "plans", pct: `${Math.min(100, stageCounts.planning * 10)}%`, dot: stageCounts.planning ? "var(--indigo)" : "var(--mut)", anim: "none", bg: "var(--card2)", bd: "var(--bd)", arrow: "block" },
-    { name: "Outline", count: String(stageCounts.outline), state: stageCounts.outline ? "outlined" : "idle", rate: "outlines", pct: `${Math.min(100, stageCounts.outline * 10)}%`, dot: stageCounts.outline ? "var(--indigo)" : "var(--mut)", anim: "none", bg: "var(--card2)", bd: "var(--bd)", arrow: "block" },
-    { name: "Writing", count: String(stageCounts.writing), state: stageCounts.writing ? "drafted" : "idle", rate: "drafts", pct: `${Math.min(100, stageCounts.writing * 10)}%`, dot: stageCounts.writing ? "var(--indigo)" : "var(--mut)", anim: "none", bg: "var(--card2)", bd: "var(--bd)", arrow: "block" },
-    { name: "Image", count: String(stageCounts.image), state: stageCounts.image ? "assets" : "idle", rate: "files", pct: `${Math.min(100, stageCounts.image * 10)}%`, dot: stageCounts.image ? "var(--sky)" : "var(--mut)", anim: "none", bg: "var(--card2)", bd: "var(--bd)", arrow: "block" },
-    { name: "Quality QA", count: String(stageCounts.quality), state: stageCounts.quality ? "scored" : "idle", rate: "checks", pct: `${Math.min(100, stageCounts.quality * 10)}%`, dot: stageCounts.quality ? "var(--amber)" : "var(--mut)", anim: "none", bg: "var(--card2)", bd: "var(--bd)", arrow: "block" },
-    { name: "Publish", count: String(stageCounts.publish), state: stageCounts.publish ? "published" : "idle", rate: "published", pct: `${Math.min(100, stageCounts.publish * 10)}%`, dot: stageCounts.publish ? "var(--emerald)" : "var(--mut)", anim: "none", bg: "var(--card2)", bd: "var(--bd)", arrow: "none" },
+  const stageMeta: { key: StageKey; name: string; rate: string; doneLabel: string; arrow: "block" | "none" }[] = [
+    { key: "research", name: "Research", rate: "topics", doneLabel: "ready", arrow: "block" },
+    { key: "planning", name: "Planning", rate: "plans", doneLabel: "planned", arrow: "block" },
+    { key: "outline", name: "Outline", rate: "outlines", doneLabel: "outlined", arrow: "block" },
+    { key: "writing", name: "Writing", rate: "drafts", doneLabel: "drafted", arrow: "block" },
+    { key: "image", name: "Image", rate: "files", doneLabel: "assets", arrow: "block" },
+    { key: "quality", name: "Quality QA", rate: "checks", doneLabel: "scored", arrow: "block" },
+    { key: "publish", name: "Publish", rate: "published", doneLabel: "published", arrow: "none" },
   ];
+  const stages = stageMeta.map((meta) => {
+    const live = stageStatus[meta.key] ?? emptyStageStatus[meta.key];
+    const backlog = live.waiting + live.delayed;
+    const count = live.active > 0 ? live.active : backlog > 0 ? backlog : live.total ?? stageCounts[meta.key];
+    const state = live.state === "done" ? meta.doneLabel : live.state;
+    const pct = live.active > 0 || backlog > 0 ? "100%" : `${Math.min(100, (live.total || stageCounts[meta.key]) * 10)}%`;
+    return {
+      ...meta,
+      count: String(count),
+      state,
+      pct,
+      dot: live.dot,
+      anim: live.anim,
+      bg:
+        live.state === "running"
+          ? "rgba(99,102,241,0.14)"
+          : live.state === "queued" || live.state === "scheduled"
+            ? "rgba(245,158,11,0.12)"
+            : live.state === "failed"
+              ? "rgba(244,63,94,0.12)"
+              : "var(--card2)",
+      bd:
+        live.state === "running"
+          ? "rgba(99,102,241,0.45)"
+          : live.state === "queued" || live.state === "scheduled"
+            ? "rgba(245,158,11,0.42)"
+            : live.state === "failed"
+              ? "rgba(244,63,94,0.42)"
+              : "var(--bd)",
+    };
+  });
+  const pipelineText =
+    pipeline.active > 0
+        ? `${pipeline.active} active jobs`
+        : pipeline.waiting + pipeline.delayed > 0
+          ? `${pipeline.waiting + pipeline.delayed} queued jobs`
+          : pipeline.failed > 0
+            ? `${pipeline.failed} failed jobs`
+            : "No active jobs";
 
   return (
     <div className="flex flex-col gap-[14px]">
@@ -152,8 +236,20 @@ export default function ExecutiveDashboard({ onOpenBlogModal }: DashboardPagePro
           <span className="font-mono text-[10px] font-medium p-[2px_6px] rounded-[6px] bg-[var(--card2)] text-[var(--mut)]">
             BullMQ · Redis
           </span>
-          <span className="ml-auto text-[11px] text-[var(--mut)]">
-            No active jobs
+          <span
+            className="ml-auto text-[11px] font-medium"
+            style={{
+              color:
+                pipeline.active > 0
+                  ? "var(--indigo)"
+                  : pipeline.waiting + pipeline.delayed > 0
+                    ? "var(--amber)"
+                    : pipeline.failed > 0
+                      ? "var(--rose)"
+                      : "var(--mut)",
+            }}
+          >
+            {pipelineText}
           </span>
           <Link
             href="/dashboard/workers"

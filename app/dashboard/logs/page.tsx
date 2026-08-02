@@ -13,10 +13,23 @@ export default function SystemLogsPage() {
   }[]>([]);
 
   useEffect(() => {
-    fetch("/api/dashboard")
-      .then((res) => res.json())
-      .then((data) => setLogs(data.logs ?? []))
-      .catch(() => setLogs([]));
+    let mounted = true;
+    const loadLogs = () => {
+      fetch("/api/dashboard", { cache: "no-store" })
+        .then((res) => res.json())
+        .then((data) => {
+          if (mounted) setLogs(data.logs ?? []);
+        })
+        .catch(() => {
+          if (mounted) setLogs([]);
+        });
+    };
+    loadLogs();
+    const timer = window.setInterval(loadLogs, 3000);
+    return () => {
+      mounted = false;
+      window.clearInterval(timer);
+    };
   }, []);
 
   const filteredLogs = levelFilter === "All levels"
