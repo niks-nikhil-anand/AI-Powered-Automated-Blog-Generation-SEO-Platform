@@ -18,6 +18,15 @@ export interface BlogItem {
   sBd?: string;
   qBg?: string;
   qFg?: string;
+  content?: string;
+  metaTitle?: string;
+  metaDescription?: string;
+  keywords?: string[];
+  schema?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  createdAtLabel?: string;
+  updatedAtLabel?: string;
 }
 
 interface BlogDetailModalProps {
@@ -27,8 +36,9 @@ interface BlogDetailModalProps {
 }
 
 export function BlogDetailModal({ blog, isOpen, onClose }: BlogDetailModalProps) {
-  const [activeTab, setActiveTab] = useState<"seo" | "quality" | "assets" | "timeline">("seo");
+  const [activeTab, setActiveTab] = useState<"overview" | "seo" | "quality" | "assets" | "timeline">("overview");
   const tabs: { key: typeof activeTab; label: string }[] = [
+    { key: "overview", label: "Overview" },
     { key: "seo", label: "SEO & Meta" },
     { key: "quality", label: "Quality QA" },
     { key: "assets", label: "GCS Media" },
@@ -37,14 +47,28 @@ export function BlogDetailModal({ blog, isOpen, onClose }: BlogDetailModalProps)
 
   if (!isOpen || !blog) return null;
 
-  const markdownBody = "";
-  const targetKeywords: string[] = [];
+  const markdownBody = blog.content ?? "";
+  const targetKeywords: string[] = blog.keywords ?? [];
+  const numericQuality = Number(blog.quality ?? 0);
   const qualityChecks: {
     name: string;
     value: string;
     pct: string;
     color: string;
-  }[] = [];
+  }[] = numericQuality > 0 ? [
+    {
+      name: "SEO Quality Score",
+      value: `${numericQuality}/100`,
+      pct: `${Math.min(100, Math.max(0, numericQuality))}%`,
+      color: numericQuality >= 90 ? "var(--emerald)" : "var(--amber)",
+    },
+    {
+      name: "Word Count",
+      value: `${blog.words || "0"} words`,
+      pct: "100%",
+      color: "var(--indigo)",
+    },
+  ] : [];
   const mediaAssets: {
     label: string;
     name: string;
@@ -55,7 +79,14 @@ export function BlogDetailModal({ blog, isOpen, onClose }: BlogDetailModalProps)
     time: string;
     worker: string;
     msg: string;
-  }[] = [];
+  }[] = [
+    ...(blog.createdAtLabel
+      ? [{ time: blog.createdAtLabel, worker: "system", msg: "Blog record created" }]
+      : []),
+    ...(blog.updatedAtLabel
+      ? [{ time: blog.updatedAtLabel, worker: "system", msg: "Blog record last updated" }]
+      : []),
+  ];
 
   return (
     <div
@@ -84,6 +115,9 @@ export function BlogDetailModal({ blog, isOpen, onClose }: BlogDetailModalProps)
             </div>
             <div className="font-mono text-[10px] font-medium text-[var(--faint)]">
               {blog.slug} · {blog.words || "0"} words · {blog.cost || "$0.00"}
+            </div>
+            <div className="font-mono text-[10px] font-medium text-[var(--faint)] mt-[2px]">
+              Created {blog.createdAtLabel || "-"} · Updated {blog.updatedAtLabel || blog.updated || "-"}
             </div>
           </div>
           <div className="ml-auto flex gap-[7px]">
@@ -149,6 +183,48 @@ export function BlogDetailModal({ blog, isOpen, onClose }: BlogDetailModalProps)
 
             {/* Tab Panels */}
             <div className="flex-1 overflow-y-auto p-[13px]">
+              {activeTab === "overview" && (
+                <div className="flex flex-col gap-[11px]">
+                  <div className="grid grid-cols-2 gap-[8px]">
+                    {[
+                      { label: "Blog ID", value: blog.id || "-" },
+                      { label: "Status", value: blog.status },
+                      { label: "Category", value: blog.cat || "General" },
+                      { label: "Words", value: blog.words || "0" },
+                      { label: "Quality", value: blog.quality || "0" },
+                      { label: "Cost", value: blog.cost || "$0.00" },
+                    ].map((item) => (
+                      <div key={item.label} className="border border-[var(--bd)] rounded-[8px] p-[8px_10px] bg-[var(--card2)] min-w-0">
+                        <div className="text-[10px] font-semibold text-[var(--mut)]">{item.label}</div>
+                        <div className="font-mono text-[11px] text-[var(--fg2)] mt-[2px] truncate">{item.value}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="border border-[var(--bd)] rounded-[8px] p-[8px_10px] bg-[var(--card2)]">
+                    <div className="text-[10px] font-semibold text-[var(--mut)]">Slug</div>
+                    <div className="font-mono text-[11px] text-[var(--fg2)] mt-[2px] break-all">{blog.slug}</div>
+                  </div>
+                  <div className="grid grid-cols-1 gap-[8px]">
+                    <div className="border border-[var(--bd)] rounded-[8px] p-[8px_10px] bg-[var(--card2)]">
+                      <div className="text-[10px] font-semibold text-[var(--mut)]">Created</div>
+                      <div className="font-mono text-[11px] text-[var(--fg2)] mt-[2px]">{blog.createdAtLabel || "-"}</div>
+                    </div>
+                    <div className="border border-[var(--bd)] rounded-[8px] p-[8px_10px] bg-[var(--card2)]">
+                      <div className="text-[10px] font-semibold text-[var(--mut)]">Updated</div>
+                      <div className="font-mono text-[11px] text-[var(--fg2)] mt-[2px]">{blog.updatedAtLabel || blog.updated || "-"}</div>
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[10.5px] font-bold tracking-wider uppercase text-[var(--mut)] mb-[5px]">
+                      Article Title
+                    </div>
+                    <div className="border border-[var(--bd)] rounded-[8px] p-[8px_10px] bg-[var(--card2)] text-[11.5px] leading-snug font-medium text-[var(--fg)]">
+                      {blog.title}
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {activeTab === "seo" && (
                 <div className="flex flex-col gap-[11px]">
                   <div>
@@ -156,7 +232,7 @@ export function BlogDetailModal({ blog, isOpen, onClose }: BlogDetailModalProps)
                       Meta Title
                     </div>
                     <div className="border border-[var(--bd)] rounded-[8px] p-[8px_10px] bg-[var(--card2)] text-[11.5px] leading-snug font-medium text-[var(--fg)]">
-                      {blog.title}
+                      {blog.metaTitle || blog.title}
                     </div>
                   </div>
                   <div>
@@ -164,7 +240,7 @@ export function BlogDetailModal({ blog, isOpen, onClose }: BlogDetailModalProps)
                       Meta Description
                     </div>
                     <div className="border border-[var(--bd)] rounded-[8px] p-[8px_10px] bg-[var(--card2)] text-[11.5px] leading-snug text-[var(--fg2)]">
-                      No meta description generated yet.
+                      {blog.metaDescription || "No meta description generated yet."}
                     </div>
                   </div>
                   <div>
@@ -188,7 +264,7 @@ export function BlogDetailModal({ blog, isOpen, onClose }: BlogDetailModalProps)
                       JSON-LD Schema
                     </div>
                     <pre className="border border-[var(--bd)] rounded-[8px] p-[9px_10px] bg-[var(--card2)] font-mono text-[10.5px] leading-relaxed text-[var(--fg2)] overflow-x-auto">
-                      No schema generated yet.
+                      {blog.schema || "No schema generated yet."}
                     </pre>
                   </div>
                 </div>
@@ -202,10 +278,10 @@ export function BlogDetailModal({ blog, isOpen, onClose }: BlogDetailModalProps)
                     </div>
                     <div>
                       <div className="text-[12px] font-bold text-[var(--fg)]">
-                        Not evaluated
+                        {numericQuality >= 90 ? "Passed Quality Gate" : numericQuality > 0 ? "Needs Review" : "Not evaluated"}
                       </div>
                       <div className="text-[10.5px] text-[var(--mut)]">
-                        Threshold {" >= "} 90 · 0 checks completed
+                        Threshold {" >= "} 90 · {qualityChecks.length} checks available
                       </div>
                     </div>
                   </div>

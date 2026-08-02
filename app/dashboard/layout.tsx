@@ -34,15 +34,15 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           {/* Top Navbar */}
           <Navbar
             onOpenCmdk={() => setCmdkOpen(true)}
-            onRunNow={() => {
-              alert("Triggered manual blog generation run now!");
-            }}
           />
 
           {/* Main Page Content */}
           <main className="flex-1 min-w-0 p-[18px]">
             {React.isValidElement(children)
-              ? React.cloneElement(children as React.ReactElement<any>, {
+              ? React.cloneElement(children as React.ReactElement<{
+                  onOpenBlogModal?: (blog: BlogItem) => void;
+                  onOpenManualTopic?: () => void;
+                }>, {
                   onOpenBlogModal: handleOpenBlogDetail,
                   onOpenManualTopic: () => setManualTopicOpen(true),
                 })
