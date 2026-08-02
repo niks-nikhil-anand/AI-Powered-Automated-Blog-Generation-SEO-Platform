@@ -10,10 +10,32 @@ import { createRedisConnection } from "./redis";
  */
 export const QUEUE_NAMES = {
   research: "research_queue",
+  planning: "planning_queue",
+  outline: "outline_queue",
   writing: "writing_queue",
 } as const;
 
 export const researchQueue = new Queue(QUEUE_NAMES.research, {
+  connection: createRedisConnection(),
+  defaultJobOptions: {
+    attempts: 3,
+    backoff: { type: "exponential", delay: 5000 },
+    removeOnComplete: { count: 200 },
+    removeOnFail: { count: 500 },
+  },
+});
+
+export const planningQueue = new Queue(QUEUE_NAMES.planning, {
+  connection: createRedisConnection(),
+  defaultJobOptions: {
+    attempts: 3,
+    backoff: { type: "exponential", delay: 5000 },
+    removeOnComplete: { count: 200 },
+    removeOnFail: { count: 500 },
+  },
+});
+
+export const outlineQueue = new Queue(QUEUE_NAMES.outline, {
   connection: createRedisConnection(),
   defaultJobOptions: {
     attempts: 3,
@@ -33,13 +55,22 @@ export const writingQueue = new Queue(QUEUE_NAMES.writing, {
   },
 });
 
-export type WritingJobPayload = {
+export type PlanningJobPayload = {
   trendId: string;
   topic: string;
-  /**
-   * Short context blurb from the Google Trends feed, passed through the
-   * job payload rather than re-fetched from the Trend row - the Trend
-   * model has no `description` column (see prisma/schema.prisma).
-   */
+  category: string;
+  score: number;
+  evidenceSummary: string;
+};
+
+export type OutlineJobPayload = {
+  trendId: string;
+  planId: string;
+};
+
+export type WritingJobPayload = {
+  trendId: string;
+  outlineId?: string;
+  topic: string;
   description: string;
 };
