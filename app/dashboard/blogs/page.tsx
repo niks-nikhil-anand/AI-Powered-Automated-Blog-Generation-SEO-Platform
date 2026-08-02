@@ -1,27 +1,32 @@
 "use client";
 
-import React, { useState } from "react";
-import { BlogItem } from "../../components/shared/BlogDetailModal";
+import React, { useEffect, useState } from "react";
+import { BlogDetailModal, BlogItem } from "../../components/shared/BlogDetailModal";
 
-interface BlogsPageProps {
-  onOpenBlogModal?: (blog: BlogItem) => void;
-}
-
-export default function BlogManagementPage({ onOpenBlogModal }: BlogsPageProps) {
+export default function BlogManagementPage() {
   const [activeTab, setActiveTab] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("All categories");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [blogRows, setBlogRows] = useState<(BlogItem & { words: string; cost: string })[]>([]);
+  const [selectedBlog, setSelectedBlog] = useState<BlogItem | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/dashboard")
+      .then((res) => res.json())
+      .then((data) => setBlogRows(data.blogs ?? []))
+      .catch(() => setBlogRows([]));
+  }, []);
 
   const blogTabs = [
-    { key: "all", label: "All articles", count: "0" },
-    { key: "pipeline", label: "In Pipeline", count: "0" },
-    { key: "published", label: "Published", count: "0" },
-    { key: "drafts", label: "Drafts", count: "0" },
-    { key: "failed", label: "Failed QA", count: "0" },
+    { key: "all", label: "All articles", count: String(blogRows.length) },
+    { key: "pipeline", label: "In Pipeline", count: String(blogRows.filter((row) => row.status === "Review").length) },
+    { key: "published", label: "Published", count: String(blogRows.filter((row) => row.status === "Published").length) },
+    { key: "drafts", label: "Drafts", count: String(blogRows.filter((row) => row.status === "Draft").length) },
+    { key: "failed", label: "Failed QA", count: String(blogRows.filter((row) => row.status === "Failed QA").length) },
   ];
-
-  const blogRows: (BlogItem & { words: string; cost: string })[] = [];
+  const categories = Array.from(new Set(blogRows.map((row) => row.cat).filter(Boolean))).sort();
 
   const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.checked) {
@@ -39,6 +44,11 @@ export default function BlogManagementPage({ onOpenBlogModal }: BlogsPageProps) 
     }
   };
 
+  const openBlogDetail = (blog: BlogItem) => {
+    setSelectedBlog(blog);
+    setDetailOpen(true);
+  };
+
   const filteredRows = blogRows.filter((row) => {
     const matchesSearch =
       row.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -48,7 +58,8 @@ export default function BlogManagementPage({ onOpenBlogModal }: BlogsPageProps) 
       activeTab === "all" ||
       (activeTab === "published" && row.status === "Published") ||
       (activeTab === "failed" && row.status === "Failed QA") ||
-      (activeTab === "pipeline" && row.status === "Writing");
+      (activeTab === "drafts" && row.status === "Draft") ||
+      (activeTab === "pipeline" && row.status === "Review");
     return matchesSearch && matchesCat && matchesTab;
   });
 
@@ -61,7 +72,7 @@ export default function BlogManagementPage({ onOpenBlogModal }: BlogsPageProps) 
             Blog Management & Pipeline
           </h1>
           <p className="margin-0 text-[12px] text-[var(--mut)] mt-[3px]">
-            0 articles · 0 in pipeline · 0 failed QA gate
+            {blogRows.length} articles · {blogRows.filter((row) => row.status === "Review").length} in pipeline · {blogRows.filter((row) => row.status === "Failed QA").length} failed QA gate
           </p>
         </div>
         <div className="flex gap-[7px]">
@@ -140,12 +151,9 @@ export default function BlogManagementPage({ onOpenBlogModal }: BlogsPageProps) 
             className="h-[29px] px-[8px] rounded-[8px] border border-[var(--bd)] bg-[var(--card)] text-[var(--fg2)] text-[11.5px] font-semibold outline-none"
           >
             <option>All categories</option>
-            <option>Frameworks</option>
-            <option>Backend</option>
-            <option>Runtime</option>
-            <option>AI Tooling</option>
-            <option>DevOps</option>
-            <option>TypeScript</option>
+            {categories.map((category) => (
+              <option key={category}>{category}</option>
+            ))}
           </select>
 
           <span className="ml-auto text-[11px] text-[var(--mut)]">
@@ -250,11 +258,15 @@ export default function BlogManagementPage({ onOpenBlogModal }: BlogsPageProps) 
                   </td>
                   <td className="p-[9px_12px] text-right">
                     <button
-                      aria-label="Open blog detail"
-                      onClick={() => onOpenBlogModal && onOpenBlogModal(b)}
-                      className="h-[24px] px-[9px] rounded-[6px] border border-[var(--bd)] bg-[var(--card)] text-[var(--fg2)] text-[11px] font-semibold hover:border-[var(--indigo)] hover:text-[var(--indigo)] transition-colors"
+                      aria-label={`Open details for ${b.title}`}
+                      title="View details"
+                      onClick={() => openBlogDetail(b)}
+                      className="w-[28px] h-[28px] rounded-[7px] border border-[var(--bd)] bg-[var(--card)] text-[var(--fg2)] inline-flex items-center justify-center hover:border-[var(--indigo)] hover:text-[var(--indigo)] transition-colors"
                     >
-                      Inspect
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" />
+                        <circle cx="12" cy="12" r="3" />
+                      </svg>
                     </button>
                   </td>
                 </tr>
@@ -288,6 +300,11 @@ export default function BlogManagementPage({ onOpenBlogModal }: BlogsPageProps) 
           </div>
         </div>
       </div>
+      <BlogDetailModal
+        blog={selectedBlog}
+        isOpen={detailOpen}
+        onClose={() => setDetailOpen(false)}
+      />
     </div>
   );
 }
