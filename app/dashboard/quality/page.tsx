@@ -1,13 +1,32 @@
 "use client";
 
-import React from "react";
+import React, { useEffect, useState } from "react";
 
 export default function QualityAuditPage() {
+  const [quality, setQuality] = useState({
+    avgQuality: 0,
+    failedCount: 0,
+    checkedCount: 0,
+    blocked: [] as {
+      id: string;
+      title: string;
+      quality: string;
+      qFg?: string;
+    }[],
+  });
+
+  useEffect(() => {
+    fetch("/api/dashboard")
+      .then((res) => res.json())
+      .then((data) => setQuality(data.quality))
+      .catch(() => {});
+  }, []);
+
   const qualityStats = [
-    { label: "Median Quality", value: "0", foot: "target >= 90", color: "var(--mut)" },
-    { label: "Articles Blocked", value: "0", foot: "needs review", color: "var(--mut)" },
-    { label: "Plagiarism Match", value: "0%", foot: "no checks yet", color: "var(--mut)" },
-    { label: "SEO Indexing Ready", value: "0%", foot: "no checks yet", color: "var(--mut)" },
+    { label: "Median Quality", value: String(quality.avgQuality), foot: "target >= 90", color: quality.avgQuality >= 90 ? "var(--emerald)" : "var(--mut)" },
+    { label: "Articles Blocked", value: String(quality.blocked.length), foot: "needs review", color: quality.blocked.length ? "var(--rose)" : "var(--mut)" },
+    { label: "Checked Articles", value: String(quality.checkedCount), foot: "SEO records", color: "var(--indigo)" },
+    { label: "Failed Articles", value: String(quality.failedCount), foot: "failed status", color: quality.failedCount ? "var(--rose)" : "var(--mut)" },
   ];
 
   const checkRates = [
@@ -23,7 +42,12 @@ export default function QualityAuditPage() {
     scoreColor: string;
     title: string;
     reasons: string[];
-  }[] = [];
+  }[] = quality.blocked.map((row) => ({
+    score: row.quality,
+    scoreColor: row.qFg ?? "var(--rose)",
+    title: row.title,
+    reasons: ["Quality score is below publishing threshold"],
+  }));
 
   return (
     <div className="flex flex-col gap-[13px]">
@@ -33,7 +57,7 @@ export default function QualityAuditPage() {
           Quality & SEO Audit Hub
         </h1>
         <p className="margin-0 text-[12px] text-[var(--mut)] mt-[3px]">
-          Gate threshold: quality {" >= "} 90 · 0 articles currently blocked from publishing
+          Gate threshold: quality {" >= "} 90 · {failedChecks.length} articles currently blocked from publishing
         </p>
       </div>
 
@@ -46,7 +70,7 @@ export default function QualityAuditPage() {
               Quality score distribution
             </span>
             <span className="text-[11px] text-[var(--mut)]">
-              0 published articles · median 0
+              {quality.checkedCount} checked articles · median {quality.avgQuality}
             </span>
           </div>
           <div className="p-[14px]">
@@ -139,7 +163,7 @@ export default function QualityAuditPage() {
               Failed checks queue
             </span>
             <span className="font-mono text-[10px] font-semibold p-[2px_6px] rounded-[6px] bg-[rgba(244,63,94,0.14)] text-[var(--rose)]">
-              0 blocked
+              {failedChecks.length} blocked
             </span>
           </div>
           <button
