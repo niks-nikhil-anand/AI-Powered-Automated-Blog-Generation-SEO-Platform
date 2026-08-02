@@ -1,21 +1,22 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 
 export default function WorkersPage() {
   const [selectedStack, setSelectedStack] = useState<string | null>(null);
-
-  const queues = [
-    { name: "research_queue", waiting: "0", active: "0", completed: "0", failed: "0", dot: "var(--mut)", anim: "none", rate: "0/min", p95: "-", failedColor: "var(--mut)" },
-    { name: "planning_queue", waiting: "0", active: "0", completed: "0", failed: "0", dot: "var(--mut)", anim: "none", rate: "0/min", p95: "-", failedColor: "var(--mut)" },
-    { name: "outline_queue", waiting: "0", active: "0", completed: "0", failed: "0", dot: "var(--mut)", anim: "none", rate: "0/min", p95: "-", failedColor: "var(--mut)" },
-    { name: "writing_queue", waiting: "0", active: "0", completed: "0", failed: "0", dot: "var(--mut)", anim: "none", rate: "0/min", p95: "-", failedColor: "var(--mut)" },
-    { name: "image_queue", waiting: "0", active: "0", completed: "0", failed: "0", dot: "var(--mut)", anim: "none", rate: "0/min", p95: "-", failedColor: "var(--mut)" },
-    { name: "quality_queue", waiting: "0", active: "0", completed: "0", failed: "0", dot: "var(--mut)", anim: "none", rate: "0/min", p95: "-", failedColor: "var(--mut)" },
-    { name: "publish_queue", waiting: "0", active: "0", completed: "0", failed: "0", dot: "var(--mut)", anim: "none", rate: "0/min", p95: "-", failedColor: "var(--mut)" },
-  ];
-
-  const jobs: {
+  const [queues, setQueues] = useState<{
+    name: string;
+    waiting: string;
+    active: string;
+    completed: string;
+    failed: string;
+    dot: string;
+    anim: string;
+    rate: string;
+    p95: string;
+    failedColor: string;
+  }[]>([]);
+  const [jobs, setJobs] = useState<{
     id: string;
     queue: string;
     payload: string;
@@ -27,7 +28,20 @@ export default function WorkersPage() {
     sBd: string;
     errBtn: string;
     stack?: string;
-  }[] = [];
+  }[]>([]);
+
+  useEffect(() => {
+    fetch("/api/dashboard")
+      .then((res) => res.json())
+      .then((data) => {
+        setQueues(data.queues ?? []);
+        setJobs(data.jobs ?? []);
+      })
+      .catch(() => {
+        setQueues([]);
+        setJobs([]);
+      });
+  }, []);
 
   return (
     <div className="flex flex-col gap-[13px]">
@@ -38,7 +52,7 @@ export default function WorkersPage() {
             Queue & Worker Operations
           </h1>
           <p className="margin-0 text-[12px] text-[var(--mut)] mt-[3px]">
-            BullMQ · 7 queues · concurrency 4
+            BullMQ · {queues.length} queues · database-backed activity
           </p>
         </div>
         <div className="flex gap-[7px]">
@@ -108,7 +122,7 @@ export default function WorkersPage() {
             Job inspector
           </span>
           <span className="text-[11px] text-[var(--mut)]">
-            latest 0 jobs
+            latest {jobs.length} jobs
           </span>
         </div>
         <div className="overflow-x-auto">
