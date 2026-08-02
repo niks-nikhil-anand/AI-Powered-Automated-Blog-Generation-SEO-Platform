@@ -1,12 +1,12 @@
 "use client";
 
 import React, { useState } from "react";
-import { ThemeProvider } from "../components/shared/ThemeProvider";
-import { Sidebar } from "../components/shared/Sidebar";
-import { Navbar } from "../components/shared/Navbar";
-import { GlobalSearchModal } from "../components/shared/GlobalSearchModal";
-import { BlogDetailModal, BlogItem } from "../components/shared/BlogDetailModal";
-import { ManualTopicModal } from "../components/shared/ManualTopicModal";
+import { ThemeProvider } from "../../components/shared/ThemeProvider";
+import { Sidebar } from "../../components/shared/Sidebar";
+import { Navbar } from "../../components/shared/Navbar";
+import { GlobalSearchModal } from "../../components/shared/GlobalSearchModal";
+import { BlogDetailModal, BlogItem } from "../../components/shared/BlogDetailModal";
+import { ManualTopicModal } from "../../components/shared/ManualTopicModal";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -40,12 +40,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           <main className="flex-1 min-w-0 p-[18px]">
             {React.isValidElement(children)
               ? React.cloneElement(children as React.ReactElement<{
-                  onOpenBlogModal?: (blog: BlogItem) => void;
-                  onOpenManualTopic?: () => void;
-                }>, {
-                  onOpenBlogModal: handleOpenBlogDetail,
-                  onOpenManualTopic: () => setManualTopicOpen(true),
-                })
+                onOpenBlogModal?: (blog: BlogItem) => void;
+                onOpenManualTopic?: () => void;
+              }>, {
+                onOpenBlogModal: handleOpenBlogDetail,
+                onOpenManualTopic: () => setManualTopicOpen(true),
+              })
               : children}
           </main>
         </div>
