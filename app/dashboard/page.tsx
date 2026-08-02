@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { MetricCard } from "../components/ui/MetricCard";
 import { BlogItem } from "../components/shared/BlogDetailModal";
@@ -11,33 +11,63 @@ interface DashboardPageProps {
 
 export default function ExecutiveDashboard({ onOpenBlogModal }: DashboardPageProps) {
   const [range, setRange] = useState("24h");
+  const [recentBlogs, setRecentBlogs] = useState<BlogItem[]>([]);
+  const [dashboardMetrics, setDashboardMetrics] = useState({
+    blogCount: 0,
+    publishedCount: 0,
+    failedCount: 0,
+    todayPublishedCount: 0,
+    successRate: 0,
+    totalCost: 0,
+    avgQuality: 0,
+  });
+  const [stageCounts, setStageCounts] = useState({
+    research: 0,
+    planning: 0,
+    outline: 0,
+    writing: 0,
+    image: 0,
+    quality: 0,
+    publish: 0,
+  });
+
+  useEffect(() => {
+    fetch("/api/dashboard")
+      .then((res) => res.json())
+      .then((data) => {
+        setDashboardMetrics(data.metrics);
+        setStageCounts(data.stages);
+        setRecentBlogs((data.blogs ?? []).slice(0, 6));
+      })
+      .catch(() => {});
+  }, []);
 
   const metrics = [
     {
       label: "Daily Blogs",
-      value: "0 / 20",
+      value: `${dashboardMetrics.todayPublishedCount} / 20`,
       suffix: "published",
       delta: "0 vs yest",
       deltaBg: "rgba(16,185,129,0.12)",
       deltaFg: "var(--emerald)",
-      pct: "0%",
+      pct: `${Math.min(100, (dashboardMetrics.todayPublishedCount / 20) * 100)}%`,
       color: "var(--indigo)",
       foot: "Goal: 20 blogs / day",
     },
     {
       label: "Success Rate",
-      value: "0%",
+      value: `${dashboardMetrics.successRate}%`,
       suffix: "passed QA",
       delta: "No runs",
       deltaBg: "rgba(16,185,129,0.12)",
       deltaFg: "var(--emerald)",
-      pct: "0%",
+      pct: `${dashboardMetrics.successRate}%`,
       color: "var(--emerald)",
-      foot: "No QA runs yet",
+      foot: `${dashboardMetrics.failedCount} failed articles`,
     },
     {
       label: "AI Cost Today",
-      value: "$0.00",
+      value: `$${dashboardMetrics.totalCost.toFixed(2)}`,
       suffix: "total",
       delta: "No spend",
       deltaBg: "rgba(99,102,241,0.12)",
@@ -48,28 +78,26 @@ export default function ExecutiveDashboard({ onOpenBlogModal }: DashboardPagePro
     },
     {
       label: "Quality Score",
-      value: "0",
+      value: String(dashboardMetrics.avgQuality),
       suffix: "/100 avg",
       delta: "No scores",
       deltaBg: "rgba(16,185,129,0.12)",
       deltaFg: "var(--emerald)",
-      pct: "0%",
+      pct: `${dashboardMetrics.avgQuality}%`,
       color: "var(--amber)",
-      foot: "No scored articles yet",
+      foot: `${dashboardMetrics.blogCount} total articles`,
     },
   ];
 
   const stages = [
-    { name: "Research", count: "0", state: "idle", rate: "0/min", pct: "0%", dot: "var(--mut)", anim: "none", bg: "var(--card2)", bd: "var(--bd)", arrow: "block" },
-    { name: "Planning", count: "0", state: "idle", rate: "0/min", pct: "0%", dot: "var(--mut)", anim: "none", bg: "var(--card2)", bd: "var(--bd)", arrow: "block" },
-    { name: "Outline", count: "0", state: "idle", rate: "0/min", pct: "0%", dot: "var(--mut)", anim: "none", bg: "var(--card2)", bd: "var(--bd)", arrow: "block" },
-    { name: "Writing", count: "0", state: "idle", rate: "0/min", pct: "0%", dot: "var(--mut)", anim: "none", bg: "var(--card2)", bd: "var(--bd)", arrow: "block" },
-    { name: "Image", count: "0", state: "idle", rate: "0/min", pct: "0%", dot: "var(--mut)", anim: "none", bg: "var(--card2)", bd: "var(--bd)", arrow: "block" },
-    { name: "Quality QA", count: "0", state: "idle", rate: "0/min", pct: "0%", dot: "var(--mut)", anim: "none", bg: "var(--card2)", bd: "var(--bd)", arrow: "block" },
-    { name: "Publish", count: "0", state: "idle", rate: "daily 20", pct: "0%", dot: "var(--mut)", anim: "none", bg: "var(--card2)", bd: "var(--bd)", arrow: "none" },
+    { name: "Research", count: String(stageCounts.research), state: stageCounts.research ? "ready" : "idle", rate: "topics", pct: `${Math.min(100, stageCounts.research * 5)}%`, dot: stageCounts.research ? "var(--emerald)" : "var(--mut)", anim: "none", bg: "var(--card2)", bd: "var(--bd)", arrow: "block" },
+    { name: "Planning", count: String(stageCounts.planning), state: stageCounts.planning ? "planned" : "idle", rate: "plans", pct: `${Math.min(100, stageCounts.planning * 10)}%`, dot: stageCounts.planning ? "var(--indigo)" : "var(--mut)", anim: "none", bg: "var(--card2)", bd: "var(--bd)", arrow: "block" },
+    { name: "Outline", count: String(stageCounts.outline), state: stageCounts.outline ? "outlined" : "idle", rate: "outlines", pct: `${Math.min(100, stageCounts.outline * 10)}%`, dot: stageCounts.outline ? "var(--indigo)" : "var(--mut)", anim: "none", bg: "var(--card2)", bd: "var(--bd)", arrow: "block" },
+    { name: "Writing", count: String(stageCounts.writing), state: stageCounts.writing ? "drafted" : "idle", rate: "drafts", pct: `${Math.min(100, stageCounts.writing * 10)}%`, dot: stageCounts.writing ? "var(--indigo)" : "var(--mut)", anim: "none", bg: "var(--card2)", bd: "var(--bd)", arrow: "block" },
+    { name: "Image", count: String(stageCounts.image), state: stageCounts.image ? "assets" : "idle", rate: "files", pct: `${Math.min(100, stageCounts.image * 10)}%`, dot: stageCounts.image ? "var(--sky)" : "var(--mut)", anim: "none", bg: "var(--card2)", bd: "var(--bd)", arrow: "block" },
+    { name: "Quality QA", count: String(stageCounts.quality), state: stageCounts.quality ? "scored" : "idle", rate: "checks", pct: `${Math.min(100, stageCounts.quality * 10)}%`, dot: stageCounts.quality ? "var(--amber)" : "var(--mut)", anim: "none", bg: "var(--card2)", bd: "var(--bd)", arrow: "block" },
+    { name: "Publish", count: String(stageCounts.publish), state: stageCounts.publish ? "published" : "idle", rate: "published", pct: `${Math.min(100, stageCounts.publish * 10)}%`, dot: stageCounts.publish ? "var(--emerald)" : "var(--mut)", anim: "none", bg: "var(--card2)", bd: "var(--bd)", arrow: "none" },
   ];
-
-  const recentBlogs: BlogItem[] = [];
 
   return (
     <div className="flex flex-col gap-[14px]">
