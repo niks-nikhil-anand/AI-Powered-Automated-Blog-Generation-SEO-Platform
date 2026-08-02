@@ -2,8 +2,8 @@
 
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
-import { MetricCard } from "../components/ui/MetricCard";
-import { BlogItem } from "../components/shared/BlogDetailModal";
+import { MetricCard } from "../../components/ui/MetricCard";
+import { BlogItem } from "../../components/shared/BlogDetailModal";
 
 interface DashboardPageProps {
   onOpenBlogModal?: (blog: BlogItem) => void;
@@ -39,7 +39,7 @@ export default function ExecutiveDashboard({ onOpenBlogModal }: DashboardPagePro
         setStageCounts(data.stages);
         setRecentBlogs((data.blogs ?? []).slice(0, 6));
       })
-      .catch(() => {});
+      .catch(() => { });
   }, []);
 
   const metrics = [
@@ -118,11 +118,10 @@ export default function ExecutiveDashboard({ onOpenBlogModal }: DashboardPagePro
               key={r}
               aria-label={`Time range ${r}`}
               onClick={() => setRange(r)}
-              className={`h-[29px] px-[11px] rounded-[8px] border text-[11.5px] font-semibold transition-colors ${
-                range === r
+              className={`h-[29px] px-[11px] rounded-[8px] border text-[11.5px] font-semibold transition-colors ${range === r
                   ? "border-[var(--indigo)] bg-[var(--tint)] text-[var(--indigo)]"
                   : "border-[var(--bd)] bg-[var(--card)] text-[var(--fg2)] hover:border-[var(--bd2)]"
-              }`}
+                }`}
             >
               {r}
             </button>
