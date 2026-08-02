@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { BlogDetailModal, BlogItem } from "../../components/shared/BlogDetailModal";
+import { BlogDetailModal, BlogItem } from "../../../components/shared/BlogDetailModal";
 
 export default function BlogManagementPage() {
   const [activeTab, setActiveTab] = useState("all");
@@ -111,11 +111,10 @@ export default function BlogManagementPage() {
                 key={tb.key}
                 aria-label={`Filter blogs by ${tb.label}`}
                 onClick={() => setActiveTab(tb.key)}
-                className={`h-[38px] px-[12px] border-b-2 text-[12px] font-semibold whitespace-nowrap flex items-center gap-[6px] transition-colors ${
-                  isActive
+                className={`h-[38px] px-[12px] border-b-2 text-[12px] font-semibold whitespace-nowrap flex items-center gap-[6px] transition-colors ${isActive
                     ? "border-[var(--indigo)] text-[var(--indigo)] font-bold"
                     : "border-transparent text-[var(--mut)] hover:text-[var(--fg)]"
-                }`}
+                  }`}
               >
                 {tb.label}
                 <span className="font-mono text-[10px] px-[5px] py-[1px] rounded-[5px] bg-[var(--card2)]">
