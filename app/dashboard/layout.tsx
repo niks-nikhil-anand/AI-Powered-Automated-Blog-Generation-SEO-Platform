@@ -7,6 +7,7 @@ import { Navbar } from "../../components/shared/Navbar";
 import { GlobalSearchModal } from "../../components/shared/GlobalSearchModal";
 import { BlogDetailModal, BlogItem } from "../../components/shared/BlogDetailModal";
 import { ManualTopicModal } from "../../components/shared/ManualTopicModal";
+import { RunPipelineModal } from "../../components/shared/RunPipelineModal";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -14,6 +15,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [selectedBlog, setSelectedBlog] = useState<BlogItem | null>(null);
   const [blogModalOpen, setBlogModalOpen] = useState(false);
   const [manualTopicOpen, setManualTopicOpen] = useState(false);
+  const [runPipelineOpen, setRunPipelineOpen] = useState(false);
 
   const handleOpenBlogDetail = (blog: BlogItem) => {
     setSelectedBlog(blog);
@@ -42,9 +44,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               ? React.cloneElement(children as React.ReactElement<{
                 onOpenBlogModal?: (blog: BlogItem) => void;
                 onOpenManualTopic?: () => void;
+                onOpenRunPipeline?: () => void;
               }>, {
                 onOpenBlogModal: handleOpenBlogDetail,
                 onOpenManualTopic: () => setManualTopicOpen(true),
+                onOpenRunPipeline: () => setRunPipelineOpen(true),
               })
               : children}
           </main>
@@ -64,6 +68,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             alert(`Topic added to research queue: ${topic.title}`);
           }}
         />
+        {runPipelineOpen && <RunPipelineModal onClose={() => setRunPipelineOpen(false)} />}
       </div>
     </ThemeProvider>
   );
