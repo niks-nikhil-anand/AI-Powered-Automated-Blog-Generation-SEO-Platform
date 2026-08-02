@@ -12,14 +12,44 @@ export default function QualityAuditPage() {
       title: string;
       quality: string;
       qFg?: string;
+      qualityReport?: {
+        checks?: {
+          label: string;
+          score: number;
+          maxScore: number;
+          notes: string[];
+        }[];
+      };
+    }[],
+    distribution: [] as {
+      label: string;
+      h: number;
+      count: number;
+      fill: string;
+    }[],
+    checkRates: [] as {
+      name: string;
+      value: string;
+      color: string;
     }[],
   });
 
   useEffect(() => {
-    fetch("/api/dashboard")
-      .then((res) => res.json())
-      .then((data) => setQuality(data.quality))
-      .catch(() => {});
+    let mounted = true;
+    const loadQuality = () => {
+      fetch("/api/dashboard", { cache: "no-store" })
+        .then((res) => res.json())
+        .then((data) => {
+          if (mounted && data.quality) setQuality(data.quality);
+        })
+        .catch(() => {});
+    };
+    loadQuality();
+    const timer = window.setInterval(loadQuality, 5000);
+    return () => {
+      mounted = false;
+      window.clearInterval(timer);
+    };
   }, []);
 
   const qualityStats = [
@@ -29,12 +59,27 @@ export default function QualityAuditPage() {
     { label: "Failed Articles", value: String(quality.failedCount), foot: "failed status", color: quality.failedCount ? "var(--rose)" : "var(--mut)" },
   ];
 
-  const checkRates = [
-    { name: "Grammar & Structure", value: "0%", color: "var(--mut)" },
-    { name: "SEO Meta & Keywords", value: "0%", color: "var(--mut)" },
-    { name: "Code Example Verification", value: "0%", color: "var(--mut)" },
-    { name: "Readability (Flesch Index)", value: "0%", color: "var(--mut)" },
-    { name: "Image Alt Text Presence", value: "0%", color: "var(--mut)" },
+  const checkRates = quality.checkRates.length > 0 ? quality.checkRates : [
+    { name: "SEO Structure", value: "0%", color: "var(--mut)" },
+    { name: "Content Completeness", value: "0%", color: "var(--mut)" },
+    { name: "Readability", value: "0%", color: "var(--mut)" },
+    { name: "Content Quality", value: "0%", color: "var(--mut)" },
+    { name: "Keyword Optimization", value: "0%", color: "var(--mut)" },
+    { name: "Technical SEO", value: "0%", color: "var(--mut)" },
+    { name: "Formatting & UX", value: "0%", color: "var(--mut)" },
+    { name: "Media Quality", value: "0%", color: "var(--mut)" },
+    { name: "AI & Fact Quality", value: "0%", color: "var(--mut)" },
+    { name: "Publishing Readiness", value: "0%", color: "var(--mut)" },
+  ];
+  const distribution = quality.distribution.length > 0 ? quality.distribution : [
+    { label: "< 80", h: 0, count: 0, fill: "var(--rose)" },
+    { label: "80-84", h: 0, count: 0, fill: "var(--rose)" },
+    { label: "85-89", h: 0, count: 0, fill: "var(--amber)" },
+    { label: "90-91", h: 0, count: 0, fill: "var(--emerald)" },
+    { label: "92-93", h: 0, count: 0, fill: "var(--emerald)" },
+    { label: "94-95", h: 0, count: 0, fill: "var(--emerald)" },
+    { label: "96-97", h: 0, count: 0, fill: "var(--emerald)" },
+    { label: "98-100", h: 0, count: 0, fill: "var(--emerald)" },
   ];
 
   const failedChecks: {
@@ -46,7 +91,12 @@ export default function QualityAuditPage() {
     score: row.quality,
     scoreColor: row.qFg ?? "var(--rose)",
     title: row.title,
-    reasons: ["Quality score is below publishing threshold"],
+    reasons:
+      row.qualityReport?.checks
+        ?.filter((check) => check.score < 9)
+        .slice(0, 3)
+        .map((check) => `${check.label}: ${check.score}/${check.maxScore}`) ??
+      ["Quality score is below publishing threshold"],
   }));
 
   return (
@@ -83,20 +133,12 @@ export default function QualityAuditPage() {
                 </span>
               </div>
 
-              {[
-                { label: "< 80", h: 0, fill: "var(--rose)" },
-                { label: "80-84", h: 0, fill: "var(--rose)" },
-                { label: "85-89", h: 0, fill: "var(--rose)" },
-                { label: "90-91", h: 0, fill: "var(--emerald)" },
-                { label: "92-93", h: 0, fill: "var(--emerald)" },
-                { label: "94-95", h: 0, fill: "var(--emerald)" },
-                { label: "96-97", h: 0, fill: "var(--emerald)" },
-                { label: "98-100", h: 0, fill: "var(--emerald)" },
-              ].map((bar, i) => (
+              {distribution.map((bar, i) => (
                 <div key={i} className="flex-1 flex flex-col items-center gap-[4px] h-full justify-end">
                   <div
                     className="w-full rounded-[2px]"
                     style={{ height: `${bar.h}px`, background: bar.fill }}
+                    title={`${bar.count} articles`}
                   />
                   <span className="font-mono text-[9px] text-[var(--faint)]">{bar.label}</span>
                 </div>
