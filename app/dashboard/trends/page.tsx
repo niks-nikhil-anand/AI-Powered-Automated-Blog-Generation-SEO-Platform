@@ -16,6 +16,8 @@ export default function TrendResearchPage({ onOpenManualTopic }: TrendsPageProps
   const [isApproving, setIsApproving] = useState(false);
   const [approveError, setApproveError] = useState("");
   const [approveResult, setApproveResult] = useState<{ jobId: string; queue: string } | null>(null);
+  const [isResearchRunning, setIsResearchRunning] = useState(false);
+  const [researchMessage, setResearchMessage] = useState("");
 
   type TrendRow = {
     id: string;
@@ -35,11 +37,41 @@ export default function TrendResearchPage({ onOpenManualTopic }: TrendsPageProps
   };
 
   useEffect(() => {
-    fetch("/api/dashboard")
-      .then((res) => res.json())
-      .then((data) => setTrends(data.trends ?? []))
-      .catch(() => setTrends([]));
+    let mounted = true;
+    const loadTrends = () => {
+      fetch("/api/dashboard", { cache: "no-store" })
+        .then((res) => res.json())
+        .then((data) => {
+          if (mounted) setTrends(data.trends ?? []);
+        })
+        .catch(() => {
+          if (mounted) setTrends([]);
+        });
+    };
+    loadTrends();
+    const timer = window.setInterval(loadTrends, 5000);
+    return () => {
+      mounted = false;
+      window.clearInterval(timer);
+    };
   }, []);
+
+  const handleTriggerResearch = async () => {
+    setIsResearchRunning(true);
+    setResearchMessage("Queueing research worker...");
+    try {
+      const res = await fetch("/api/research/run", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "Failed to queue research worker");
+      }
+      setResearchMessage(`Queued ${data.queue}${data.jobId ? ` · ${data.jobId}` : ""}`);
+    } catch (err) {
+      setResearchMessage(err instanceof Error ? err.message : "Failed to queue research worker");
+    } finally {
+      setIsResearchRunning(false);
+    }
+  };
 
   const handleDeleteTrend = async () => {
     if (!deleteTarget) return;
@@ -111,6 +143,7 @@ export default function TrendResearchPage({ onOpenManualTopic }: TrendsPageProps
   const filteredTrends = activeFilter === "All sources"
     ? trends
     : trends.filter((t) => t.source.toLowerCase().includes(activeFilter.toLowerCase()));
+  const minWritingScore = 90;
 
   return (
     <div className="flex flex-col gap-[14px]">
@@ -134,13 +167,19 @@ export default function TrendResearchPage({ onOpenManualTopic }: TrendsPageProps
           </button>
           <button
             aria-label="Trigger research worker"
-            onClick={() => alert("Triggered Research Worker crawl job!")}
-            className="h-[30px] px-[12px] rounded-[8px] border border-transparent bg-[var(--indigo)] text-white text-[11.5px] font-semibold hover:bg-[#4f46e5] transition-colors"
+            disabled={isResearchRunning}
+            onClick={handleTriggerResearch}
+            className="h-[30px] px-[12px] rounded-[8px] border border-transparent bg-[var(--indigo)] text-white text-[11.5px] font-semibold hover:bg-[#4f46e5] transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
           >
-            Trigger research worker
+            {isResearchRunning ? "Queueing..." : "Trigger research worker"}
           </button>
         </div>
       </div>
+      {researchMessage && (
+        <div className="rounded-[9px] border border-[var(--bd)] bg-[var(--card)] px-[11px] py-[8px] text-[11.5px] text-[var(--fg2)]">
+          {researchMessage}
+        </div>
+      )}
 
       {/* Filter Tabs */}
       <div className="flex gap-[7px] flex-wrap items-center">
@@ -168,7 +207,9 @@ export default function TrendResearchPage({ onOpenManualTopic }: TrendsPageProps
 
       {/* Trends Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-[12px]">
-        {filteredTrends.length > 0 ? filteredTrends.map((t, idx) => (
+        {filteredTrends.length > 0 ? filteredTrends.map((t, idx) => {
+          const canApprove = Number(t.score) >= minWritingScore;
+          return (
           <div
             key={idx}
             className="bg-[var(--card)] border border-[var(--bd)] rounded-[12px] p-[13px] shadow-[var(--shadow)] flex flex-col gap-[9px] hover:border-[var(--bd2)] transition-colors"
@@ -241,10 +282,11 @@ export default function TrendResearchPage({ onOpenManualTopic }: TrendsPageProps
             <div className="flex gap-[7px] mt-auto pt-[3px]">
               <button
                 aria-label="Approve topic and send to pipeline"
+                disabled={!canApprove}
                 onClick={() => openApproveModal(t)}
-                className="flex-1 h-[28px] rounded-[8px] border border-transparent bg-[var(--indigo)] text-white text-[11px] font-semibold hover:bg-[#4f46e5] transition-colors"
+                className="flex-1 h-[28px] rounded-[8px] border border-transparent bg-[var(--indigo)] text-white text-[11px] font-semibold hover:bg-[#4f46e5] transition-colors disabled:bg-[var(--card2)] disabled:text-[var(--mut)] disabled:border-[var(--bd)] disabled:cursor-not-allowed"
               >
-                Approve → Pipeline
+                {canApprove ? "Approve → Pipeline" : "Score too low"}
               </button>
               <button
                 aria-label="Dismiss topic"
@@ -255,7 +297,8 @@ export default function TrendResearchPage({ onOpenManualTopic }: TrendsPageProps
               </button>
             </div>
           </div>
-        )) : (
+          );
+        }) : (
           <div className="sm:col-span-2 lg:col-span-3 bg-[var(--card)] border border-[var(--bd)] rounded-[12px] p-[32px] text-center text-[12px] text-[var(--mut)] shadow-[var(--shadow)]">
             No trend signals yet.
           </div>

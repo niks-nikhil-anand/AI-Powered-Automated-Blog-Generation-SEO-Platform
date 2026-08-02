@@ -38,6 +38,34 @@ export interface BlogItem {
     height?: number | null;
     size: number;
   };
+  qualityReport?: {
+    overallScore: number;
+    passed: boolean;
+    recommendation: string;
+    checks: {
+      label: string;
+      score: number;
+      maxScore: number;
+      notes: string[];
+    }[];
+    createdAt: string;
+  };
+  workflow?: {
+    id: string;
+    status: string;
+    currentStage: string;
+    failureReason?: string | null;
+    attempts: {
+      id: string;
+      worker: string;
+      attempt: number;
+      status: string;
+      error?: string | null;
+      qualityReport?: unknown;
+      startedAt: string;
+      finishedAt?: string | null;
+    }[];
+  };
 }
 
 interface BlogDetailModalProps {
@@ -45,6 +73,19 @@ interface BlogDetailModalProps {
   isOpen: boolean;
   onClose: () => void;
 }
+
+const qualityParameterLabels = [
+  "SEO Structure",
+  "Content Completeness",
+  "Readability",
+  "Content Quality",
+  "Keyword Optimization",
+  "Technical SEO",
+  "Formatting & UX",
+  "Media Quality",
+  "AI & Fact Quality",
+  "Publishing Readiness",
+];
 
 export function BlogDetailModal({ blog, isOpen, onClose }: BlogDetailModalProps) {
   const [activeTab, setActiveTab] = useState<"overview" | "seo" | "quality" | "assets" | "timeline">("overview");
@@ -61,25 +102,30 @@ export function BlogDetailModal({ blog, isOpen, onClose }: BlogDetailModalProps)
   const markdownBody = blog.content ?? "";
   const targetKeywords: string[] = blog.keywords ?? [];
   const numericQuality = Number(blog.quality ?? 0);
+  const qualityReportChecks = blog.qualityReport?.checks ?? [];
+  const fallbackQualityScore = Math.min(10, Math.max(0, Math.round(numericQuality / 10)));
   const qualityChecks: {
     name: string;
     value: string;
     pct: string;
     color: string;
-  }[] = numericQuality > 0 ? [
-    {
-      name: "SEO Quality Score",
-      value: `${numericQuality}/100`,
-      pct: `${Math.min(100, Math.max(0, numericQuality))}%`,
-      color: numericQuality >= 90 ? "var(--emerald)" : "var(--amber)",
-    },
-    {
-      name: "Word Count",
-      value: `${blog.words || "0"} words`,
-      pct: "100%",
-      color: "var(--indigo)",
-    },
-  ] : [];
+    notes?: string[];
+  }[] = qualityParameterLabels.map((label, index) => {
+    const reportCheck = qualityReportChecks.find((check) => check.label === label);
+    const score = reportCheck?.score ?? (numericQuality > 0 ? fallbackQualityScore : 0);
+    const maxScore = reportCheck?.maxScore ?? 10;
+    return {
+      name: label,
+      value: reportCheck ? `${score}/${maxScore}` : numericQuality > 0 ? `${score}/${maxScore}` : "Pending",
+      pct: `${Math.min(100, Math.max(0, (score / maxScore) * 100))}%`,
+      color: score >= 9 ? "var(--emerald)" : score >= 7 ? "var(--amber)" : score > 0 ? "var(--indigo)" : "var(--mut)",
+      notes: reportCheck?.notes ?? [
+        index === 0
+          ? "Detailed QA report not generated yet"
+          : "Run Quality QA to calculate this parameter",
+      ],
+    };
+  });
   const mediaAssets: {
     label: string;
     name: string;
@@ -107,10 +153,19 @@ export function BlogDetailModal({ blog, isOpen, onClose }: BlogDetailModalProps)
     time: string;
     worker: string;
     msg: string;
+    status?: string;
+    error?: string | null;
   }[] = [
     ...(blog.createdAtLabel
       ? [{ time: blog.createdAtLabel, worker: "system", msg: "Blog record created" }]
       : []),
+    ...(blog.workflow?.attempts.map((attempt) => ({
+      time: new Date(attempt.finishedAt ?? attempt.startedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
+      worker: attempt.worker,
+      status: attempt.status,
+      msg: `Attempt ${attempt.attempt}${attempt.error ? " failed" : " completed"}`,
+      error: attempt.error,
+    })) ?? []),
     ...(blog.updatedAtLabel
       ? [{ time: blog.updatedAtLabel, worker: "system", msg: "Blog record last updated" }]
       : []),
@@ -250,6 +305,24 @@ export function BlogDetailModal({ blog, isOpen, onClose }: BlogDetailModalProps)
                       {blog.title}
                     </div>
                   </div>
+                  {blog.featuredImage && (
+                    <div>
+                      <div className="text-[10.5px] font-bold tracking-wider uppercase text-[var(--mut)] mb-[5px]">
+                        Generated Hero Image
+                      </div>
+                      <div className="border border-[var(--bd)] rounded-[10px] bg-[var(--card2)] p-[8px]">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={blog.featuredImage.publicUrl}
+                          alt={blog.title}
+                          className="w-full aspect-video object-cover rounded-[8px] border border-[var(--bd)] bg-[var(--card)]"
+                        />
+                        <div className="mt-[7px] font-mono text-[10px] text-[var(--faint)] break-all">
+                          {blog.featuredImage.publicUrl}
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -306,10 +379,10 @@ export function BlogDetailModal({ blog, isOpen, onClose }: BlogDetailModalProps)
                     </div>
                     <div>
                       <div className="text-[12px] font-bold text-[var(--fg)]">
-                        {numericQuality >= 90 ? "Passed Quality Gate" : numericQuality > 0 ? "Needs Review" : "Not evaluated"}
+                        {blog.qualityReport?.recommendation || (numericQuality >= 90 ? "Passed Quality Gate" : numericQuality > 0 ? "Needs Review" : "Not evaluated")}
                       </div>
                       <div className="text-[10.5px] text-[var(--mut)]">
-                        Threshold {" >= "} 90 · {qualityChecks.length} checks available
+                        Threshold {" >= "} 90 · {qualityChecks.length} QA parameters
                       </div>
                     </div>
                   </div>
@@ -325,6 +398,11 @@ export function BlogDetailModal({ blog, isOpen, onClose }: BlogDetailModalProps)
                       <div className="h-[5px] rounded-[3px] bg-[var(--card2)] overflow-hidden">
                         <div className="h-full rounded-[3px]" style={{ width: q.pct, background: q.color }} />
                       </div>
+                      {q.notes && q.notes.length > 0 && (
+                        <div className="mt-[4px] text-[10px] text-[var(--faint)] leading-snug">
+                          {q.notes.slice(0, 2).join(" · ")}
+                        </div>
+                      )}
                     </div>
                   )) : (
                     <div className="p-[24px_12px] text-center text-[12px] text-[var(--mut)]">
@@ -371,13 +449,31 @@ export function BlogDetailModal({ blog, isOpen, onClose }: BlogDetailModalProps)
 
               {activeTab === "timeline" && (
                 <div className="flex flex-col gap-[8px] font-mono text-[11px]">
+                  {blog.workflow && (
+                    <div className="p-[8px] rounded-[8px] bg-[var(--card2)] border border-[var(--bd)]">
+                      <div className="flex items-center justify-between text-[10px] font-bold">
+                        <span className="text-[var(--fg)]">Workflow {blog.workflow.status}</span>
+                        <span className="text-[var(--faint)]">{blog.workflow.currentStage}</span>
+                      </div>
+                      {blog.workflow.failureReason && (
+                        <div className="mt-[5px] text-[var(--rose)] whitespace-pre-wrap">
+                          {blog.workflow.failureReason}
+                        </div>
+                      )}
+                    </div>
+                  )}
                   {timeline.length > 0 ? timeline.map((row, i) => (
                     <div key={i} className="p-[6px_8px] rounded-[6px] bg-[var(--card2)] border border-[var(--bd)] flex flex-col gap-[2px]">
                       <div className="flex items-center justify-between text-[10px] text-[var(--indigo)] font-bold">
                         <span>{row.worker}</span>
                         <span className="text-[var(--faint)]">{row.time}</span>
                       </div>
-                      <div className="text-[var(--fg2)]">{row.msg}</div>
+                      <div className="text-[var(--fg2)]">
+                        {row.status ? `${row.status}: ` : ""}{row.msg}
+                      </div>
+                      {row.error && (
+                        <div className="text-[var(--rose)] whitespace-pre-wrap">{row.error}</div>
+                      )}
                     </div>
                   )) : (
                     <div className="p-[24px_12px] text-center text-[12px] text-[var(--mut)]">
