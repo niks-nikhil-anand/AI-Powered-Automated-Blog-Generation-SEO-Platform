@@ -12,6 +12,7 @@
     "worker:planning": "tsx workers/planning-worker/index.ts",
     "worker:outline": "tsx workers/outline-worker/index.ts",
     "worker:writing": "tsx workers/writing-worker/index.ts",
+    "worker:image": "tsx workers/image-worker/index.ts",
     "worker:dev": "tsx workers/start.ts"
   },
   "dependencies": {

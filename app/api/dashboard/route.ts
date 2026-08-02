@@ -130,7 +130,7 @@ export async function GET() {
     prisma.blog.findMany({
       orderBy: { updatedAt: "desc" },
       take: 50,
-      include: { category: true, seo: true },
+      include: { category: true, seo: true, featuredImage: true },
     }),
     prisma.blog.count(),
     prisma.blog.count({ where: { status: "PUBLISHED" } }),
@@ -175,6 +175,19 @@ export async function GET() {
       metaDescription: blog.seo?.metaDescription,
       keywords: Array.isArray(blog.seo?.keywords) ? blog.seo?.keywords : [],
       schema: blog.seo?.schema ? JSON.stringify(blog.seo.schema, null, 2) : undefined,
+      featuredImage: blog.featuredImage
+        ? {
+            id: blog.featuredImage.id,
+            name: blog.featuredImage.fileName,
+            bucket: blog.featuredImage.bucket,
+            path: blog.featuredImage.path,
+            publicUrl: blog.featuredImage.publicUrl,
+            mimeType: blog.featuredImage.mimeType,
+            width: blog.featuredImage.width,
+            height: blog.featuredImage.height,
+            size: blog.featuredImage.size,
+          }
+        : undefined,
     };
   });
 
@@ -296,6 +309,7 @@ export async function GET() {
       { name: "planning_queue", completed: plansCount, active: 0, waiting: trends.filter((row) => row.status === "PLANNED").length, failed: 0 },
       { name: "outline_queue", completed: outlinesCount, active: 0, waiting: Math.max(0, plansCount - outlinesCount), failed: 0 },
       { name: "writing_queue", completed: blogCount, active: 0, waiting: Math.max(0, outlinesCount - blogCount), failed: failedCount },
+      { name: "image_queue", completed: assets.length, active: 0, waiting: Math.max(0, blogCount - assets.length), failed: 0 },
     ].map((queue) => ({
       ...queue,
       waiting: String(queue.waiting),
