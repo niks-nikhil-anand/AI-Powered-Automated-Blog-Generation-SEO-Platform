@@ -157,16 +157,23 @@ model Trend {
   updatedAt DateTime    @updatedAt
 }
 
-model Job {
-  id        String    @id @default(cuid())
-  queue     String
-  status    JobStatus @default(PENDING)
-  attempts  Int       @default(0)
-  payload   Json
-  result    Json?
-  error     String?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+/// Persisted Winston output. Written by the buffered PrismaTransport in
+/// workers/shared/log-transport.ts; pruned to LOG_RETENTION_DAYS.
+model LogEntry {
+  id            String   @id @default(cuid())
+  timestamp     DateTime @default(now())
+  level         String
+  worker        String?
+  message       String
+  stack         String?
+  meta          Json?
+  workflowRunId String?
+  trendId       String?
+  blogId        String?
+
+  @@index([timestamp])
+  @@index([level, timestamp])
+  @@index([worker, timestamp])
 }
 
 model WorkflowRun {
