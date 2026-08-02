@@ -1,6 +1,6 @@
-import { VertexAI } from "@google-cloud/vertexai";
 import { env, isVertexConfigured } from "../shared/env";
 import { logger } from "../shared/logger";
+import { generateVertexText, slugify } from "../shared/vertex";
 
 const log = logger.child({ worker: "writing-worker" });
 
@@ -15,61 +15,62 @@ export type BlogDraft = {
   usage: { promptTokens: number; completionTokens: number };
 };
 
-function slugify(input: string): string {
-  return input
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "")
-    .slice(0, 80);
-}
+export type WritingContext = {
+  plan?: {
+    searchIntent: string;
+    audience: string;
+    angle: string;
+    primaryKeyword: string;
+    secondaryKeywords: unknown;
+    competitorNotes: unknown;
+  };
+  outline?: {
+    title: string;
+    metaTitle: string;
+    metaDescription: string;
+    sections: unknown;
+    faqs: unknown;
+  };
+};
 
-function buildPrompt(topic: string, description: string): string {
-  // Blueprint adapted from prompts/04-writing-worker-prompt.md, collapsed
-  // into a single planning+writing pass since the planning/outline
-  // workers aren't built yet (MVP scope).
+function buildPrompt(topic: string, description: string, context: WritingContext = {}): string {
   return `You are a Staff Technical Writer for DevKit Market, a developer-focused tech blog.
 
-Write a ${env.BLOG_MIN_WORDS}-${env.BLOG_MAX_WORDS} word technical blog post about: "${topic}"
+Write a ${env.BLOG_MIN_WORDS}-${env.BLOG_MAX_WORDS} word technical blog post in GitHub Flavored Markdown.
+
+Topic: "${topic}"
 Context: ${description || "No additional context provided."}
+Content plan:
+${context.plan ? JSON.stringify(context.plan, null, 2) : "No separate content plan provided."}
+
+Approved outline:
+${context.outline ? JSON.stringify(context.outline, null, 2) : "No separate outline provided."}
 
 Guidelines:
 1. Tone: technical, practical, zero fluff.
-2. Include at least one Markdown comparison table or code snippet where relevant.
-3. Use proper GitHub Flavored Markdown (H2/H3 headings, lists, bold).
-4. End with a short FAQ section and a one-paragraph conclusion.
+2. Follow the approved outline when provided.
+3. Include at least one Markdown comparison table or code snippet where relevant.
+4. Use proper GitHub Flavored Markdown (H2/H3 headings, lists, bold).
+5. End with a short FAQ section and a one-paragraph conclusion.
+6. Do not invent unsupported facts. Use cautious wording when evidence is incomplete.
 
-Respond with ONLY a JSON object (no markdown code fences, no commentary) with these exact keys:
-{
-  "title": "SEO-friendly title, under 70 characters",
-  "excerpt": "150-200 character summary",
-  "metaTitle": "under 60 characters",
-  "metaDescription": "under 160 characters",
-  "keywords": ["3-6 lowercase keyword strings"],
-  "markdown": "the full article body in GitHub Flavored Markdown"
-}`;
-}
-
-/** Extracts a JSON object from a model response, tolerating ```json fences. */
-function extractJson(text: string): any {
-  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  const candidate = fenced ? fenced[1] : text;
-  return JSON.parse(candidate.trim());
+Respond with ONLY the article body as Markdown. Do not return JSON. Do not wrap the whole article in a code fence.`;
 }
 
 let warnedMock = false;
 
-async function generateMock(topic: string, description: string): Promise<BlogDraft> {
+async function generateMock(topic: string, description: string, context: WritingContext = {}): Promise<BlogDraft> {
   if (!warnedMock) {
     log.warn(
-      "GOOGLE_CLOUD_PROJECT / GOOGLE_APPLICATION_CREDENTIALS not set - using local writer fallback. Set both in .env to call real Vertex AI."
+      "Vertex AI is not configured - using local writer fallback. Set GOOGLE_CLOUD_PROJECT and VERTEX_LOCATION, and authenticate with GOOGLE_APPLICATION_CREDENTIALS or ADC."
     );
     warnedMock = true;
   }
 
-  const title = topic;
+  const title = context.outline?.title ?? topic;
   const markdown = `## Draft unavailable\n\nWriter credentials are not configured for this environment.${
     description ? `\n\nTopic note: ${description}` : ""
-  }\n\nSet \`GOOGLE_CLOUD_PROJECT\` and \`GOOGLE_APPLICATION_CREDENTIALS\` in \`.env\` to generate a full ${env.BLOG_MIN_WORDS}-${env.BLOG_MAX_WORDS} word article.`;
+  }\n\nSet \`GOOGLE_CLOUD_PROJECT\`, \`VERTEX_LOCATION\`, and \`GOOGLE_APPLICATION_CREDENTIALS\` in \`.env\` to generate a full ${env.BLOG_MIN_WORDS}-${env.BLOG_MAX_WORDS} word article with Vertex AI.`;
 
   return {
     title,
@@ -83,40 +84,37 @@ async function generateMock(topic: string, description: string): Promise<BlogDra
   };
 }
 
-async function generateWithVertex(topic: string, description: string): Promise<BlogDraft> {
-  const vertex = new VertexAI({
-    project: env.GOOGLE_CLOUD_PROJECT!,
-    location: env.VERTEX_LOCATION,
-  });
-  const model = vertex.getGenerativeModel({ model: env.VERTEX_MODEL });
-
-  const prompt = buildPrompt(topic, description);
-  const result = await model.generateContent({
-    contents: [{ role: "user", parts: [{ text: prompt }] }],
+async function generateWithVertex(topic: string, description: string, context: WritingContext = {}): Promise<BlogDraft> {
+  const prompt = buildPrompt(topic, description, context);
+  const result = await generateVertexText(env.VERTEX_MODEL, prompt, {
+    maxOutputTokens: 8192,
+    temperature: 0.35,
   });
 
-  const text = result.response.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) throw new Error("Vertex AI returned no text in response");
+  const title = context.outline?.title ?? topic;
+  const keywords = [
+    context.plan?.primaryKeyword,
+    ...(Array.isArray(context.plan?.secondaryKeywords) ? context.plan.secondaryKeywords.map(String) : []),
+  ].filter(Boolean) as string[];
 
-  const parsed = extractJson(text);
-  const usage = result.response.usageMetadata;
-
-  const title = String(parsed.title ?? topic);
   return {
     title,
     slug: slugify(title),
-    excerpt: String(parsed.excerpt ?? ""),
-    metaTitle: String(parsed.metaTitle ?? title).slice(0, 60),
-    metaDescription: String(parsed.metaDescription ?? "").slice(0, 160),
-    keywords: Array.isArray(parsed.keywords) ? parsed.keywords.map(String) : [],
-    markdown: String(parsed.markdown ?? ""),
-    usage: {
-      promptTokens: usage?.promptTokenCount ?? 0,
-      completionTokens: usage?.candidatesTokenCount ?? 0,
-    },
+    excerpt: (context.outline?.metaDescription || `Technical guide to ${topic}`).slice(0, 200),
+    metaTitle: (context.outline?.metaTitle || title).slice(0, 60),
+    metaDescription: (context.outline?.metaDescription || `Technical guide to ${topic}`).slice(0, 160),
+    keywords: keywords.length > 0 ? keywords.slice(0, 8) : [topic.toLowerCase()],
+    markdown: result.text,
+    usage: result.usage,
   };
 }
 
-export async function generateBlogDraft(topic: string, description: string): Promise<BlogDraft> {
-  return isVertexConfigured ? generateWithVertex(topic, description) : generateMock(topic, description);
+export async function generateBlogDraft(
+  topic: string,
+  description: string,
+  context: WritingContext = {}
+): Promise<BlogDraft> {
+  return isVertexConfigured
+    ? generateWithVertex(topic, description, context)
+    : generateMock(topic, description, context);
 }
