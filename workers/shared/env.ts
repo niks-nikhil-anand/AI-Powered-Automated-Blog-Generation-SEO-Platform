@@ -55,6 +55,14 @@ export const env = {
   BLOG_MIN_WORDS: Number(optional("BLOG_MIN_WORDS", "1200")),
   BLOG_MAX_WORDS: Number(optional("BLOG_MAX_WORDS", "2000")),
 
+  // Image worker / AWS S3
+  AWS_REGION: optional("AWS_REGION", "us-east-1"),
+  AWS_ACCESS_KEY_ID: required("AWS_ACCESS_KEY_ID"),
+  AWS_SECRET_ACCESS_KEY: required("AWS_SECRET_ACCESS_KEY"),
+  AWS_SESSION_TOKEN: required("AWS_SESSION_TOKEN"),
+  AWS_S3_BUCKET: required("AWS_S3_BUCKET"),
+  AWS_S3_PUBLIC_BASE_URL: required("AWS_S3_PUBLIC_BASE_URL"),
+
   LOG_LEVEL: optional("LOG_LEVEL", "info"),
 };
 
@@ -64,3 +72,5 @@ export const env = {
  * GOOGLE_APPLICATION_CREDENTIALS or `gcloud auth application-default login`.
  */
 export const isVertexConfigured = Boolean(env.GOOGLE_CLOUD_PROJECT && env.VERTEX_LOCATION);
+
+export const isS3Configured = Boolean(env.AWS_ACCESS_KEY_ID && env.AWS_SECRET_ACCESS_KEY && env.AWS_S3_BUCKET);

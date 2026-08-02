@@ -1,6 +1,6 @@
 import { Worker } from "bullmq";
 import { marked } from "marked";
-import { QUEUE_NAMES, type WritingJobPayload } from "../shared/queues";
+import { imageQueue, QUEUE_NAMES, type WritingJobPayload } from "../shared/queues";
 import { prisma } from "../shared/prisma";
 import { generateBlogDraft } from "./vertex";
 import { logger } from "../shared/logger";
@@ -113,6 +113,14 @@ async function generateBlogForTrend(trendId: string, topic: string, description:
   });
 
   await prisma.trend.update({ where: { id: trendId }, data: { status: "PROCESSED" } });
+  await imageQueue.add("generate_blog_image", {
+    blogId: blog.id,
+    trendId,
+    title: blog.title,
+    slug: blog.slug,
+    category: category.name,
+    excerpt: draft.excerpt,
+  });
 
   log.info(`Blog created: ${blog.slug}`, { blogId: blog.id, score });
   return { blogId: blog.id, slug: blog.slug, score };
