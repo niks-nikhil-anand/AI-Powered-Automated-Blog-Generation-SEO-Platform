@@ -5,6 +5,7 @@ import { logger } from "../shared/logger";
 import { env } from "../shared/env";
 import { generateContentPlan } from "./vertex";
 import { workerOptions } from "../shared/worker-options";
+import { recordAIUsage } from "../shared/pricing";
 import {
   assertGate,
   failWorkerAttempt,
@@ -41,12 +42,14 @@ async function planTopic(payload: PlanningJobPayload) {
   }
 
   try {
+    const startedAt = Date.now();
     const { plan, usage, model } = await generateContentPlan(
       payload.topic,
       payload.category,
       payload.score,
       payload.evidenceSummary
     );
+    const latencyMs = Date.now() - startedAt;
     const gate = scoreRequiredFields("planning-worker", [
       { label: "search intent", ok: Boolean(plan.searchIntent) },
       { label: "audience", ok: Boolean(plan.audience) },
@@ -80,15 +83,12 @@ async function planTopic(payload: PlanningJobPayload) {
       },
     });
 
-    await prisma.aIUsage.create({
-      data: {
-        worker: "planning-worker",
-        model,
-        promptTokens: usage.promptTokens,
-        completionTokens: usage.completionTokens,
-        cost: 0,
-        latency: 0,
-      },
+    await recordAIUsage({
+      worker: "planning-worker",
+      model,
+      usage,
+      latencyMs,
+      trendId: payload.trendId,
     });
 
     await outlineQueue.add("outline_blog", { trendId: payload.trendId, planId: saved.id });
