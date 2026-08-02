@@ -1,65 +1,122 @@
 import { Worker } from "bullmq";
 import { prisma } from "../shared/prisma";
 import { logger } from "../shared/logger";
+import { env } from "../shared/env";
 import { QUEUE_NAMES, type OutlineJobPayload, writingQueue } from "../shared/queues";
 import { generateContentOutline } from "./vertex";
 import { workerOptions } from "../shared/worker-options";
+import {
+  assertGate,
+  failWorkerAttempt,
+  passWorkerAttempt,
+  scoreRequiredFields,
+  startWorkerAttempt,
+  QualityGateError,
+} from "../shared/recovery";
 
 const log = logger.child({ worker: "outline-worker" });
 
 async function outlineTopic(payload: OutlineJobPayload) {
+  const attempt = await startWorkerAttempt({
+    worker: "outline-worker",
+    trendId: payload.trendId,
+    input: payload,
+  });
   const plan = await prisma.contentPlan.findUnique({
     where: { id: payload.planId },
     include: { trend: true },
   });
   if (!plan) throw new Error(`ContentPlan ${payload.planId} not found`);
+  if (plan.trend.score < env.RESEARCH_MIN_SCORE_TO_WRITE) {
+    log.info(`Skipping writing for "${plan.trend.topic}" because score ${Math.round(plan.trend.score)} is below ${env.RESEARCH_MIN_SCORE_TO_WRITE}`, {
+      trendId: plan.trend.id,
+      score: plan.trend.score,
+    });
+    const output = { trendId: plan.trend.id, skipped: true, reason: "score_below_write_threshold" };
+    await passWorkerAttempt({
+      workflowRunId: attempt.workflow.id,
+      attemptId: attempt.attempt.id,
+      output,
+      nextStage: "stopped",
+    });
+    return output;
+  }
 
-  const { outline, usage, model } = await generateContentOutline(plan.trend.topic, plan.trend.category, plan);
-  const saved = await prisma.contentOutline.upsert({
-    where: { trendId: payload.trendId },
-    create: {
+  try {
+    const { outline, usage, model } = await generateContentOutline(plan.trend.topic, plan.trend.category, plan);
+    const sections = Array.isArray(outline.sections) ? outline.sections : [];
+    const faqs = Array.isArray(outline.faqs) ? outline.faqs : [];
+    const gate = scoreRequiredFields("outline-worker", [
+      { label: "title", ok: Boolean(outline.title) },
+      { label: "slug", ok: Boolean(outline.slug) },
+      { label: "meta title", ok: Boolean(outline.metaTitle) },
+      { label: "meta description", ok: Boolean(outline.metaDescription) },
+      { label: "H2/H3 sections", ok: sections.length >= 6 },
+      { label: "FAQs", ok: faqs.length >= 3 },
+    ]);
+    assertGate(gate);
+
+    const saved = await prisma.contentOutline.upsert({
+      where: { trendId: payload.trendId },
+      create: {
+        trendId: payload.trendId,
+        planId: plan.id,
+        title: outline.title,
+        slug: outline.slug,
+        metaTitle: outline.metaTitle,
+        metaDescription: outline.metaDescription,
+        sections: outline.sections,
+        faqs: outline.faqs,
+      },
+      update: {
+        title: outline.title,
+        slug: outline.slug,
+        metaTitle: outline.metaTitle,
+        metaDescription: outline.metaDescription,
+        sections: outline.sections,
+        faqs: outline.faqs,
+      },
+    });
+
+    await prisma.aIUsage.create({
+      data: {
+        worker: "outline-worker",
+        model,
+        promptTokens: usage.promptTokens,
+        completionTokens: usage.completionTokens,
+        cost: 0,
+        latency: 0,
+      },
+    });
+
+    await writingQueue.add("write_blog", {
       trendId: payload.trendId,
-      planId: plan.id,
-      title: outline.title,
-      slug: outline.slug,
-      metaTitle: outline.metaTitle,
-      metaDescription: outline.metaDescription,
-      sections: outline.sections,
-      faqs: outline.faqs,
-    },
-    update: {
-      title: outline.title,
-      slug: outline.slug,
-      metaTitle: outline.metaTitle,
-      metaDescription: outline.metaDescription,
-      sections: outline.sections,
-      faqs: outline.faqs,
-    },
-  });
+      outlineId: saved.id,
+      topic: saved.title,
+      description: plan.angle,
+    });
+    await passWorkerAttempt({
+      workflowRunId: attempt.workflow.id,
+      attemptId: attempt.attempt.id,
+      output: { trendId: plan.trend.id, outlineId: saved.id },
+      qualityReport: gate,
+      nextStage: "writing-worker",
+    });
 
-  await prisma.aIUsage.create({
-    data: {
-      worker: "outline-worker",
-      model,
-      promptTokens: usage.promptTokens,
-      completionTokens: usage.completionTokens,
-      cost: 0,
-      latency: 0,
-    },
-  });
-
-  await writingQueue.add("write_blog", {
-    trendId: payload.trendId,
-    outlineId: saved.id,
-    topic: saved.title,
-    description: plan.angle,
-  });
-
-  log.info(`Content outline saved for "${plan.trend.topic}"`, {
-    trendId: plan.trend.id,
-    outlineId: saved.id,
-  });
-  return { trendId: plan.trend.id, outlineId: saved.id };
+    log.info(`Content outline saved for "${plan.trend.topic}"`, {
+      trendId: plan.trend.id,
+      outlineId: saved.id,
+    });
+    return { trendId: plan.trend.id, outlineId: saved.id };
+  } catch (err) {
+    await failWorkerAttempt({
+      workflowRunId: attempt.workflow.id,
+      attemptId: attempt.attempt.id,
+      error: err,
+      qualityReport: err instanceof QualityGateError ? err.report : undefined,
+    });
+    throw err;
+  }
 }
 
 export function startOutlineWorker() {

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { useTheme } from "./ThemeProvider";
 
@@ -15,6 +15,31 @@ export function Navbar({ onOpenCmdk, onRunNow }: NavbarProps) {
   const [notifOpen, setNotifOpen] = useState(false);
   const [runState, setRunState] = useState<"idle" | "running" | "queued" | "error">("idle");
   const [runMessage, setRunMessage] = useState("");
+  const [pipeline, setPipeline] = useState({
+    active: 0,
+    waiting: 0,
+    delayed: 0,
+    failed: 0,
+    state: "idle",
+  });
+
+  useEffect(() => {
+    let mounted = true;
+    const loadPipeline = () => {
+      fetch("/api/dashboard", { cache: "no-store" })
+        .then((res) => res.json())
+        .then((data) => {
+          if (mounted && data.pipeline) setPipeline(data.pipeline);
+        })
+        .catch(() => { });
+    };
+    loadPipeline();
+    const timer = window.setInterval(loadPipeline, 3000);
+    return () => {
+      mounted = false;
+      window.clearInterval(timer);
+    };
+  }, []);
 
   const getBreadcrumb = () => {
     switch (pathname) {
@@ -67,6 +92,31 @@ export function Navbar({ onOpenCmdk, onRunNow }: NavbarProps) {
       setRunMessage(err instanceof Error ? err.message : "Failed to queue research run");
     }
   };
+  const liveBacklog = pipeline.waiting + pipeline.delayed;
+  const pillState =
+    runState === "running" || pipeline.active > 0
+      ? "running"
+      : runState === "queued" || liveBacklog > 0
+        ? "queued"
+        : runState === "error" || pipeline.failed > 0
+          ? "error"
+          : "idle";
+  const pillLabel =
+    pillState === "running"
+      ? "Pipeline Running"
+      : pillState === "queued"
+        ? "Pipeline Queued"
+        : pillState === "error"
+          ? "Pipeline Issues"
+          : "Pipeline Idle";
+  const pillCount =
+    pillState === "running"
+      ? `${pipeline.active || 1} active`
+      : pillState === "queued"
+        ? `${liveBacklog || 1} queued`
+        : pillState === "error"
+          ? `${pipeline.failed || 1} failed`
+          : "0 active";
 
   return (
     <header className="sticky top-0 z-40 h-[56px] flex-none flex items-center gap-[12px] px-[18px] border-b border-[var(--bd)] bg-[var(--glass)] backdrop-blur-md">
@@ -102,22 +152,26 @@ export function Navbar({ onOpenCmdk, onRunNow }: NavbarProps) {
       <div className="ml-auto flex items-center gap-[9px]">
         {/* Pipeline Status Pill */}
         <div className={`flex items-center gap-[7px] h-[28px] px-[10px] rounded-full border ${
-          runState === "error"
+          pillState === "error"
             ? "border-[rgba(244,63,94,0.3)] bg-[rgba(244,63,94,0.10)]"
-            : "border-[rgba(16,185,129,0.3)] bg-[rgba(16,185,129,0.10)]"
+            : pillState === "queued"
+              ? "border-[rgba(245,158,11,0.35)] bg-[rgba(245,158,11,0.10)]"
+              : pillState === "running"
+                ? "border-[rgba(99,102,241,0.35)] bg-[rgba(99,102,241,0.10)]"
+                : "border-[rgba(16,185,129,0.3)] bg-[rgba(16,185,129,0.10)]"
         }`}>
           <span className={`w-[6px] h-[6px] rounded-full ${
-            runState === "error" ? "bg-[var(--rose)]" : "bg-[var(--emerald)]"
-          } ${runState === "running" ? "animate-dkpulse" : ""}`} />
+            pillState === "error" ? "bg-[var(--rose)]" : pillState === "queued" ? "bg-[var(--amber)]" : pillState === "running" ? "bg-[var(--indigo)]" : "bg-[var(--emerald)]"
+          } ${pillState === "running" ? "animate-dkpulse" : ""}`} />
           <span className={`text-[11px] font-semibold whitespace-nowrap ${
-            runState === "error" ? "text-[var(--rose)]" : "text-[var(--emerald)]"
+            pillState === "error" ? "text-[var(--rose)]" : pillState === "queued" ? "text-[var(--amber)]" : pillState === "running" ? "text-[var(--indigo)]" : "text-[var(--emerald)]"
           }`}>
-            {runState === "running" ? "Queueing Run" : runState === "queued" ? "Run Queued" : runState === "error" ? "Run Failed" : "Pipeline Idle"}
+            {pillLabel}
           </span>
           <span className={`font-mono text-[10px] font-medium opacity-80 ${
-            runState === "error" ? "text-[var(--rose)]" : "text-[var(--emerald)]"
+            pillState === "error" ? "text-[var(--rose)]" : pillState === "queued" ? "text-[var(--amber)]" : pillState === "running" ? "text-[var(--indigo)]" : "text-[var(--emerald)]"
           }`}>
-            {runState === "queued" ? "1 queued" : "0 active"}
+            {pillCount}
           </span>
         </div>
         {runMessage && (
