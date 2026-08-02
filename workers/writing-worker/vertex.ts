@@ -48,13 +48,96 @@ ${context.outline ? JSON.stringify(context.outline, null, 2) : "No separate outl
 
 Guidelines:
 1. Tone: technical, practical, zero fluff.
-2. Follow the approved outline when provided.
-3. Include at least one Markdown comparison table or code snippet where relevant.
-4. Use proper GitHub Flavored Markdown (H2/H3 headings, lists, bold).
-5. End with a short FAQ section and a one-paragraph conclusion.
+2. Use the approved outline as factual/source context, but reshape the final article into the mandatory structure below.
+3. Include a short Table of Contents when the article is longer than 1,200 words.
+4. Include at least one Markdown comparison table in Pros and Cons.
+5. Use proper GitHub Flavored Markdown.
 6. Do not invent unsupported facts. Use cautious wording when evidence is incomplete.
+7. The Call To Action should be short, practical, and related to DevKit Market.
+
+Mandatory Markdown structure:
+# [SEO-friendly title]
+
+[Introduction: 2-4 paragraphs that explain the topic, reader problem, and practical value.]
+
+## Table of Contents
+[Optional. Include only when useful. Use anchor-style Markdown links.]
+
+## What is [topic]?
+[Clear definition and context.]
+
+## Why it matters
+[Explain developer/business/security/ecosystem impact.]
+
+## Key Features
+### [Feature 1]
+### [Feature 2]
+### [Feature 3]
+
+## Benefits
+### [Benefit 1]
+### [Benefit 2]
+
+## How it Works
+### Step 1: [Name]
+### Step 2: [Name]
+### Step 3: [Name]
+### Step 4: [Name]
+
+## Real World Use Cases
+### [Use Case 1]
+### [Use Case 2]
+### [Use Case 3]
+
+## Pros and Cons
+[Use a Markdown table.]
+
+## Best Practices
+[Practical checklist or guidance.]
+
+## Common Mistakes
+[Mistakes and how to avoid them.]
+
+## FAQs
+[4-6 H3 questions with concise answers.]
+
+## Conclusion
+[Summarize the practical takeaway.]
+
+## Call To Action
+[One short CTA paragraph.]
+
+Heading rules:
+- Use exactly one H1: the first line must start with "# ".
+- Never use "# " again after the first line. All main sections must use "## ". Subsections must use "### ".
+- Use the H2 labels above exactly, except "[topic]" and bracketed placeholders should be replaced naturally.
+- Use H3 only under Key Features, Benefits, How it Works, Real World Use Cases, and FAQs.
+- Every H3 must have at least one useful paragraph under it.
 
 Respond with ONLY the article body as Markdown. Do not return JSON. Do not wrap the whole article in a code fence.`;
+}
+
+function enforceSingleH1(markdown: string, title: string): string {
+  const lines = markdown.trim().split("\n");
+  let seenH1 = false;
+  const normalized = lines.map((line, index) => {
+    if (!line.startsWith("# ")) return line;
+    if (!seenH1 && index === 0) {
+      seenH1 = true;
+      return line;
+    }
+    if (!seenH1) {
+      seenH1 = true;
+      return line;
+    }
+    return `## ${line.slice(2).trim()}`;
+  });
+
+  if (!seenH1) {
+    return `# ${title}\n\n${normalized.join("\n").trim()}`;
+  }
+
+  return normalized.join("\n").trim();
 }
 
 let warnedMock = false;
@@ -104,7 +187,7 @@ async function generateWithVertex(topic: string, description: string, context: W
     metaTitle: (context.outline?.metaTitle || title).slice(0, 60),
     metaDescription: (context.outline?.metaDescription || `Technical guide to ${topic}`).slice(0, 160),
     keywords: keywords.length > 0 ? keywords.slice(0, 8) : [topic.toLowerCase()],
-    markdown: result.text,
+    markdown: enforceSingleH1(result.text, title),
     usage: result.usage,
   };
 }
