@@ -13,10 +13,23 @@ export default function BlogManagementPage() {
   const [detailOpen, setDetailOpen] = useState(false);
 
   useEffect(() => {
-    fetch("/api/dashboard")
-      .then((res) => res.json())
-      .then((data) => setBlogRows(data.blogs ?? []))
-      .catch(() => setBlogRows([]));
+    let mounted = true;
+    const loadBlogs = () => {
+      fetch("/api/dashboard", { cache: "no-store" })
+        .then((res) => res.json())
+        .then((data) => {
+          if (mounted) setBlogRows(data.blogRows ?? data.blogs ?? []);
+        })
+        .catch(() => {
+          if (mounted) setBlogRows([]);
+        });
+    };
+    loadBlogs();
+    const timer = window.setInterval(loadBlogs, 5000);
+    return () => {
+      mounted = false;
+      window.clearInterval(timer);
+    };
   }, []);
 
   const blogTabs = [
@@ -30,7 +43,7 @@ export default function BlogManagementPage() {
 
   const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.checked) {
-      setSelectedIds(blogRows.map((r) => r.id!));
+      setSelectedIds(filteredRows.map((r) => r.id!));
     } else {
       setSelectedIds([]);
     }
@@ -52,7 +65,8 @@ export default function BlogManagementPage() {
   const filteredRows = blogRows.filter((row) => {
     const matchesSearch =
       row.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      row.slug.toLowerCase().includes(searchQuery.toLowerCase());
+      row.slug.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (row.keywords ?? []).some((keyword) => keyword.toLowerCase().includes(searchQuery.toLowerCase()));
     const matchesCat = categoryFilter === "All categories" || row.cat === categoryFilter;
     const matchesTab =
       activeTab === "all" ||
@@ -169,7 +183,7 @@ export default function BlogManagementPage() {
                   <input
                     type="checkbox"
                     aria-label="Select all rows"
-                    checked={selectedIds.length === blogRows.length}
+                    checked={filteredRows.length > 0 && selectedIds.length === filteredRows.length}
                     onChange={handleSelectAll}
                   />
                 </th>

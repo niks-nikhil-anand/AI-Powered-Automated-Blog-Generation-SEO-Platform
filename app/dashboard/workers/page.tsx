@@ -31,16 +31,27 @@ export default function WorkersPage() {
   }[]>([]);
 
   useEffect(() => {
-    fetch("/api/dashboard")
-      .then((res) => res.json())
-      .then((data) => {
-        setQueues(data.queues ?? []);
-        setJobs(data.jobs ?? []);
-      })
-      .catch(() => {
-        setQueues([]);
-        setJobs([]);
-      });
+    let mounted = true;
+    const loadWorkers = () => {
+      fetch("/api/dashboard", { cache: "no-store" })
+        .then((res) => res.json())
+        .then((data) => {
+          if (!mounted) return;
+          setQueues(data.queues ?? []);
+          setJobs(data.jobs ?? []);
+        })
+        .catch(() => {
+          if (!mounted) return;
+          setQueues([]);
+          setJobs([]);
+        });
+    };
+    loadWorkers();
+    const timer = window.setInterval(loadWorkers, 3000);
+    return () => {
+      mounted = false;
+      window.clearInterval(timer);
+    };
   }, []);
 
   return (
