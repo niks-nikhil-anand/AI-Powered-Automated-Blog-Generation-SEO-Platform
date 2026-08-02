@@ -13,6 +13,7 @@ export const QUEUE_NAMES = {
   planning: "planning_queue",
   outline: "outline_queue",
   writing: "writing_queue",
+  image: "image_queue",
 } as const;
 
 export const researchQueue = new Queue(QUEUE_NAMES.research, {
@@ -55,6 +56,16 @@ export const writingQueue = new Queue(QUEUE_NAMES.writing, {
   },
 });
 
+export const imageQueue = new Queue(QUEUE_NAMES.image, {
+  connection: createRedisConnection(),
+  defaultJobOptions: {
+    attempts: 3,
+    backoff: { type: "exponential", delay: 15000 },
+    removeOnComplete: { count: 200 },
+    removeOnFail: { count: 500 },
+  },
+});
+
 export type PlanningJobPayload = {
   trendId: string;
   topic: string;
@@ -73,4 +84,13 @@ export type WritingJobPayload = {
   outlineId?: string;
   topic: string;
   description: string;
+};
+
+export type ImageJobPayload = {
+  blogId: string;
+  trendId?: string;
+  title: string;
+  slug: string;
+  category: string;
+  excerpt?: string;
 };
