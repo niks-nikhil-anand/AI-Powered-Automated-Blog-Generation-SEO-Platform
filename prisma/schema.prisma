@@ -71,6 +71,7 @@ model Blog {
   featuredImage   Asset?     @relation("FeaturedImage", fields: [featuredImageId], references: [id])
   seo             BlogSEO?
   qualityReport   QualityReport?
+  aiUsage         AIUsage[]
   createdAt       DateTime   @default(now())
   updatedAt       DateTime   @updatedAt
 }
@@ -201,9 +202,19 @@ model AIUsage {
   id               String   @id @default(cuid())
   worker           String
   model            String
+  blogId           String?
+  blog             Blog?    @relation(fields: [blogId], references: [id], onDelete: SetNull)
+  trendId          String?
   promptTokens     Int
   completionTokens Int
+  /** USD, computed from MODEL_PRICING at write time. */
   cost             Float
+  /** Round-trip latency of the model call, in milliseconds. */
   latency          Int
   createdAt        DateTime @default(now())
+
+  @@index([blogId])
+  @@index([createdAt])
+  @@index([worker, createdAt])
+  @@index([model, createdAt])
 }

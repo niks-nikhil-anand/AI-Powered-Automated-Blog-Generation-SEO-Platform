@@ -18,6 +18,48 @@ function startOfToday() {
   return date;
 }
 
+function startOfDayOffset(daysAgo: number) {
+  const date = new Date();
+  date.setHours(0, 0, 0, 0);
+  date.setDate(date.getDate() - daysAgo);
+  return date;
+}
+
+function formatUsd(value: number) {
+  if (value === 0) return "$0.00";
+  if (value < 0.01) return `$${value.toFixed(4)}`;
+  return `$${value.toFixed(2)}`;
+}
+
+function compactNumber(value: number) {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`;
+  return String(value);
+}
+
+const MODEL_COLORS: Record<string, string> = {
+  "gemini-2.5-pro": "var(--indigo)",
+  "gemini-2.5-flash": "var(--emerald)",
+  "gemini-2.5-flash-lite": "var(--sky)",
+  "gemini-2.0-flash": "var(--sky)",
+  fallback: "var(--mut)",
+};
+
+function modelColor(model: string) {
+  const key = Object.keys(MODEL_COLORS).find((candidate) => model.toLowerCase().startsWith(candidate));
+  return key ? MODEL_COLORS[key] : "var(--amber)";
+}
+
+const WORKER_COLORS: Record<string, string> = {
+  "research-worker": "var(--emerald)",
+  "planning-worker": "var(--indigo)",
+  "outline-worker": "var(--sky)",
+  "writing-worker": "var(--amber)",
+  "image-worker": "var(--rose)",
+  "quality-worker": "var(--mut)",
+  "publish-worker": "var(--emerald)",
+};
+
 function formatAgo(date: Date) {
   const seconds = Math.max(0, Math.floor((Date.now() - date.getTime()) / 1000));
   if (seconds < 60) return `${seconds}s ago`;
@@ -213,7 +255,10 @@ export async function GET() {
       include: { trend: true, plan: true },
     }),
     prisma.asset.findMany({ orderBy: { createdAt: "desc" }, take: 50 }),
-    prisma.aIUsage.findMany({ orderBy: { createdAt: "desc" }, take: 100 }),
+    prisma.aIUsage.findMany({
+      where: { createdAt: { gte: startOfDayOffset(6) } },
+      orderBy: { createdAt: "desc" },
+    }),
     prisma.contentPlan.count(),
     prisma.contentOutline.count(),
     prisma.job.findMany({ orderBy: { createdAt: "desc" }, take: 25 }),
@@ -234,9 +279,22 @@ export async function GET() {
     : [];
   const workflowsByBlogId = new Map(workflowRuns.filter((run) => run.blogId).map((run) => [run.blogId!, run]));
 
+  // Cost attributed to each blog (used by blog rows and the cost tables below).
+  const usageByBlog = new Map<string, { cost: number; tokens: number; calls: number; models: Set<string> }>();
+  for (const row of aiUsage) {
+    if (!row.blogId) continue;
+    const entry = usageByBlog.get(row.blogId) ?? { cost: 0, tokens: 0, calls: 0, models: new Set<string>() };
+    entry.cost += row.cost;
+    entry.tokens += row.promptTokens + row.completionTokens;
+    entry.calls += 1;
+    entry.models.add(row.model);
+    usageByBlog.set(row.blogId, entry);
+  }
+
   const blogRows = blogs.map((blog) => {
     const status = blogStatusLabel(blog.status);
     const quality = blog.qualityReport?.overallScore ?? blog.seo?.score ?? 0;
+    const spend = usageByBlog.get(blog.id);
     return {
       id: blog.id,
       title: blog.title,
@@ -245,7 +303,12 @@ export async function GET() {
       words: wordCount(blog.content).toLocaleString(),
       trend: "-",
       quality: String(quality),
-      cost: "$0.00",
+      cost: formatUsd(spend?.cost ?? 0),
+      costValue: spend?.cost ?? 0,
+      tokens: spend ? compactNumber(spend.tokens) : "-",
+      tokenCount: spend?.tokens ?? 0,
+      aiCalls: spend?.calls ?? 0,
+      models: spend ? [...spend.models] : [],
       status,
       updated: formatAgo(blog.updatedAt),
       createdAt: blog.createdAt.toISOString(),
@@ -392,7 +455,128 @@ export async function GET() {
     kindFg: "var(--indigo)",
   }));
 
-  const totalCost = aiUsage.reduce((sum, row) => sum + row.cost, 0);
+  // ---------------------------------------------------------------------
+  // AI cost / token analytics (real data from the AIUsage table)
+  // ---------------------------------------------------------------------
+  const yesterday = startOfDayOffset(1);
+  const usageToday = aiUsage.filter((row) => row.createdAt >= today);
+  const usageYesterday = aiUsage.filter((row) => row.createdAt >= yesterday && row.createdAt < today);
+
+  const sumCost = (rows: typeof aiUsage) => rows.reduce((sum, row) => sum + row.cost, 0);
+  const sumPrompt = (rows: typeof aiUsage) => rows.reduce((sum, row) => sum + row.promptTokens, 0);
+  const sumCompletion = (rows: typeof aiUsage) => rows.reduce((sum, row) => sum + row.completionTokens, 0);
+
+  const totalCost = sumCost(usageToday);
+  const costYesterday = sumCost(usageYesterday);
+  const weekCost = sumCost(aiUsage);
+  const promptTokensToday = sumPrompt(usageToday);
+  const completionTokensToday = sumCompletion(usageToday);
+  const totalTokensToday = promptTokensToday + completionTokensToday;
+  const costDeltaPct =
+    costYesterday > 0 ? Math.round(((totalCost - costYesterday) / costYesterday) * 100) : null;
+
+  const avgLatencyToday = usageToday.length
+    ? Math.round(usageToday.reduce((sum, row) => sum + row.latency, 0) / usageToday.length)
+    : 0;
+
+  // Per-model rollup (today)
+  const modelMap = new Map<
+    string,
+    { model: string; cost: number; calls: number; promptTokens: number; completionTokens: number; latency: number }
+  >();
+  for (const row of usageToday) {
+    const entry = modelMap.get(row.model) ?? {
+      model: row.model,
+      cost: 0,
+      calls: 0,
+      promptTokens: 0,
+      completionTokens: 0,
+      latency: 0,
+    };
+    entry.cost += row.cost;
+    entry.calls += 1;
+    entry.promptTokens += row.promptTokens;
+    entry.completionTokens += row.completionTokens;
+    entry.latency += row.latency;
+    modelMap.set(row.model, entry);
+  }
+  const modelBreakdown = [...modelMap.values()]
+    .sort((a, b) => b.cost - a.cost)
+    .map((entry) => ({
+      model: entry.model,
+      cost: entry.cost,
+      costLabel: formatUsd(entry.cost),
+      calls: entry.calls,
+      promptTokens: entry.promptTokens,
+      completionTokens: entry.completionTokens,
+      totalTokens: entry.promptTokens + entry.completionTokens,
+      totalTokensLabel: compactNumber(entry.promptTokens + entry.completionTokens),
+      avgLatencyMs: entry.calls ? Math.round(entry.latency / entry.calls) : 0,
+      sharePct: totalCost > 0 ? Math.round((entry.cost / totalCost) * 100) : 0,
+      color: modelColor(entry.model),
+    }));
+
+  // Per-worker rollup (today)
+  const workerMap = new Map<
+    string,
+    { worker: string; cost: number; calls: number; promptTokens: number; completionTokens: number; latency: number }
+  >();
+  for (const row of usageToday) {
+    const entry = workerMap.get(row.worker) ?? {
+      worker: row.worker,
+      cost: 0,
+      calls: 0,
+      promptTokens: 0,
+      completionTokens: 0,
+      latency: 0,
+    };
+    entry.cost += row.cost;
+    entry.calls += 1;
+    entry.promptTokens += row.promptTokens;
+    entry.completionTokens += row.completionTokens;
+    entry.latency += row.latency;
+    workerMap.set(row.worker, entry);
+  }
+  const workerBreakdown = [...workerMap.values()]
+    .sort((a, b) => b.cost - a.cost)
+    .map((entry) => ({
+      worker: entry.worker,
+      label: entry.worker.replace(/-worker$/, "").replace(/^\w/, (c) => c.toUpperCase()),
+      cost: entry.cost,
+      costLabel: formatUsd(entry.cost),
+      calls: entry.calls,
+      totalTokens: entry.promptTokens + entry.completionTokens,
+      totalTokensLabel: compactNumber(entry.promptTokens + entry.completionTokens),
+      avgLatencyMs: entry.calls ? Math.round(entry.latency / entry.calls) : 0,
+      sharePct: totalCost > 0 ? Math.round((entry.cost / totalCost) * 100) : 0,
+      color: WORKER_COLORS[entry.worker] ?? "var(--mut)",
+    }));
+
+  // 7-day daily series, oldest -> newest
+  const dailySeries = Array.from({ length: 7 }, (_, index) => {
+    const dayStart = startOfDayOffset(6 - index);
+    const dayEnd = startOfDayOffset(5 - index);
+    const rows = aiUsage.filter((row) => row.createdAt >= dayStart && row.createdAt < dayEnd);
+    const byModel = new Map<string, number>();
+    for (const row of rows) {
+      byModel.set(row.model, (byModel.get(row.model) ?? 0) + row.cost);
+    }
+    return {
+      day: dayStart.toLocaleDateString("en-IN", { weekday: "short", timeZone: "Asia/Kolkata" }),
+      date: dayStart.toISOString().slice(0, 10),
+      cost: sumCost(rows),
+      promptTokens: sumPrompt(rows),
+      completionTokens: sumCompletion(rows),
+      calls: rows.length,
+      models: [...byModel.entries()].map(([model, cost]) => ({ model, cost, color: modelColor(model) })),
+    };
+  });
+  const maxDailyCost = Math.max(...dailySeries.map((day) => day.cost), 0);
+
+  const blogsWithCost = blogs.filter((blog) => usageByBlog.has(blog.id));
+  const avgCostPerBlog = blogsWithCost.length
+    ? blogsWithCost.reduce((sum, blog) => sum + (usageByBlog.get(blog.id)?.cost ?? 0), 0) / blogsWithCost.length
+    : 0;
   const qualityReportCount = blogs.filter((blog) => blog.qualityReport).length;
   const qualityScores = blogs
     .map((blog) => blog.qualityReport?.overallScore ?? blog.seo?.score ?? 0)
@@ -485,6 +669,56 @@ export async function GET() {
       successRate,
       totalCost,
       avgQuality,
+      costYesterday,
+      costDeltaPct,
+      weekCost,
+      avgCostPerBlog,
+      promptTokensToday,
+      completionTokensToday,
+      totalTokensToday,
+      aiCallsToday: usageToday.length,
+      avgLatencyToday,
+      dailyTarget: Number(process.env.DAILY_BLOG_TARGET ?? 3),
+    },
+    analytics: {
+      cost: {
+        today: totalCost,
+        todayLabel: formatUsd(totalCost),
+        yesterday: costYesterday,
+        yesterdayLabel: formatUsd(costYesterday),
+        deltaPct: costDeltaPct,
+        week: weekCost,
+        weekLabel: formatUsd(weekCost),
+        perBlog: avgCostPerBlog,
+        perBlogLabel: formatUsd(avgCostPerBlog),
+        projectedMonth: totalCost * 30,
+        projectedMonthLabel: formatUsd(totalCost * 30),
+      },
+      tokens: {
+        prompt: promptTokensToday,
+        promptLabel: compactNumber(promptTokensToday),
+        completion: completionTokensToday,
+        completionLabel: compactNumber(completionTokensToday),
+        total: totalTokensToday,
+        totalLabel: compactNumber(totalTokensToday),
+        ratio: completionTokensToday > 0 ? Number((promptTokensToday / completionTokensToday).toFixed(2)) : 0,
+        perBlog: blogsWithCost.length
+          ? Math.round(
+              blogsWithCost.reduce((sum, blog) => sum + (usageByBlog.get(blog.id)?.tokens ?? 0), 0) /
+                blogsWithCost.length
+            )
+          : 0,
+      },
+      models: modelBreakdown,
+      workers: workerBreakdown,
+      daily: dailySeries.map((day) => ({
+        ...day,
+        costLabel: formatUsd(day.cost),
+        heightPct: maxDailyCost > 0 ? Math.max(2, Math.round((day.cost / maxDailyCost) * 100)) : 0,
+      })),
+      maxDailyCost,
+      calls: usageToday.length,
+      avgLatencyMs: avgLatencyToday,
     },
     stages: stageTotals,
     stageStatus: Object.fromEntries(
@@ -521,13 +755,18 @@ export async function GET() {
     outlineRows,
     trends: trendRows,
     assets: assetRows,
-    usage: aiUsage.map((row) => ({
+    usage: aiUsage.slice(0, 100).map((row) => ({
       id: row.id,
       worker: row.worker,
       model: row.model,
+      blogId: row.blogId,
       promptTokens: row.promptTokens,
       completionTokens: row.completionTokens,
+      totalTokens: row.promptTokens + row.completionTokens,
       cost: row.cost,
+      costLabel: formatUsd(row.cost),
+      latency: row.latency,
+      color: modelColor(row.model),
       createdAt: row.createdAt,
     })),
     queues: queueSnapshots.map((queue) => ({
@@ -575,7 +814,7 @@ export async function GET() {
         time: usage.createdAt.toISOString().slice(11, 19),
         level: "INFO",
         worker: usage.worker,
-        msg: `${usage.model} usage: ${usage.promptTokens} prompt tokens, ${usage.completionTokens} completion tokens`,
+        msg: `${usage.model} · ${usage.promptTokens} in / ${usage.completionTokens} out · ${formatUsd(usage.cost)} · ${usage.latency}ms`,
         color: "var(--indigo)",
       })),
     ].sort((a, b) => b.time.localeCompare(a.time)),
