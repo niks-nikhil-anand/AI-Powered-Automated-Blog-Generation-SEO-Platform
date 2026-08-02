@@ -1,5 +1,14 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import {
+  imageQueue,
+  outlineQueue,
+  planningQueue,
+  publishQueue,
+  qualityQueue,
+  researchQueue,
+  writingQueue,
+} from "@/workers/shared/queues";
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +34,26 @@ function wordCount(markdown: string) {
 
 function asStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.map(String) : [];
+}
+
+function asQualityChecks(value: unknown): {
+  label: string;
+  score: number;
+  maxScore: number;
+  notes: string[];
+}[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => {
+      const row = item as { label?: unknown; score?: unknown; maxScore?: unknown; notes?: unknown };
+      return {
+        label: String(row.label ?? ""),
+        score: Number(row.score ?? 0),
+        maxScore: Number(row.maxScore ?? 10) || 10,
+        notes: asStringArray(row.notes),
+      };
+    })
+    .filter((row) => row.label);
 }
 
 function outlineMarkdown(outline: {
@@ -111,6 +140,40 @@ function statusStyle(status: string) {
   };
 }
 
+async function queueCounts(queue: typeof researchQueue) {
+  const counts = await queue.getJobCounts(
+    "active",
+    "waiting",
+    "delayed",
+    "failed",
+    "completed"
+  );
+  return {
+    active: counts.active ?? 0,
+    waiting: counts.waiting ?? 0,
+    delayed: counts.delayed ?? 0,
+    failed: counts.failed ?? 0,
+    completed: counts.completed ?? 0,
+  };
+}
+
+function stageState(counts: Awaited<ReturnType<typeof queueCounts>>, total: number) {
+  if (counts.active > 0) return "running";
+  if (counts.waiting > 0) return "queued";
+  if (counts.delayed > 0) return "scheduled";
+  if (counts.failed > 0) return "failed";
+  if (total > 0) return "done";
+  return "idle";
+}
+
+function queueColor(counts: Awaited<ReturnType<typeof queueCounts>>, total: number, doneColor = "var(--emerald)") {
+  if (counts.active > 0) return "var(--indigo)";
+  if (counts.waiting > 0 || counts.delayed > 0) return "var(--amber)";
+  if (counts.failed > 0) return "var(--rose)";
+  if (total > 0) return doneColor;
+  return "var(--mut)";
+}
+
 export async function GET() {
   const today = startOfToday();
   const [
@@ -126,11 +189,18 @@ export async function GET() {
     plansCount,
     outlinesCount,
     jobs,
+    researchCounts,
+    planningCounts,
+    outlineCounts,
+    writingCounts,
+    imageCounts,
+    qualityCounts,
+    publishCounts,
   ] = await Promise.all([
     prisma.blog.findMany({
       orderBy: { updatedAt: "desc" },
       take: 50,
-      include: { category: true, seo: true, featuredImage: true },
+      include: { category: true, seo: true, featuredImage: true, qualityReport: true },
     }),
     prisma.blog.count(),
     prisma.blog.count({ where: { status: "PUBLISHED" } }),
@@ -147,11 +217,26 @@ export async function GET() {
     prisma.contentPlan.count(),
     prisma.contentOutline.count(),
     prisma.job.findMany({ orderBy: { createdAt: "desc" }, take: 25 }),
+    queueCounts(researchQueue),
+    queueCounts(planningQueue),
+    queueCounts(outlineQueue),
+    queueCounts(writingQueue),
+    queueCounts(imageQueue),
+    queueCounts(qualityQueue),
+    queueCounts(publishQueue),
   ]);
+  const workflowRuns = blogs.length
+    ? await prisma.workflowRun.findMany({
+        where: { OR: blogs.map((blog) => ({ blogId: blog.id })) },
+        include: { attempts: { orderBy: { startedAt: "asc" } } },
+        orderBy: { updatedAt: "desc" },
+      })
+    : [];
+  const workflowsByBlogId = new Map(workflowRuns.filter((run) => run.blogId).map((run) => [run.blogId!, run]));
 
   const blogRows = blogs.map((blog) => {
     const status = blogStatusLabel(blog.status);
-    const quality = blog.seo?.score ?? 0;
+    const quality = blog.qualityReport?.overallScore ?? blog.seo?.score ?? 0;
     return {
       id: blog.id,
       title: blog.title,
@@ -175,6 +260,33 @@ export async function GET() {
       metaDescription: blog.seo?.metaDescription,
       keywords: Array.isArray(blog.seo?.keywords) ? blog.seo?.keywords : [],
       schema: blog.seo?.schema ? JSON.stringify(blog.seo.schema, null, 2) : undefined,
+      qualityReport: blog.qualityReport
+        ? {
+            overallScore: blog.qualityReport.overallScore,
+            passed: blog.qualityReport.passed,
+            recommendation: blog.qualityReport.recommendation,
+            checks: blog.qualityReport.checks,
+            createdAt: blog.qualityReport.createdAt.toISOString(),
+          }
+        : undefined,
+      workflow: workflowsByBlogId.get(blog.id)
+        ? {
+            id: workflowsByBlogId.get(blog.id)!.id,
+            status: workflowsByBlogId.get(blog.id)!.status,
+            currentStage: workflowsByBlogId.get(blog.id)!.currentStage,
+            failureReason: workflowsByBlogId.get(blog.id)!.failureReason,
+            attempts: workflowsByBlogId.get(blog.id)!.attempts.map((attempt) => ({
+              id: attempt.id,
+              worker: attempt.worker,
+              attempt: attempt.attempt,
+              status: attempt.status,
+              error: attempt.error,
+              qualityReport: attempt.qualityReport,
+              startedAt: attempt.startedAt.toISOString(),
+              finishedAt: attempt.finishedAt?.toISOString(),
+            })),
+          }
+        : undefined,
       featuredImage: blog.featuredImage
         ? {
             id: blog.featuredImage.id,
@@ -258,20 +370,111 @@ export async function GET() {
     id: asset.id,
     name: asset.fileName,
     placeholder: asset.mimeType,
-    kind: asset.width && asset.height ? `${asset.width}x${asset.height}` : "Asset",
+    kind: asset.mimeType.includes("image") ? "Hero" : "Asset",
     dim: asset.width && asset.height ? `${asset.width}x${asset.height}` : "-",
     size: `${Math.round(asset.size / 1024)} KB`,
+    sizeBytes: asset.size,
     path: asset.path,
+    bucket: asset.bucket,
+    publicUrl: asset.publicUrl,
+    mimeType: asset.mimeType,
+    width: asset.width,
+    height: asset.height,
+    createdAt: asset.createdAt.toISOString(),
+    month: `${asset.createdAt.toLocaleString("en-IN", {
+      timeZone: "Asia/Kolkata",
+      year: "numeric",
+    })} / ${asset.createdAt.toLocaleString("en-IN", {
+      timeZone: "Asia/Kolkata",
+      month: "2-digit",
+    })}`,
     kindBg: "rgba(99,102,241,0.14)",
     kindFg: "var(--indigo)",
   }));
 
   const totalCost = aiUsage.reduce((sum, row) => sum + row.cost, 0);
+  const qualityReportCount = blogs.filter((blog) => blog.qualityReport).length;
+  const qualityScores = blogs
+    .map((blog) => blog.qualityReport?.overallScore ?? blog.seo?.score ?? 0)
+    .filter((score) => score > 0);
   const avgQuality =
-    blogs.length > 0
-      ? Math.round(blogs.reduce((sum, blog) => sum + (blog.seo?.score ?? 0), 0) / blogs.length)
+    qualityScores.length > 0
+      ? Math.round(qualityScores.reduce((sum, score) => sum + score, 0) / qualityScores.length)
       : 0;
   const successRate = blogCount > 0 ? Math.round((publishedCount / blogCount) * 100) : 0;
+  const qualityBuckets = [
+    { label: "< 80", min: 0, max: 79, fill: "var(--rose)" },
+    { label: "80-84", min: 80, max: 84, fill: "var(--rose)" },
+    { label: "85-89", min: 85, max: 89, fill: "var(--amber)" },
+    { label: "90-91", min: 90, max: 91, fill: "var(--emerald)" },
+    { label: "92-93", min: 92, max: 93, fill: "var(--emerald)" },
+    { label: "94-95", min: 94, max: 95, fill: "var(--emerald)" },
+    { label: "96-97", min: 96, max: 97, fill: "var(--emerald)" },
+    { label: "98-100", min: 98, max: 100, fill: "var(--emerald)" },
+  ].map((bucket) => {
+    const count = qualityScores.filter((score) => score >= bucket.min && score <= bucket.max).length;
+    const maxCount = Math.max(1, qualityScores.length);
+    return {
+      label: bucket.label,
+      count,
+      h: count > 0 ? Math.max(8, Math.round((count / maxCount) * 130)) : 0,
+      fill: bucket.fill,
+    };
+  });
+  const qualityParameters = [
+    "SEO Structure",
+    "Content Completeness",
+    "Readability",
+    "Content Quality",
+    "Keyword Optimization",
+    "Technical SEO",
+    "Formatting & UX",
+    "Media Quality",
+    "AI & Fact Quality",
+    "Publishing Readiness",
+  ].map((label) => {
+    const checks = blogs.flatMap((blog) =>
+      asQualityChecks(blog.qualityReport?.checks).filter((check) => check.label === label)
+    );
+    const avg =
+      checks.length > 0
+        ? Math.round((checks.reduce((sum, check) => sum + check.score / check.maxScore, 0) / checks.length) * 100)
+        : 0;
+    return {
+      name: label,
+      value: `${avg}%`,
+      color: avg >= 90 ? "var(--emerald)" : avg >= 70 ? "var(--amber)" : avg > 0 ? "var(--rose)" : "var(--mut)",
+    };
+  });
+  const stageTotals = {
+    research: trends.length,
+    planning: plansCount,
+    outline: outlinesCount,
+    writing: blogs.filter((blog) => blog.status === "DRAFT").length,
+    image: assets.length,
+    quality: qualityReportCount,
+    publish: publishedCount,
+  };
+  const queueSnapshots = [
+    { key: "research", name: "research_queue", counts: researchCounts, total: stageTotals.research, doneColor: "var(--emerald)" },
+    { key: "planning", name: "planning_queue", counts: planningCounts, total: stageTotals.planning, doneColor: "var(--indigo)" },
+    { key: "outline", name: "outline_queue", counts: outlineCounts, total: stageTotals.outline, doneColor: "var(--indigo)" },
+    { key: "writing", name: "writing_queue", counts: writingCounts, total: blogCount, doneColor: "var(--indigo)" },
+    { key: "image", name: "image_queue", counts: imageCounts, total: stageTotals.image, doneColor: "var(--sky)" },
+    { key: "quality", name: "quality_queue", counts: qualityCounts, total: stageTotals.quality, doneColor: "var(--amber)" },
+    { key: "publish", name: "publish_queue", counts: publishCounts, total: stageTotals.publish, doneColor: "var(--emerald)" },
+  ] as const;
+  const pipeline = queueSnapshots.reduce(
+    (acc, item) => {
+      acc.active += item.counts.active;
+      acc.waiting += item.counts.waiting;
+      acc.delayed += item.counts.delayed;
+      acc.failed += item.counts.failed;
+      acc.completed += item.counts.completed;
+      return acc;
+    },
+    { active: 0, waiting: 0, delayed: 0, failed: 0, completed: 0 }
+  );
 
   return NextResponse.json({
     metrics: {
@@ -283,16 +486,39 @@ export async function GET() {
       totalCost,
       avgQuality,
     },
-    stages: {
-      research: trends.length,
-      planning: plansCount,
-      outline: outlinesCount,
-      writing: blogs.filter((blog) => blog.status === "DRAFT").length,
-      image: assets.length,
-      quality: blogs.filter((blog) => (blog.seo?.score ?? 0) > 0).length,
-      publish: publishedCount,
+    stages: stageTotals,
+    stageStatus: Object.fromEntries(
+      queueSnapshots.map((item) => [
+        item.key,
+        {
+          total: item.total,
+          active: item.counts.active,
+          waiting: item.counts.waiting,
+          delayed: item.counts.delayed,
+          failed: item.counts.failed,
+          completed: item.counts.completed,
+          state: stageState(item.counts, item.total),
+          dot: queueColor(item.counts, item.total, item.doneColor),
+          anim: item.counts.active > 0 ? "animate-dkpulse" : "none",
+        },
+      ])
+    ),
+    pipeline: {
+      ...pipeline,
+      running: pipeline.active > 0,
+      hasBacklog: pipeline.waiting + pipeline.delayed > 0,
+      state:
+        pipeline.active > 0
+            ? "running"
+            : pipeline.waiting + pipeline.delayed > 0
+              ? "queued"
+              : pipeline.failed > 0
+                ? "failed"
+                : "idle",
     },
     blogs: [...outlineRows, ...blogRows].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
+    blogRows,
+    outlineRows,
     trends: trendRows,
     assets: assetRows,
     usage: aiUsage.map((row) => ({
@@ -304,23 +530,17 @@ export async function GET() {
       cost: row.cost,
       createdAt: row.createdAt,
     })),
-    queues: [
-      { name: "research_queue", completed: trends.length, active: 0, waiting: trends.filter((row) => row.status === "NEW").length, failed: 0 },
-      { name: "planning_queue", completed: plansCount, active: 0, waiting: trends.filter((row) => row.status === "PLANNED").length, failed: 0 },
-      { name: "outline_queue", completed: outlinesCount, active: 0, waiting: Math.max(0, plansCount - outlinesCount), failed: 0 },
-      { name: "writing_queue", completed: blogCount, active: 0, waiting: Math.max(0, outlinesCount - blogCount), failed: failedCount },
-      { name: "image_queue", completed: assets.length, active: 0, waiting: Math.max(0, blogCount - assets.length), failed: 0 },
-    ].map((queue) => ({
-      ...queue,
-      waiting: String(queue.waiting),
-      active: String(queue.active),
-      completed: String(queue.completed),
-      failed: String(queue.failed),
-      dot: Number(queue.active) > 0 ? "var(--indigo)" : Number(queue.completed) > 0 ? "var(--emerald)" : "var(--mut)",
-      anim: Number(queue.active) > 0 ? "animate-dkpulse" : "none",
+    queues: queueSnapshots.map((queue) => ({
+      name: queue.name,
+      waiting: String(queue.counts.waiting + queue.counts.delayed),
+      active: String(queue.counts.active),
+      completed: String(queue.counts.completed),
+      failed: String(queue.counts.failed),
+      dot: queueColor(queue.counts, queue.total, queue.doneColor),
+      anim: queue.counts.active > 0 ? "animate-dkpulse" : "none",
       rate: "db",
       p95: "-",
-      failedColor: Number(queue.failed) > 0 ? "var(--rose)" : "var(--mut)",
+      failedColor: queue.counts.failed > 0 ? "var(--rose)" : "var(--mut)",
     })),
     jobs: jobs.map((job) => ({
       id: job.id,
@@ -332,6 +552,16 @@ export async function GET() {
       ...statusStyle(job.status),
       errBtn: job.error ? "inline-block" : "none",
       stack: job.error ?? undefined,
+    })),
+    workflows: workflowRuns.map((run) => ({
+      id: run.id,
+      blogId: run.blogId,
+      trendId: run.trendId,
+      status: run.status,
+      currentStage: run.currentStage,
+      failureReason: run.failureReason,
+      attempts: run.attempts.length,
+      updatedAt: run.updatedAt.toISOString(),
     })),
     logs: [
       ...trends.slice(0, 8).map((trend) => ({
@@ -352,8 +582,11 @@ export async function GET() {
     quality: {
       avgQuality,
       failedCount,
-      checkedCount: blogs.filter((blog) => blog.seo).length,
+      checkedCount: qualityReportCount,
       blocked: blogRows.filter((blog) => Number(blog.quality) > 0 && Number(blog.quality) < 90),
+      reports: blogRows.filter((blog) => blog.qualityReport),
+      distribution: qualityBuckets,
+      checkRates: qualityParameters,
     },
   });
 }
