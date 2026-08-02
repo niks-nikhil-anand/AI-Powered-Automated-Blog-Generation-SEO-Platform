@@ -1,4 +1,4 @@
-# Dockerfile for the standalone BullMQ workers (research-worker, writing-worker).
+# Dockerfile for the standalone BullMQ workers.
 # Separate from the root Dockerfile because workers run via `tsx` against
 # source .ts files instead of a Next.js standalone build.
 FROM node:20-alpine AS base
@@ -22,5 +22,7 @@ RUN npx prisma generate
 
 # Overridden per-service by docker-compose.yml (`command:`), e.g.:
 #   node_modules/.bin/tsx workers/research-worker/index.ts
+#   node_modules/.bin/tsx workers/planning-worker/index.ts
+#   node_modules/.bin/tsx workers/outline-worker/index.ts
 #   node_modules/.bin/tsx workers/writing-worker/index.ts
 CMD ["node_modules/.bin/tsx", "workers/start.ts"]
