@@ -27,6 +27,17 @@ export interface BlogItem {
   updatedAt?: string;
   createdAtLabel?: string;
   updatedAtLabel?: string;
+  featuredImage?: {
+    id: string;
+    name: string;
+    bucket: string;
+    path: string;
+    publicUrl: string;
+    mimeType: string;
+    width?: number | null;
+    height?: number | null;
+    size: number;
+  };
 }
 
 interface BlogDetailModalProps {
@@ -74,7 +85,24 @@ export function BlogDetailModal({ blog, isOpen, onClose }: BlogDetailModalProps)
     name: string;
     size: string;
     path: string;
-  }[] = [];
+    bucket: string;
+    publicUrl: string;
+    mimeType: string;
+  }[] = blog.featuredImage
+    ? [
+        {
+          label: blog.featuredImage.width && blog.featuredImage.height
+            ? `${blog.featuredImage.width}x${blog.featuredImage.height}`
+            : "Hero image",
+          name: blog.featuredImage.name,
+          size: `${Math.max(1, Math.round(blog.featuredImage.size / 1024))} KB`,
+          path: blog.featuredImage.path,
+          bucket: blog.featuredImage.bucket,
+          publicUrl: blog.featuredImage.publicUrl,
+          mimeType: blog.featuredImage.mimeType,
+        },
+      ]
+    : [];
   const timeline: {
     time: string;
     worker: string;
@@ -310,15 +338,27 @@ export function BlogDetailModal({ blog, isOpen, onClose }: BlogDetailModalProps)
                 <div className="flex flex-col gap-[12px]">
                   {mediaAssets.length > 0 ? mediaAssets.map((asset, idx) => (
                     <div key={idx} className="border border-[var(--bd)] rounded-[10px] overflow-hidden bg-[var(--card2)] p-[10px]">
-                      <div className="h-[120px] bg-[var(--card)] rounded-[8px] flex items-center justify-center text-[var(--mut)] font-mono text-[11px]">
-                        {asset.label}
-                      </div>
+                      {asset.publicUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={asset.publicUrl}
+                          alt={asset.name}
+                          className="h-[150px] w-full object-cover rounded-[8px] bg-[var(--card)] border border-[var(--bd)]"
+                        />
+                      ) : (
+                        <div className="h-[120px] bg-[var(--card)] rounded-[8px] flex items-center justify-center text-[var(--mut)] font-mono text-[11px]">
+                          {asset.label}
+                        </div>
+                      )}
                       <div className="mt-[8px] flex items-center justify-between text-[11px]">
                         <span className="font-semibold text-[var(--fg)]">{asset.name}</span>
                         <span className="font-mono text-[var(--faint)]">{asset.size}</span>
                       </div>
-                      <div className="text-[10px] text-[var(--mut)] mt-[2px] font-mono truncate">
-                        {asset.path}
+                      <div className="text-[10px] text-[var(--mut)] mt-[5px] font-mono break-all">
+                        s3://{asset.bucket}/{asset.path}
+                      </div>
+                      <div className="text-[10px] text-[var(--faint)] mt-[4px] font-mono break-all">
+                        {asset.publicUrl}
                       </div>
                     </div>
                   )) : (
