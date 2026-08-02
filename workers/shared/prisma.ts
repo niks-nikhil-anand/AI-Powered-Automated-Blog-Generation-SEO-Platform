@@ -17,13 +17,17 @@ import { env } from "./env";
  * actually want the workers writing blogs into before running them.
  */
 declare global {
-  // eslint-disable-next-line no-var
   var __workerPgPool: pg.Pool | undefined;
   var __workerPrisma: PrismaClient | undefined;
 }
 
 function createClient() {
-  const pool = globalThis.__workerPgPool ?? new pg.Pool({ connectionString: env.DATABASE_URL });
+  const pool =
+    globalThis.__workerPgPool ??
+    new pg.Pool({
+      connectionString: env.DATABASE_URL,
+      password: new URL(env.DATABASE_URL).password || "",
+    });
   const adapter = new PrismaPg(pool);
   globalThis.__workerPgPool = pool;
   return new PrismaClient({ adapter });
