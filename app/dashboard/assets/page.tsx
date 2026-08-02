@@ -1,20 +1,28 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 
 export default function AssetLibraryPage() {
   const [selectedMonth, setSelectedMonth] = useState("2026 / 08");
   const [selectedType, setSelectedType] = useState("All types");
-
-  const assets: {
+  const [assets, setAssets] = useState<{
+    id: string;
     name: string;
     placeholder: string;
     kind: string;
     dim: string;
     size: string;
+    path: string;
     kindBg: string;
     kindFg: string;
-  }[] = [];
+  }[]>([]);
+
+  useEffect(() => {
+    fetch("/api/dashboard")
+      .then((res) => res.json())
+      .then((data) => setAssets(data.assets ?? []))
+      .catch(() => setAssets([]));
+  }, []);
 
   const filteredAssets = selectedType === "All types"
     ? assets
@@ -30,7 +38,7 @@ export default function AssetLibraryPage() {
           </h1>
           <p className="margin-0 text-[12px] text-[var(--mut)] mt-[3px]">
             gs://
-            <span className="font-mono text-[var(--fg2)]">blogs/2026/08/</span> · 0 objects · 0 B
+            <span className="font-mono text-[var(--fg2)]">blogs/2026/08/</span> · {assets.length} objects
           </p>
         </div>
         <div className="flex gap-[7px] flex-wrap">
@@ -68,7 +76,7 @@ export default function AssetLibraryPage() {
           <button
             key={idx}
             aria-label="Open asset preview"
-            onClick={() => alert(`Asset path: ${a.name}`)}
+            onClick={() => alert(`Asset path: ${a.path}`)}
             className="text-left p-0 bg-[var(--card)] border border-[var(--bd)] rounded-[12px] overflow-hidden shadow-[var(--shadow)] flex flex-col hover:border-[var(--indigo)] transition-colors group"
           >
             <div className="h-[118px] bg-[var(--card2)] border-b border-[var(--bd)] flex items-center justify-center relative p-[8px]">
