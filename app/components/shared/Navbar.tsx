@@ -13,6 +13,8 @@ export function Navbar({ onOpenCmdk, onRunNow }: NavbarProps) {
   const pathname = usePathname();
   const { theme, toggleTheme } = useTheme();
   const [notifOpen, setNotifOpen] = useState(false);
+  const [runState, setRunState] = useState<"idle" | "running" | "queued" | "error">("idle");
+  const [runMessage, setRunMessage] = useState("");
 
   const getBreadcrumb = () => {
     switch (pathname) {
@@ -41,6 +43,30 @@ export function Navbar({ onOpenCmdk, onRunNow }: NavbarProps) {
     time: string;
     color: string;
   }[] = [];
+
+  const handleRunNow = async () => {
+    if (runState === "running") return;
+    setRunState("running");
+    setRunMessage("Queueing research run...");
+
+    try {
+      const res = await fetch("/api/research/run", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "Failed to queue research run");
+      }
+      setRunState("queued");
+      setRunMessage(`Research job queued${data.jobId ? ` · ${data.jobId}` : ""}`);
+      onRunNow?.();
+      window.setTimeout(() => {
+        setRunState("idle");
+        setRunMessage("");
+      }, 5000);
+    } catch (err) {
+      setRunState("error");
+      setRunMessage(err instanceof Error ? err.message : "Failed to queue research run");
+    }
+  };
 
   return (
     <header className="sticky top-0 z-40 h-[56px] flex-none flex items-center gap-[12px] px-[18px] border-b border-[var(--bd)] bg-[var(--glass)] backdrop-blur-md">
@@ -75,15 +101,30 @@ export function Navbar({ onOpenCmdk, onRunNow }: NavbarProps) {
       {/* Right Controls */}
       <div className="ml-auto flex items-center gap-[9px]">
         {/* Pipeline Status Pill */}
-        <div className="flex items-center gap-[7px] h-[28px] px-[10px] rounded-full border border-[rgba(16,185,129,0.3)] bg-[rgba(16,185,129,0.10)]">
-          <span className="w-[6px] h-[6px] rounded-full bg-[var(--emerald)] animate-dkpulse" />
-          <span className="text-[11px] font-semibold text-[var(--emerald)] whitespace-nowrap">
-            Pipeline Idle
+        <div className={`flex items-center gap-[7px] h-[28px] px-[10px] rounded-full border ${
+          runState === "error"
+            ? "border-[rgba(244,63,94,0.3)] bg-[rgba(244,63,94,0.10)]"
+            : "border-[rgba(16,185,129,0.3)] bg-[rgba(16,185,129,0.10)]"
+        }`}>
+          <span className={`w-[6px] h-[6px] rounded-full ${
+            runState === "error" ? "bg-[var(--rose)]" : "bg-[var(--emerald)]"
+          } ${runState === "running" ? "animate-dkpulse" : ""}`} />
+          <span className={`text-[11px] font-semibold whitespace-nowrap ${
+            runState === "error" ? "text-[var(--rose)]" : "text-[var(--emerald)]"
+          }`}>
+            {runState === "running" ? "Queueing Run" : runState === "queued" ? "Run Queued" : runState === "error" ? "Run Failed" : "Pipeline Idle"}
           </span>
-          <span className="font-mono text-[10px] font-medium text-[var(--emerald)] opacity-80">
-            0 active
+          <span className={`font-mono text-[10px] font-medium opacity-80 ${
+            runState === "error" ? "text-[var(--rose)]" : "text-[var(--emerald)]"
+          }`}>
+            {runState === "queued" ? "1 queued" : "0 active"}
           </span>
         </div>
+        {runMessage && (
+          <span className="hidden xl:inline max-w-[260px] truncate text-[11px] text-[var(--mut)]">
+            {runMessage}
+          </span>
+        )}
 
         {/* Notifications Button & Dropdown */}
         <div className="relative">
@@ -168,13 +209,14 @@ export function Navbar({ onOpenCmdk, onRunNow }: NavbarProps) {
         <button
           id="btn-run-now"
           aria-label="Trigger generation run now"
-          onClick={onRunNow}
-          className="h-[32px] px-[13px] rounded-[9px] border border-transparent bg-[var(--indigo)] text-white text-[12px] font-semibold flex items-center gap-[6px] hover:bg-[#4f46e5] transition-colors shadow-sm"
+          onClick={handleRunNow}
+          disabled={runState === "running"}
+          className="h-[32px] px-[13px] rounded-[9px] border border-transparent bg-[var(--indigo)] text-white text-[12px] font-semibold flex items-center gap-[6px] hover:bg-[#4f46e5] transition-colors shadow-sm disabled:opacity-60 disabled:cursor-not-allowed"
         >
           <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
             <path d="M7 4l13 8-13 8z" />
           </svg>
-          Run now
+          {runState === "running" ? "Queueing" : "Run now"}
         </button>
       </div>
     </header>
