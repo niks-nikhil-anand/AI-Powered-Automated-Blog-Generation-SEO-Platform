@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { env } from "@/workers/shared/env";
 import { planningQueue } from "@/workers/shared/queues";
 
 export const dynamic = "force-dynamic";
@@ -25,6 +26,27 @@ export async function POST(_request: Request, context: RouteContext) {
 
   if (!trend) {
     return NextResponse.json({ ok: false, error: "Trend not found" }, { status: 404 });
+  }
+
+  if (trend.score < env.RESEARCH_MIN_SCORE_TO_WRITE) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: `Only topics with score >= ${env.RESEARCH_MIN_SCORE_TO_WRITE} can enter writing. This topic score is ${Math.round(trend.score)}.`,
+      },
+      { status: 422 }
+    );
+  }
+
+  const existingPlan = await prisma.contentPlan.findUnique({
+    where: { trendId: trend.id },
+    select: { id: true },
+  });
+  if (existingPlan) {
+    return NextResponse.json(
+      { ok: false, error: "This topic is already in the content pipeline." },
+      { status: 409 }
+    );
   }
 
   const job = await planningQueue.add("plan_blog", {
