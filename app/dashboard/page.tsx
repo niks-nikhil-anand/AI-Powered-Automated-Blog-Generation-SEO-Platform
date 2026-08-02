@@ -33,9 +33,104 @@ const emptyStageStatus: Record<StageKey, StageStatus> = {
   publish: { total: 0, active: 0, waiting: 0, delayed: 0, failed: 0, completed: 0, state: "idle", dot: "var(--mut)", anim: "none" },
 };
 
+type ModelUsage = {
+  model: string;
+  cost: number;
+  costLabel: string;
+  calls: number;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  totalTokensLabel: string;
+  avgLatencyMs: number;
+  sharePct: number;
+  color: string;
+};
+
+type WorkerUsage = {
+  worker: string;
+  label: string;
+  cost: number;
+  costLabel: string;
+  calls: number;
+  totalTokens: number;
+  totalTokensLabel: string;
+  avgLatencyMs: number;
+  sharePct: number;
+  color: string;
+};
+
+type DailyUsage = {
+  day: string;
+  date: string;
+  cost: number;
+  costLabel: string;
+  promptTokens: number;
+  completionTokens: number;
+  calls: number;
+  heightPct: number;
+  models: { model: string; cost: number; color: string }[];
+};
+
+type Analytics = {
+  cost: {
+    today: number;
+    todayLabel: string;
+    yesterday: number;
+    yesterdayLabel: string;
+    deltaPct: number | null;
+    week: number;
+    weekLabel: string;
+    perBlog: number;
+    perBlogLabel: string;
+    projectedMonth: number;
+    projectedMonthLabel: string;
+  };
+  tokens: {
+    prompt: number;
+    promptLabel: string;
+    completion: number;
+    completionLabel: string;
+    total: number;
+    totalLabel: string;
+    ratio: number;
+    perBlog: number;
+  };
+  models: ModelUsage[];
+  workers: WorkerUsage[];
+  daily: DailyUsage[];
+  maxDailyCost: number;
+  calls: number;
+  avgLatencyMs: number;
+};
+
+const emptyAnalytics: Analytics = {
+  cost: {
+    today: 0,
+    todayLabel: "$0.00",
+    yesterday: 0,
+    yesterdayLabel: "$0.00",
+    deltaPct: null,
+    week: 0,
+    weekLabel: "$0.00",
+    perBlog: 0,
+    perBlogLabel: "$0.00",
+    projectedMonth: 0,
+    projectedMonthLabel: "$0.00",
+  },
+  tokens: { prompt: 0, promptLabel: "0", completion: 0, completionLabel: "0", total: 0, totalLabel: "0", ratio: 0, perBlog: 0 },
+  models: [],
+  workers: [],
+  daily: [],
+  maxDailyCost: 0,
+  calls: 0,
+  avgLatencyMs: 0,
+};
+
 export default function ExecutiveDashboard({ onOpenBlogModal }: DashboardPageProps) {
   const [range, setRange] = useState("24h");
   const [recentBlogs, setRecentBlogs] = useState<BlogItem[]>([]);
+  const [analytics, setAnalytics] = useState<Analytics>(emptyAnalytics);
   const [dashboardMetrics, setDashboardMetrics] = useState({
     blogCount: 0,
     publishedCount: 0,
@@ -44,6 +139,12 @@ export default function ExecutiveDashboard({ onOpenBlogModal }: DashboardPagePro
     successRate: 0,
     totalCost: 0,
     avgQuality: 0,
+    costDeltaPct: null as number | null,
+    avgCostPerBlog: 0,
+    totalTokensToday: 0,
+    aiCallsToday: 0,
+    avgLatencyToday: 0,
+    dailyTarget: 3,
   });
   const [stageCounts, setStageCounts] = useState({
     research: 0,
@@ -72,6 +173,7 @@ export default function ExecutiveDashboard({ onOpenBlogModal }: DashboardPagePro
         .then((data) => {
           if (!mounted) return;
           setDashboardMetrics(data.metrics);
+          setAnalytics(data.analytics ?? emptyAnalytics);
           setStageCounts(data.stages);
           setStageStatus({ ...emptyStageStatus, ...(data.stageStatus ?? {}) });
           setPipeline(data.pipeline ?? { active: 0, waiting: 0, delayed: 0, failed: 0, completed: 0, state: "idle" });
@@ -87,23 +189,35 @@ export default function ExecutiveDashboard({ onOpenBlogModal }: DashboardPagePro
     };
   }, []);
 
+  const dailyTarget = Math.max(1, dashboardMetrics.dailyTarget || 3);
+  const today = new Date().toLocaleDateString("en-GB", {
+    weekday: "short",
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+
   const metrics = [
     {
       label: "Daily Blogs",
-      value: `${dashboardMetrics.todayPublishedCount} / 20`,
+      value: `${dashboardMetrics.todayPublishedCount} / ${dailyTarget}`,
       suffix: "published",
-      delta: "0 vs yest",
-      deltaBg: "rgba(16,185,129,0.12)",
-      deltaFg: "var(--emerald)",
-      pct: `${Math.min(100, (dashboardMetrics.todayPublishedCount / 20) * 100)}%`,
+      delta: `${Math.round((dashboardMetrics.todayPublishedCount / dailyTarget) * 100)}% of goal`,
+      deltaBg:
+        dashboardMetrics.todayPublishedCount >= dailyTarget
+          ? "rgba(16,185,129,0.12)"
+          : "rgba(245,158,11,0.12)",
+      deltaFg:
+        dashboardMetrics.todayPublishedCount >= dailyTarget ? "var(--emerald)" : "var(--amber)",
+      pct: `${Math.min(100, (dashboardMetrics.todayPublishedCount / dailyTarget) * 100)}%`,
       color: "var(--indigo)",
-      foot: "Goal: 20 blogs / day",
+      foot: `Goal: ${dailyTarget} blogs / day · 3 research runs`,
     },
     {
       label: "Success Rate",
       value: `${dashboardMetrics.successRate}%`,
       suffix: "passed QA",
-      delta: "No runs",
+      delta: dashboardMetrics.blogCount > 0 ? `${dashboardMetrics.publishedCount}/${dashboardMetrics.blogCount}` : "No runs",
       deltaBg: "rgba(16,185,129,0.12)",
       deltaFg: "var(--emerald)",
       pct: `${dashboardMetrics.successRate}%`,
@@ -112,20 +226,27 @@ export default function ExecutiveDashboard({ onOpenBlogModal }: DashboardPagePro
     },
     {
       label: "AI Cost Today",
-      value: `$${dashboardMetrics.totalCost.toFixed(2)}`,
-      suffix: "total",
-      delta: "No spend",
-      deltaBg: "rgba(99,102,241,0.12)",
-      deltaFg: "var(--indigo)",
-      pct: "0%",
+      value: analytics.cost.todayLabel,
+      suffix: `${analytics.calls} calls`,
+      delta:
+        analytics.cost.deltaPct === null
+          ? "No baseline"
+          : `${analytics.cost.deltaPct >= 0 ? "+" : ""}${analytics.cost.deltaPct}% vs yest`,
+      deltaBg:
+        analytics.cost.deltaPct !== null && analytics.cost.deltaPct > 0
+          ? "rgba(244,63,94,0.12)"
+          : "rgba(16,185,129,0.12)",
+      deltaFg:
+        analytics.cost.deltaPct !== null && analytics.cost.deltaPct > 0 ? "var(--rose)" : "var(--emerald)",
+      pct: `${analytics.cost.week > 0 ? Math.min(100, Math.round((analytics.cost.today / analytics.cost.week) * 100)) : 0}%`,
       color: "var(--sky)",
-      foot: "Avg $0.00 per post",
+      foot: `${analytics.cost.perBlogLabel} per post · ${analytics.cost.projectedMonthLabel}/mo projected`,
     },
     {
       label: "Quality Score",
       value: String(dashboardMetrics.avgQuality),
       suffix: "/100 avg",
-      delta: "No scores",
+      delta: analytics.tokens.perBlog > 0 ? `${analytics.tokens.perBlog.toLocaleString()} tok/post` : "No scores",
       deltaBg: "rgba(16,185,129,0.12)",
       deltaFg: "var(--emerald)",
       pct: `${dashboardMetrics.avgQuality}%`,
@@ -192,8 +313,8 @@ export default function ExecutiveDashboard({ onOpenBlogModal }: DashboardPagePro
             Executive Dashboard
           </h1>
           <p className="margin-0 text-[12px] text-[var(--mut)] mt-[3px]">
-            Automated blog generation pipeline · Sat 01 Aug 2026 · cron{" "}
-            <span className="font-mono text-[var(--fg2)]">0 */2 * * *</span>
+            Automated blog generation pipeline · {today} · research runs{" "}
+            <span className="font-mono text-[var(--fg2)]">06:30 · 14:00 · 23:30 IST</span>
           </p>
         </div>
         <div className="flex gap-[7px]">
@@ -347,7 +468,10 @@ export default function ExecutiveDashboard({ onOpenBlogModal }: DashboardPagePro
                     Category
                   </th>
                   <th className="text-right p-[8px] text-[10px] font-bold tracking-wider uppercase border-b border-[var(--bd)]">
-                    Trend
+                    Tokens
+                  </th>
+                  <th className="text-right p-[8px] text-[10px] font-bold tracking-wider uppercase border-b border-[var(--bd)]">
+                    Cost
                   </th>
                   <th className="text-right p-[8px] text-[10px] font-bold tracking-wider uppercase border-b border-[var(--bd)]">
                     Quality
@@ -377,8 +501,11 @@ export default function ExecutiveDashboard({ onOpenBlogModal }: DashboardPagePro
                         {b.cat}
                       </span>
                     </td>
-                    <td className="p-[9px_8px] text-right font-mono font-semibold text-[11.5px] text-[var(--fg2)]">
-                      {b.trend}
+                    <td className="p-[9px_8px] text-right font-mono text-[11px] text-[var(--fg2)]">
+                      {b.tokens ?? "-"}
+                    </td>
+                    <td className="p-[9px_8px] text-right font-mono font-semibold text-[11px] text-[var(--fg2)]">
+                      {b.cost ?? "$0.00"}
                     </td>
                     <td className="p-[9px_8px] text-right">
                       <span
@@ -408,7 +535,7 @@ export default function ExecutiveDashboard({ onOpenBlogModal }: DashboardPagePro
                   </tr>
                 )) : (
                   <tr>
-                    <td colSpan={6} className="p-[32px_14px] text-center text-[12px] text-[var(--mut)]">
+                    <td colSpan={7} className="p-[32px_14px] text-center text-[12px] text-[var(--mut)]">
                       No recent generations yet.
                     </td>
                   </tr>
@@ -423,90 +550,192 @@ export default function ExecutiveDashboard({ onOpenBlogModal }: DashboardPagePro
           <div className="p-[12px_14px] border-b border-[var(--bd)]">
             <div className="flex items-center justify-between">
               <span className="text-[13px] font-bold text-[var(--fg)]">
-                Token & cost analytics
+                Token &amp; cost analytics
               </span>
               <span className="font-mono font-bold text-[13px] text-[var(--fg)]">
-                $0.00
+                {analytics.cost.todayLabel}
               </span>
             </div>
             <div className="flex gap-[12px] mt-[8px] flex-wrap">
-              {[
-                { name: "Gemini 2.5 Pro", val: "$0.00", color: "var(--indigo)" },
-                { name: "Gemini 2.5 Flash", val: "$0.00", color: "var(--emerald)" },
-                { name: "Imagen 4", val: "$0.00", color: "var(--amber)" },
-              ].map((l, idx) => (
-                <span key={idx} className="flex items-center gap-[5px] text-[10.5px] text-[var(--mut)]">
-                  <span
-                    className="w-[8px] h-[8px] rounded-[2px]"
-                    style={{ background: l.color }}
-                  />
-                  {l.name}
-                  <span className="font-mono font-semibold text-[10px] text-[var(--fg2)]">
-                    {l.val}
+              {analytics.models.length > 0 ? (
+                analytics.models.map((m) => (
+                  <span key={m.model} className="flex items-center gap-[5px] text-[10.5px] text-[var(--mut)]">
+                    <span className="w-[8px] h-[8px] rounded-[2px]" style={{ background: m.color }} />
+                    {m.model}
+                    <span className="font-mono font-semibold text-[10px] text-[var(--fg2)]">
+                      {m.costLabel}
+                    </span>
                   </span>
-                </span>
-              ))}
+                ))
+              ) : (
+                <span className="text-[10.5px] text-[var(--faint)]">No model calls recorded today</span>
+              )}
             </div>
           </div>
           <div className="p-[14px]">
-            {/* Cost Analytics Bar Chart */}
+            {/* 7-day stacked cost chart */}
             <div className="w-full h-[160px] flex items-end justify-between gap-[6px] pt-[10px] pb-[4px] border-b border-[var(--bd)]">
-              {[
-                { day: "Mon", pro: 0, flash: 0, img: 0 },
-                { day: "Tue", pro: 0, flash: 0, img: 0 },
-                { day: "Wed", pro: 0, flash: 0, img: 0 },
-                { day: "Thu", pro: 0, flash: 0, img: 0 },
-                { day: "Fri", pro: 0, flash: 0, img: 0 },
-                { day: "Sat", pro: 0, flash: 0, img: 0 },
-                { day: "Sun", pro: 0, flash: 0, img: 0 },
-              ].map((bar, i) => (
-                <div key={i} className="flex-1 flex flex-col items-center gap-[4px] h-full justify-end">
-                  <div className="w-full max-w-[24px] flex flex-col gap-[2px]">
-                    <div className="w-full rounded-[2px] bg-[var(--amber)]" style={{ height: `${bar.img}px` }} />
-                    <div className="w-full rounded-[2px] bg-[var(--emerald)]" style={{ height: `${bar.flash}px` }} />
-                    <div className="w-full rounded-[2px] bg-[var(--indigo)]" style={{ height: `${bar.pro}px` }} />
+              {analytics.daily.map((bar) => (
+                <div key={bar.date} className="flex-1 flex flex-col items-center gap-[4px] h-full justify-end group relative">
+                  <div
+                    className="w-full max-w-[24px] flex flex-col-reverse gap-[2px] justify-start"
+                    style={{ height: `${Math.round((bar.heightPct / 100) * 120)}px` }}
+                    title={`${bar.date}: ${bar.costLabel} · ${bar.calls} calls`}
+                  >
+                    {bar.models.length > 0 ? (
+                      bar.models.map((segment) => (
+                        <div
+                          key={segment.model}
+                          className="w-full rounded-[2px]"
+                          style={{
+                            background: segment.color,
+                            height: `${bar.cost > 0 ? Math.max(2, (segment.cost / bar.cost) * 100) : 0}%`,
+                          }}
+                        />
+                      ))
+                    ) : (
+                      <div className="w-full rounded-[2px] bg-[var(--bd)]" style={{ height: "2px" }} />
+                    )}
                   </div>
                   <span className="font-mono text-[9px] text-[var(--faint)]">{bar.day}</span>
                 </div>
               ))}
             </div>
 
-            {/* Quick Metrics Grid */}
+            {/* Real token + cost metrics */}
             <div className="mt-[10px] grid grid-cols-2 gap-[8px]">
               <div className="border border-[var(--bd)] rounded-[9px] p-[8px_10px] bg-[var(--card2)]">
-                <div className="text-[10px] text-[var(--mut)] font-semibold">
-                  Input tokens
-                </div>
+                <div className="text-[10px] text-[var(--mut)] font-semibold">Input tokens</div>
                 <div className="font-mono text-[14px] font-bold text-[var(--fg)] mt-[2px]">
-                  0
+                  {analytics.tokens.promptLabel}
                 </div>
               </div>
               <div className="border border-[var(--bd)] rounded-[9px] p-[8px_10px] bg-[var(--card2)]">
-                <div className="text-[10px] text-[var(--mut)] font-semibold">
-                  Output tokens
-                </div>
+                <div className="text-[10px] text-[var(--mut)] font-semibold">Output tokens</div>
                 <div className="font-mono text-[14px] font-bold text-[var(--fg)] mt-[2px]">
-                  0
+                  {analytics.tokens.completionLabel}
                 </div>
               </div>
               <div className="border border-[var(--bd)] rounded-[9px] p-[8px_10px] bg-[var(--card2)]">
-                <div className="text-[10px] text-[var(--mut)] font-semibold">
-                  Cost / blog
-                </div>
+                <div className="text-[10px] text-[var(--mut)] font-semibold">Cost / blog</div>
                 <div className="font-mono text-[14px] font-bold text-[var(--fg)] mt-[2px]">
-                  $0.00
+                  {analytics.cost.perBlogLabel}
                 </div>
               </div>
               <div className="border border-[var(--bd)] rounded-[9px] p-[8px_10px] bg-[var(--card2)]">
-                <div className="text-[10px] text-[var(--mut)] font-semibold">
-                  Imagen 4 calls
-                </div>
+                <div className="text-[10px] text-[var(--mut)] font-semibold">Avg latency</div>
                 <div className="font-mono text-[14px] font-bold text-[var(--fg)] mt-[2px]">
-                  0
+                  {analytics.avgLatencyMs > 0 ? `${(analytics.avgLatencyMs / 1000).toFixed(1)}s` : "-"}
                 </div>
               </div>
             </div>
+
+            {/* Cost per worker */}
+            <div className="mt-[12px]">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--mut)] mb-[7px]">
+                Spend by worker
+              </div>
+              {analytics.workers.length > 0 ? (
+                <div className="flex flex-col gap-[6px]">
+                  {analytics.workers.map((w) => (
+                    <div key={w.worker} className="flex items-center gap-[8px]">
+                      <span className="text-[10.5px] text-[var(--fg2)] w-[58px] shrink-0">{w.label}</span>
+                      <div className="flex-1 h-[6px] rounded-[3px] bg-[var(--bd)] overflow-hidden">
+                        <div
+                          className="h-full rounded-[3px]"
+                          style={{ width: `${w.sharePct}%`, background: w.color }}
+                        />
+                      </div>
+                      <span className="font-mono text-[10px] font-semibold text-[var(--fg)] w-[52px] text-right">
+                        {w.costLabel}
+                      </span>
+                      <span className="font-mono text-[9.5px] text-[var(--faint)] w-[40px] text-right">
+                        {w.totalTokensLabel}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-[10.5px] text-[var(--faint)]">No worker spend recorded today</div>
+              )}
+            </div>
           </div>
+        </div>
+      </div>
+
+      {/* Model Performance Table */}
+      <div className="bg-[var(--card)] border border-[var(--bd)] rounded-[12px] shadow-[var(--shadow)] overflow-hidden">
+        <div className="flex items-center gap-[10px] p-[12px_14px] border-b border-[var(--bd)]">
+          <span className="text-[13px] font-bold text-[var(--fg)]">Model performance</span>
+          <span className="font-mono text-[10px] font-medium p-[2px_6px] rounded-[6px] bg-[var(--card2)] text-[var(--mut)]">
+            Vertex AI · today
+          </span>
+          <span className="ml-auto text-[11px] text-[var(--mut)]">
+            {analytics.tokens.totalLabel} tokens · {analytics.calls} calls
+          </span>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse text-[12px]">
+            <thead>
+              <tr className="bg-[var(--card2)] text-[var(--mut)]">
+                <th className="text-left p-[8px_14px] text-[10px] font-bold tracking-wider uppercase border-b border-[var(--bd)]">
+                  Model
+                </th>
+                <th className="text-right p-[8px] text-[10px] font-bold tracking-wider uppercase border-b border-[var(--bd)]">
+                  Calls
+                </th>
+                <th className="text-right p-[8px] text-[10px] font-bold tracking-wider uppercase border-b border-[var(--bd)]">
+                  Input
+                </th>
+                <th className="text-right p-[8px] text-[10px] font-bold tracking-wider uppercase border-b border-[var(--bd)]">
+                  Output
+                </th>
+                <th className="text-right p-[8px] text-[10px] font-bold tracking-wider uppercase border-b border-[var(--bd)]">
+                  Avg latency
+                </th>
+                <th className="text-right p-[8px] text-[10px] font-bold tracking-wider uppercase border-b border-[var(--bd)]">
+                  Share
+                </th>
+                <th className="text-right p-[8px_14px] text-[10px] font-bold tracking-wider uppercase border-b border-[var(--bd)]">
+                  Cost
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {analytics.models.length > 0 ? (
+                analytics.models.map((m) => (
+                  <tr key={m.model} className="border-b border-[var(--bd)] hover:bg-[var(--card2)] transition-colors">
+                    <td className="p-[9px_14px]">
+                      <span className="flex items-center gap-[7px]">
+                        <span className="w-[8px] h-[8px] rounded-[2px]" style={{ background: m.color }} />
+                        <span className="font-mono text-[11.5px] font-semibold text-[var(--fg)]">{m.model}</span>
+                      </span>
+                    </td>
+                    <td className="p-[9px_8px] text-right font-mono text-[11.5px] text-[var(--fg2)]">{m.calls}</td>
+                    <td className="p-[9px_8px] text-right font-mono text-[11.5px] text-[var(--fg2)]">
+                      {m.promptTokens.toLocaleString()}
+                    </td>
+                    <td className="p-[9px_8px] text-right font-mono text-[11.5px] text-[var(--fg2)]">
+                      {m.completionTokens.toLocaleString()}
+                    </td>
+                    <td className="p-[9px_8px] text-right font-mono text-[11.5px] text-[var(--fg2)]">
+                      {m.avgLatencyMs > 0 ? `${(m.avgLatencyMs / 1000).toFixed(1)}s` : "-"}
+                    </td>
+                    <td className="p-[9px_8px] text-right font-mono text-[11.5px] text-[var(--fg2)]">{m.sharePct}%</td>
+                    <td className="p-[9px_14px] text-right font-mono text-[11.5px] font-bold text-[var(--fg)]">
+                      {m.costLabel}
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={7} className="p-[32px_14px] text-center text-[12px] text-[var(--mut)]">
+                    No AI calls recorded today.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
     </div>

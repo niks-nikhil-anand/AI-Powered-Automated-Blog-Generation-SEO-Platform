@@ -14,7 +14,8 @@ The system is built as a **Next.js application** with a **BullMQ-based job queue
 - **Frontend/Framework**: Next.js 16.2 + React 19 + TypeScript
 - **Job Queue**: BullMQ + Redis
 - **Database**: PostgreSQL + Prisma ORM
-- **AI Models**: Google Vertex AI (Gemini 2.5 Pro/Flash, Imagen 4)
+- **AI Models**: Google Vertex AI (Gemini 2.5 Pro / Flash). Hero images are rendered
+  locally as SVG — no image model is called.
 - **Styling**: Tailwind CSS 4 + shadcn/ui components
 - **Logging**: Winston
 - **XML Parsing**: fast-xml-parser
@@ -132,16 +133,18 @@ Research → Planning → Outline → Writing → Image → Quality → Publish
 ---
 
 ### Stage 5: Image Worker
-**Purpose**: Generate feature images using AI
+**Purpose**: Generate the hero image and upload it
 
 **Input**: Jobs from Image Queue (Blog metadata)
 
 **Process**:
-- Calls **Google Imagen 4** API to generate:
-  - Feature image based on blog title + topic
-  - 1200x630px optimal dimensions
-- Uploads to **cloud storage** (bucket path + public URL)
+- Renders an editorial hero image locally as SVG (`image-worker/generator.ts`) from
+  the blog title, category and excerpt — deterministic, no API call, **$0 cost**
+- Uploads to **S3** (bucket path + CDN public URL)
 - Links image to Blog as `featuredImage`
+
+> Swapping this for Vertex Imagen is a drop-in change to `generateEditorialHeroImage`;
+> until then the dashboard correctly reports zero image spend.
 
 **Output**: Updates Blog with `featuredImageId`, dispatches to **Quality Queue**
 
@@ -230,7 +233,10 @@ Research → Planning → Outline → Writing → Image → Quality → Publish
 - `workflowRunId` (FK), `worker`, `status`, `input` (JSON), `output` (JSON), `error` (if failed)
 
 **AIUsage** (cost tracking)
-- `worker`, `model`, `promptTokens`, `completionTokens`, `cost`, `latency`
+- `worker`, `model`, `blogId` (FK), `trendId`, `promptTokens`, `completionTokens`,
+  `cost` (USD, computed at write time), `latency` (ms)
+- Indexed on `blogId`, `createdAt`, `(worker, createdAt)`, `(model, createdAt)` for
+  fast dashboard rollups
 
 ---
 
@@ -285,10 +291,15 @@ publishQueue       // Publication
 - Latest 6 blogs with title, category, trend score, quality, status
 - Links to detailed blog view
 
-**Cost analytics**:
-- Daily spend breakdown (Gemini Pro, Flash, Imagen 4)
-- Input/output token counts
-- Cost per blog
+**Cost analytics** (real data, from the `AIUsage` table):
+- 7-day stacked spend chart, segmented by model
+- Input / output token counts for today
+- Cost per blog and projected monthly spend
+- Spend by worker (which stage is expensive)
+- Model performance table: calls, tokens, avg latency, share of spend, cost
+
+Costs are computed at write time from `workers/shared/pricing.ts` using Vertex AI
+list prices, so the numbers are real rather than placeholders.
 
 ### Sub-pages
 - `/dashboard/blogs` - Browse all generated blogs (search, filter, detail modal)
