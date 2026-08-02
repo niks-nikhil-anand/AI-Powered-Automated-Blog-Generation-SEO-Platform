@@ -10,6 +10,14 @@ import { dedupeSignals } from "./pipeline/dedupe";
 import { scoreClusters } from "./pipeline/score";
 import { promotableCandidates } from "./pipeline/promote";
 import { RawSignal, ResearchCandidate } from "./types";
+import {
+  assertGate,
+  failWorkerAttempt,
+  passWorkerAttempt,
+  type QualityGateReport,
+  startWorkerAttempt,
+  QualityGateError,
+} from "../shared/recovery";
 
 const log = logger.child({ worker: "research-worker" });
 
@@ -54,109 +62,148 @@ function candidateDescription(candidate: ResearchCandidate): string {
  * once the planning/outline workers exist.
  */
 export async function runResearch() {
+  const attempt = await startWorkerAttempt({
+    worker: "research-worker",
+    input: {
+      sources: getEnabledSources().map((source) => source.name),
+      geo: env.GOOGLE_TRENDS_GEO,
+    },
+  });
   const sources = getEnabledSources();
   log.info("Starting research run", {
     sources: sources.map((source) => source.name),
     geo: env.GOOGLE_TRENDS_GEO,
   });
 
-  const sourceResults = await Promise.allSettled(
-    sources.map(async (source) => ({
-      source: source.name,
-      signals: await source.fetchSignals(),
-    }))
-  );
+  try {
+    const sourceResults = await Promise.allSettled(
+      sources.map(async (source) => ({
+        source: source.name,
+        signals: await source.fetchSignals(),
+      }))
+    );
 
-  const rawSignals: RawSignal[] = [];
-  const failedSources: string[] = [];
+    const rawSignals: RawSignal[] = [];
+    const failedSources: string[] = [];
 
-  for (const result of sourceResults) {
-    if (result.status === "fulfilled") {
-      rawSignals.push(...result.value.signals);
-      log.info("Fetched research signals", {
-        source: result.value.source,
-        count: result.value.signals.length,
-      });
-    } else {
-      failedSources.push(result.reason instanceof Error ? result.reason.message : String(result.reason));
+    for (const result of sourceResults) {
+      if (result.status === "fulfilled") {
+        rawSignals.push(...result.value.signals);
+        log.info("Fetched research signals", {
+          source: result.value.source,
+          count: result.value.signals.length,
+        });
+      } else {
+        failedSources.push(result.reason instanceof Error ? result.reason.message : String(result.reason));
+      }
     }
-  }
 
-  const normalized = normalizeSignals(rawSignals);
-  const clusters = dedupeSignals(normalized);
-  const scored = scoreClusters(clusters);
-  const promotable = promotableCandidates(scored);
-  log.info("Research scoring complete", {
-    rawSignals: rawSignals.length,
-    normalized: normalized.length,
-    clusters: clusters.length,
-    promotable: promotable.length,
-    failedSources,
-  });
-
-  const since = startOfToday();
-  const duplicateCutoff = recentDuplicateCutoff();
-  const created: { id: string; topic: string; category: string; description: string; score: number }[] = [];
-
-  for (const item of promotable) {
-    const alreadySavedToday = await prisma.trend.findFirst({
-      where: { topic: item.title, createdAt: { gte: since } },
-      select: { id: true },
+    const normalized = normalizeSignals(rawSignals);
+    const clusters = dedupeSignals(normalized);
+    const scored = scoreClusters(clusters);
+    const promotable = promotableCandidates(scored);
+    log.info("Research scoring complete", {
+      rawSignals: rawSignals.length,
+      normalized: normalized.length,
+      clusters: clusters.length,
+      promotable: promotable.length,
+      failedSources,
     });
-    if (alreadySavedToday) continue;
 
-    const recentDuplicate = await prisma.trend.findFirst({
-      where: {
-        OR: [{ topic: item.title }, { topic: { contains: item.title, mode: "insensitive" } }],
-        createdAt: { gte: duplicateCutoff },
-      },
-      select: { id: true },
-    });
-    if (recentDuplicate) continue;
+    const since = startOfToday();
+    const duplicateCutoff = recentDuplicateCutoff();
+    const created: { id: string; topic: string; category: string; description: string; score: number }[] = [];
 
-    const trend = await prisma.trend.create({
-      data: {
-        topic: item.title,
-        source: item.evidence.map((signal) => signal.source).join(","),
-        category: item.category,
+    for (const item of promotable) {
+      const alreadySavedToday = await prisma.trend.findFirst({
+        where: { topic: item.title, createdAt: { gte: since } },
+        select: { id: true },
+      });
+      if (alreadySavedToday) continue;
+
+      const recentDuplicate = await prisma.trend.findFirst({
+        where: {
+          OR: [{ topic: item.title }, { topic: { contains: item.title, mode: "insensitive" } }],
+          createdAt: { gte: duplicateCutoff },
+        },
+        select: { id: true },
+      });
+      if (recentDuplicate) continue;
+
+      const trend = await prisma.trend.create({
+        data: {
+          topic: item.title,
+          source: item.evidence.map((signal) => signal.source).join(","),
+          category: item.category,
+          score: item.score,
+          status: "NEW",
+        },
+      });
+      created.push({
+        id: trend.id,
+        topic: trend.topic,
+        category: trend.category,
+        description: candidateDescription(item),
         score: item.score,
-        status: "NEW",
-      },
+      });
+    }
+
+    const topN = created
+      .filter((trend) => trend.score >= env.RESEARCH_MIN_SCORE_TO_WRITE)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 1);
+    const bestScore = Math.max(0, ...created.map((trend) => trend.score));
+    const researchGate: QualityGateReport = {
+      stage: "research-worker",
+      score: bestScore,
+      passed: topN.length === 1 && bestScore >= env.RESEARCH_MIN_SCORE_TO_WRITE,
+      reasons:
+        topN.length === 1
+          ? ["Selected one score-qualified topic"]
+          : [`No newly-created topic reached score ${env.RESEARCH_MIN_SCORE_TO_WRITE}`],
+    };
+    assertGate(researchGate);
+
+    for (const trend of topN) {
+      await planningQueue.add("plan_blog", {
+        trendId: trend.id,
+        topic: trend.topic,
+        category: trend.category,
+        score: trend.score,
+        evidenceSummary: trend.description,
+      });
+      await prisma.trend.update({ where: { id: trend.id }, data: { status: "PLANNED" } });
+    }
+
+    log.info(
+      `Saved ${created.length} new research candidates, dispatched ${topN.length} score>=${env.RESEARCH_MIN_SCORE_TO_WRITE} topic to ${QUEUE_NAMES.planning}`
+    );
+
+    const output = {
+      rawSignals: rawSignals.length,
+      clusterCount: clusters.length,
+      promotableCount: promotable.length,
+      savedCount: created.length,
+      dispatchedCount: topN.length,
+      failedSources,
+    };
+    await passWorkerAttempt({
+      workflowRunId: attempt.workflow.id,
+      attemptId: attempt.attempt.id,
+      output,
+      qualityReport: researchGate,
+      nextStage: "planning-worker",
     });
-    created.push({
-      id: trend.id,
-      topic: trend.topic,
-      category: trend.category,
-      description: candidateDescription(item),
-      score: item.score,
+    return output;
+  } catch (err) {
+    await failWorkerAttempt({
+      workflowRunId: attempt.workflow.id,
+      attemptId: attempt.attempt.id,
+      error: err,
+      qualityReport: err instanceof QualityGateError ? err.report : undefined,
     });
+    throw err;
   }
-
-  const topN = created.sort((a, b) => b.score - a.score).slice(0, env.TRENDS_TO_WRITE_PER_RUN);
-
-  for (const trend of topN) {
-    await planningQueue.add("plan_blog", {
-      trendId: trend.id,
-      topic: trend.topic,
-      category: trend.category,
-      score: trend.score,
-      evidenceSummary: trend.description,
-    });
-    await prisma.trend.update({ where: { id: trend.id }, data: { status: "PLANNED" } });
-  }
-
-  log.info(
-    `Saved ${created.length} new research candidates, dispatched ${topN.length} to ${QUEUE_NAMES.planning}`
-  );
-
-  return {
-    rawSignals: rawSignals.length,
-    clusterCount: clusters.length,
-    promotableCount: promotable.length,
-    savedCount: created.length,
-    dispatchedCount: topN.length,
-    failedSources,
-  };
 }
 
 async function registerDailySchedule() {
