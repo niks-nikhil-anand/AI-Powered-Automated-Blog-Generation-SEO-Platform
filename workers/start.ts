@@ -12,6 +12,7 @@ import { startResearchWorker } from "./research-worker/index";
 import { startPlanningWorker } from "./planning-worker/index";
 import { startOutlineWorker } from "./outline-worker/index";
 import { startWritingWorker } from "./writing-worker/index";
+import { startImageWorker } from "./image-worker/index";
 import { logger } from "./shared/logger";
 
 const log = logger.child({ worker: "start" });
@@ -20,8 +21,9 @@ startResearchWorker();
 startPlanningWorker();
 startOutlineWorker();
 startWritingWorker();
+startImageWorker();
 
-log.info("All workers started (research-worker, planning-worker, outline-worker, writing-worker)");
+log.info("All workers started (research-worker, planning-worker, outline-worker, writing-worker, image-worker)");
 
 process.on("SIGTERM", () => {
   log.info("SIGTERM received, exiting");
