@@ -60,6 +60,49 @@ services:
       - RESEARCH_CRON=${RESEARCH_CRON:-0 8 * * *}
       - TIMEZONE=${TIMEZONE:-Asia/Kolkata}
       - TRENDS_TO_WRITE_PER_RUN=${TRENDS_TO_WRITE_PER_RUN:-5}
+      - RESEARCH_MAX_SIGNALS_PER_SOURCE=${RESEARCH_MAX_SIGNALS_PER_SOURCE:-25}
+      - RESEARCH_MIN_SCORE_TO_PROMOTE=${RESEARCH_MIN_SCORE_TO_PROMOTE:-70}
+      - RESEARCH_RECENT_DUPLICATE_DAYS=${RESEARCH_RECENT_DUPLICATE_DAYS:-30}
+      - RESEARCH_GOOGLE_NEWS_QUERY=${RESEARCH_GOOGLE_NEWS_QUERY:-developer tools OR javascript OR typescript OR ai coding OR open source}
+      - RESEARCH_GITHUB_QUERIES=${RESEARCH_GITHUB_QUERIES:-created:>2026-07-01 stars:>100 language:TypeScript,created:>2026-07-01 stars:>100 language:JavaScript,created:>2026-07-01 stars:>100 language:Python}
+    depends_on:
+      - postgres
+      - redis
+    restart: always
+
+  planning-worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.worker
+    container_name: blog-agent-planning-worker
+    command: ["node_modules/.bin/tsx", "workers/planning-worker/index.ts"]
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/blog_agent?schema=public
+      - REDIS_URL=redis://redis:6379
+      - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT:-}
+      - GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS:-}
+      - VERTEX_LOCATION=${VERTEX_LOCATION:-us-central1}
+      - VERTEX_FLASH=${VERTEX_FLASH:-gemini-2.5-flash}
+    depends_on:
+      - postgres
+      - redis
+    restart: always
+
+  outline-worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.worker
+    container_name: blog-agent-outline-worker
+    command: ["node_modules/.bin/tsx", "workers/outline-worker/index.ts"]
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/blog_agent?schema=public
+      - REDIS_URL=redis://redis:6379
+      - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT:-}
+      - GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS:-}
+      - VERTEX_LOCATION=${VERTEX_LOCATION:-us-central1}
+      - VERTEX_FLASH=${VERTEX_FLASH:-gemini-2.5-flash}
     depends_on:
       - postgres
       - redis
@@ -79,6 +122,7 @@ services:
       - GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS:-}
       - VERTEX_LOCATION=${VERTEX_LOCATION:-us-central1}
       - VERTEX_MODEL=${VERTEX_MODEL:-gemini-2.5-pro}
+      - VERTEX_FLASH=${VERTEX_FLASH:-gemini-2.5-flash}
       - BLOG_MIN_WORDS=${BLOG_MIN_WORDS:-1200}
       - BLOG_MAX_WORDS=${BLOG_MAX_WORDS:-2000}
     depends_on:
