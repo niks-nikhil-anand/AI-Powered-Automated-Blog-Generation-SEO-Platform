@@ -35,9 +35,10 @@ export const env = {
   GOOGLE_TRENDS_GEO: optional("GOOGLE_TRENDS_GEO", "US"),
   RESEARCH_CRON: optional("RESEARCH_CRON", "0 8 * * *"), // 8:00 AM daily
   TIMEZONE: optional("TIMEZONE", "Asia/Kolkata"),
-  TRENDS_TO_WRITE_PER_RUN: Number(optional("TRENDS_TO_WRITE_PER_RUN", "5")),
+  TRENDS_TO_WRITE_PER_RUN: Number(optional("TRENDS_TO_WRITE_PER_RUN", "1")),
   RESEARCH_MAX_SIGNALS_PER_SOURCE: Number(optional("RESEARCH_MAX_SIGNALS_PER_SOURCE", "25")),
   RESEARCH_MIN_SCORE_TO_PROMOTE: Number(optional("RESEARCH_MIN_SCORE_TO_PROMOTE", "70")),
+  RESEARCH_MIN_SCORE_TO_WRITE: Number(optional("RESEARCH_MIN_SCORE_TO_WRITE", "90")),
   RESEARCH_RECENT_DUPLICATE_DAYS: Number(optional("RESEARCH_RECENT_DUPLICATE_DAYS", "30")),
   RESEARCH_GOOGLE_NEWS_QUERY: optional(
     "RESEARCH_GOOGLE_NEWS_QUERY",
@@ -57,11 +58,11 @@ export const env = {
 
   // Image worker / AWS S3
   AWS_REGION: optional("AWS_REGION", "us-east-1"),
-  AWS_ACCESS_KEY_ID: required("AWS_ACCESS_KEY_ID"),
-  AWS_SECRET_ACCESS_KEY: required("AWS_SECRET_ACCESS_KEY"),
+  AWS_ACCESS_KEY_ID: optional("AWS_ACCESS_KEY_ID", optional("AWS_ACCESS_KEY", "")),
+  AWS_SECRET_ACCESS_KEY: optional("AWS_SECRET_ACCESS_KEY", optional("AWS_SECRET_KEY", "")),
   AWS_SESSION_TOKEN: required("AWS_SESSION_TOKEN"),
-  AWS_S3_BUCKET: required("AWS_S3_BUCKET"),
-  AWS_S3_PUBLIC_BASE_URL: required("AWS_S3_PUBLIC_BASE_URL"),
+  AWS_S3_BUCKET: optional("AWS_S3_BUCKET", optional("AWS_BUCKET_NAME", "")),
+  AWS_S3_PUBLIC_BASE_URL: optional("AWS_S3_PUBLIC_BASE_URL", optional("AWS_CLOUDFRONT_URL", "")),
 
   LOG_LEVEL: optional("LOG_LEVEL", "info"),
 };
