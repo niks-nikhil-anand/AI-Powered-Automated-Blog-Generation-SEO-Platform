@@ -14,13 +14,15 @@ export const QUEUE_NAMES = {
   outline: "outline_queue",
   writing: "writing_queue",
   image: "image_queue",
+  quality: "quality_queue",
+  publish: "publish_queue",
 } as const;
 
 export const researchQueue = new Queue(QUEUE_NAMES.research, {
   connection: createRedisConnection(),
   defaultJobOptions: {
-    attempts: 3,
-    backoff: { type: "exponential", delay: 5000 },
+    attempts: 4,
+    backoff: { type: "recovery" },
     removeOnComplete: { count: 200 },
     removeOnFail: { count: 500 },
   },
@@ -29,8 +31,8 @@ export const researchQueue = new Queue(QUEUE_NAMES.research, {
 export const planningQueue = new Queue(QUEUE_NAMES.planning, {
   connection: createRedisConnection(),
   defaultJobOptions: {
-    attempts: 3,
-    backoff: { type: "exponential", delay: 5000 },
+    attempts: 4,
+    backoff: { type: "recovery" },
     removeOnComplete: { count: 200 },
     removeOnFail: { count: 500 },
   },
@@ -39,8 +41,8 @@ export const planningQueue = new Queue(QUEUE_NAMES.planning, {
 export const outlineQueue = new Queue(QUEUE_NAMES.outline, {
   connection: createRedisConnection(),
   defaultJobOptions: {
-    attempts: 3,
-    backoff: { type: "exponential", delay: 5000 },
+    attempts: 4,
+    backoff: { type: "recovery" },
     removeOnComplete: { count: 200 },
     removeOnFail: { count: 500 },
   },
@@ -49,8 +51,8 @@ export const outlineQueue = new Queue(QUEUE_NAMES.outline, {
 export const writingQueue = new Queue(QUEUE_NAMES.writing, {
   connection: createRedisConnection(),
   defaultJobOptions: {
-    attempts: 3,
-    backoff: { type: "exponential", delay: 10000 },
+    attempts: 4,
+    backoff: { type: "recovery" },
     removeOnComplete: { count: 200 },
     removeOnFail: { count: 500 },
   },
@@ -59,8 +61,28 @@ export const writingQueue = new Queue(QUEUE_NAMES.writing, {
 export const imageQueue = new Queue(QUEUE_NAMES.image, {
   connection: createRedisConnection(),
   defaultJobOptions: {
-    attempts: 3,
-    backoff: { type: "exponential", delay: 15000 },
+    attempts: 4,
+    backoff: { type: "recovery" },
+    removeOnComplete: { count: 200 },
+    removeOnFail: { count: 500 },
+  },
+});
+
+export const qualityQueue = new Queue(QUEUE_NAMES.quality, {
+  connection: createRedisConnection(),
+  defaultJobOptions: {
+    attempts: 4,
+    backoff: { type: "recovery" },
+    removeOnComplete: { count: 200 },
+    removeOnFail: { count: 500 },
+  },
+});
+
+export const publishQueue = new Queue(QUEUE_NAMES.publish, {
+  connection: createRedisConnection(),
+  defaultJobOptions: {
+    attempts: 4,
+    backoff: { type: "recovery" },
     removeOnComplete: { count: 200 },
     removeOnFail: { count: 500 },
   },
@@ -84,6 +106,10 @@ export type WritingJobPayload = {
   outlineId?: string;
   topic: string;
   description: string;
+  recoveryContext?: {
+    reason: string;
+    qualityReport?: unknown;
+  };
 };
 
 export type ImageJobPayload = {
@@ -93,4 +119,13 @@ export type ImageJobPayload = {
   slug: string;
   category: string;
   excerpt?: string;
+};
+
+export type QualityJobPayload = {
+  blogId: string;
+};
+
+export type PublishJobPayload = {
+  blogId: string;
+  qualityReportId: string;
 };
