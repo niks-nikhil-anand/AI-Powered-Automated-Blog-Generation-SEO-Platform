@@ -7,6 +7,7 @@ import { BlogItem } from "../../components/shared/BlogDetailModal";
 
 interface DashboardPageProps {
   onOpenBlogModal?: (blog: BlogItem) => void;
+  onOpenRunPipeline?: () => void;
 }
 
 type StageKey = "research" | "planning" | "outline" | "writing" | "image" | "quality" | "publish";
@@ -127,7 +128,7 @@ const emptyAnalytics: Analytics = {
   avgLatencyMs: 0,
 };
 
-export default function ExecutiveDashboard({ onOpenBlogModal }: DashboardPageProps) {
+export default function ExecutiveDashboard({ onOpenBlogModal, onOpenRunPipeline }: DashboardPageProps) {
   const [range, setRange] = useState("24h");
   const [recentBlogs, setRecentBlogs] = useState<BlogItem[]>([]);
   const [analytics, setAnalytics] = useState<Analytics>(emptyAnalytics);
@@ -337,6 +338,14 @@ export default function ExecutiveDashboard({ onOpenBlogModal }: DashboardPagePro
             className="h-[29px] px-[11px] rounded-[8px] border border-[var(--bd)] bg-[var(--card)] text-[var(--fg2)] text-[11.5px] font-semibold hover:border-[var(--bd2)]"
           >
             Export
+          </button>
+          <button
+            aria-label="Run pipeline"
+            onClick={() => onOpenRunPipeline?.()}
+            className="h-[29px] px-[12px] rounded-[8px] border border-transparent bg-[var(--indigo)] text-white text-[11.5px] font-bold hover:bg-[#4f46e5] transition-colors flex items-center gap-[6px]"
+          >
+            <span className="text-[9px] leading-none">▶</span>
+            Run
           </button>
         </div>
       </div>
