@@ -13,6 +13,8 @@
     "worker:outline": "tsx workers/outline-worker/index.ts",
     "worker:writing": "tsx workers/writing-worker/index.ts",
     "worker:image": "tsx workers/image-worker/index.ts",
+    "worker:quality": "tsx workers/quality-worker/index.ts",
+    "worker:publish": "tsx workers/publish-worker/index.ts",
     "worker:dev": "tsx workers/start.ts"
   },
   "dependencies": {
