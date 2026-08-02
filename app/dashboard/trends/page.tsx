@@ -12,6 +12,10 @@ export default function TrendResearchPage({ onOpenManualTopic }: TrendsPageProps
   const [deleteTarget, setDeleteTarget] = useState<TrendRow | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState("");
+  const [approveTarget, setApproveTarget] = useState<TrendRow | null>(null);
+  const [isApproving, setIsApproving] = useState(false);
+  const [approveError, setApproveError] = useState("");
+  const [approveResult, setApproveResult] = useState<{ jobId: string; queue: string } | null>(null);
 
   type TrendRow = {
     id: string;
@@ -54,6 +58,46 @@ export default function TrendResearchPage({ onOpenManualTopic }: TrendsPageProps
       setDeleteError(err instanceof Error ? err.message : "Failed to delete trend");
     } finally {
       setIsDeleting(false);
+    }
+  };
+
+  const openApproveModal = (trend: TrendRow) => {
+    setApproveTarget(trend);
+    setApproveError("");
+    setApproveResult(null);
+  };
+
+  const closeApproveModal = () => {
+    if (isApproving) return;
+    setApproveTarget(null);
+    setApproveError("");
+    setApproveResult(null);
+  };
+
+  const handleApproveTrend = async () => {
+    if (!approveTarget) return;
+    setIsApproving(true);
+    setApproveError("");
+    setApproveResult(null);
+
+    try {
+      const res = await fetch(`/api/trends/${approveTarget.id}/approve`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "Failed to start pipeline");
+      }
+      setApproveResult({ jobId: String(data.jobId), queue: data.queue });
+      setTrends((current) =>
+        current.map((trend) =>
+          trend.id === approveTarget.id
+            ? { ...trend, volume: `PLANNED · queued now`, rec: "Pipeline Queued" }
+            : trend
+        )
+      );
+    } catch (err) {
+      setApproveError(err instanceof Error ? err.message : "Failed to start pipeline");
+    } finally {
+      setIsApproving(false);
     }
   };
 
@@ -197,7 +241,7 @@ export default function TrendResearchPage({ onOpenManualTopic }: TrendsPageProps
             <div className="flex gap-[7px] mt-auto pt-[3px]">
               <button
                 aria-label="Approve topic and send to pipeline"
-                onClick={() => alert(`Approved topic "${t.title}" -> Sent to BullMQ planning_queue`)}
+                onClick={() => openApproveModal(t)}
                 className="flex-1 h-[28px] rounded-[8px] border border-transparent bg-[var(--indigo)] text-white text-[11px] font-semibold hover:bg-[#4f46e5] transition-colors"
               >
                 Approve → Pipeline
@@ -217,6 +261,136 @@ export default function TrendResearchPage({ onOpenManualTopic }: TrendsPageProps
           </div>
         )}
       </div>
+
+      {approveTarget && (
+        <div
+          className="fixed inset-0 z-50 bg-[rgba(2,6,23,0.58)] backdrop-blur-sm flex items-center justify-center p-[18px] animate-dkfade"
+          onClick={closeApproveModal}
+        >
+          <div
+            className="w-full max-w-[620px] bg-[var(--card)] border border-[var(--bd)] rounded-[16px] shadow-[var(--shadow)] overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-[16px] border-b border-[var(--bd)] flex items-start gap-[12px]">
+              <div className="w-[38px] h-[38px] rounded-[12px] bg-[var(--tint)] text-[var(--indigo)] flex items-center justify-center flex-none">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M4 13a8 8 0 0 1 14-5" />
+                  <path d="M14 4h5v5" />
+                  <path d="M20 11a8 8 0 0 1-14 5" />
+                  <path d="M10 20H5v-5" />
+                </svg>
+              </div>
+              <div className="min-w-0">
+                <div className="text-[14px] font-extrabold tracking-tight text-[var(--fg)]">
+                  Run content pipeline
+                </div>
+                <div className="text-[11.5px] text-[var(--mut)] mt-[3px] leading-relaxed">
+                  Approve this research signal and queue it for planning, outline generation, and writing.
+                </div>
+              </div>
+              <button
+                aria-label="Close approve pipeline modal"
+                disabled={isApproving}
+                onClick={closeApproveModal}
+                className="ml-auto w-[30px] h-[30px] rounded-[9px] border border-[var(--bd)] bg-[var(--card)] text-[var(--mut)] flex items-center justify-center hover:text-[var(--fg)] disabled:opacity-50"
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
+                  <path d="M6 6l12 12M18 6L6 18" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="p-[16px] flex flex-col gap-[14px]">
+              <div className="rounded-[12px] border border-[var(--bd)] bg-[var(--card2)] p-[13px]">
+                <div className="flex items-center gap-[8px] flex-wrap mb-[8px]">
+                  <span
+                    className="w-[24px] h-[24px] rounded-[7px] flex items-center justify-center font-mono font-extrabold text-[9px] text-white"
+                    style={{ background: approveTarget.srcColor }}
+                  >
+                    {approveTarget.srcInitial}
+                  </span>
+                  <span className="text-[10.5px] font-semibold text-[var(--mut)]">{approveTarget.source}</span>
+                  <span className="text-[10.5px] font-semibold p-[2px_7px] rounded-[6px] bg-[var(--card)] text-[var(--fg2)]">
+                    {approveTarget.cat}
+                  </span>
+                  <span
+                    className="ml-auto font-mono text-[11px] font-bold p-[2px_8px] rounded-[7px]"
+                    style={{ background: approveTarget.scoreBg, color: approveTarget.scoreFg }}
+                  >
+                    score {approveTarget.score}
+                  </span>
+                </div>
+                <div className="text-[13px] font-bold leading-snug text-[var(--fg)]">
+                  {approveTarget.title}
+                </div>
+                <div className="text-[11px] text-[var(--mut)] mt-[8px]">
+                  {approveTarget.volume}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-[9px]">
+                {[
+                  { label: "Planning", text: "SEO intent, audience, angle", active: true },
+                  { label: "Outline", text: "Sections, FAQs, metadata", active: Boolean(approveResult) },
+                  { label: "Writing", text: "Structured Markdown draft", active: Boolean(approveResult) },
+                ].map((step, index) => (
+                  <div key={step.label} className="rounded-[11px] border border-[var(--bd)] bg-[var(--card)] p-[11px]">
+                    <div className="flex items-center gap-[7px]">
+                      <span
+                        className={`w-[22px] h-[22px] rounded-full flex items-center justify-center text-[10px] font-bold ${
+                          step.active ? "bg-[var(--indigo)] text-white" : "bg-[var(--card2)] text-[var(--mut)]"
+                        }`}
+                      >
+                        {index + 1}
+                      </span>
+                      <span className="text-[11.5px] font-bold text-[var(--fg)]">{step.label}</span>
+                    </div>
+                    <div className="text-[10.5px] text-[var(--mut)] mt-[7px] leading-snug">{step.text}</div>
+                  </div>
+                ))}
+              </div>
+
+              {approveError && (
+                <div className="text-[11px] text-[var(--rose)] bg-[rgba(244,63,94,0.10)] border border-[rgba(244,63,94,0.25)] rounded-[9px] p-[9px_10px]">
+                  {approveError}
+                </div>
+              )}
+
+              {approveResult && (
+                <div className="text-[11px] text-[var(--emerald)] bg-[rgba(16,185,129,0.10)] border border-[rgba(16,185,129,0.25)] rounded-[9px] p-[9px_10px]">
+                  Pipeline queued successfully: job {approveResult.jobId} on {approveResult.queue}.
+                </div>
+              )}
+            </div>
+
+            <div className="p-[12px_16px] border-t border-[var(--bd)] flex items-center justify-between gap-[10px]">
+              <div className="text-[10.5px] text-[var(--mut)]">
+                Worker must be running: <span className="font-mono">npm run worker:dev</span>
+              </div>
+              <div className="flex gap-[8px]">
+                <button
+                  type="button"
+                  disabled={isApproving}
+                  onClick={closeApproveModal}
+                  className="h-[31px] px-[12px] rounded-[8px] border border-[var(--bd)] bg-[var(--card)] text-[var(--fg2)] text-[11.5px] font-semibold hover:border-[var(--bd2)] disabled:opacity-60"
+                >
+                  {approveResult ? "Close" : "Cancel"}
+                </button>
+                {!approveResult && (
+                  <button
+                    type="button"
+                    disabled={isApproving}
+                    onClick={handleApproveTrend}
+                    className="h-[31px] px-[13px] rounded-[8px] border border-transparent bg-[var(--indigo)] text-white text-[11.5px] font-bold hover:bg-[#4f46e5] disabled:opacity-60"
+                  >
+                    {isApproving ? "Queueing..." : "Run pipeline"}
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {deleteTarget && (
         <div
