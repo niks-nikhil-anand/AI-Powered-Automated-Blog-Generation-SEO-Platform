@@ -11,6 +11,11 @@ export interface BlogItem {
   trend?: string;
   quality?: string;
   cost?: string;
+  costValue?: number;
+  tokens?: string;
+  tokenCount?: number;
+  aiCalls?: number;
+  models?: string[];
   status: string;
   updated?: string;
   sBg?: string;

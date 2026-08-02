@@ -5,6 +5,7 @@ import { env } from "../shared/env";
 import { QUEUE_NAMES, type OutlineJobPayload, writingQueue } from "../shared/queues";
 import { generateContentOutline } from "./vertex";
 import { workerOptions } from "../shared/worker-options";
+import { recordAIUsage } from "../shared/pricing";
 import {
   assertGate,
   failWorkerAttempt,
@@ -43,7 +44,9 @@ async function outlineTopic(payload: OutlineJobPayload) {
   }
 
   try {
+    const startedAt = Date.now();
     const { outline, usage, model } = await generateContentOutline(plan.trend.topic, plan.trend.category, plan);
+    const latencyMs = Date.now() - startedAt;
     const sections = Array.isArray(outline.sections) ? outline.sections : [];
     const faqs = Array.isArray(outline.faqs) ? outline.faqs : [];
     const gate = scoreRequiredFields("outline-worker", [
@@ -78,15 +81,12 @@ async function outlineTopic(payload: OutlineJobPayload) {
       },
     });
 
-    await prisma.aIUsage.create({
-      data: {
-        worker: "outline-worker",
-        model,
-        promptTokens: usage.promptTokens,
-        completionTokens: usage.completionTokens,
-        cost: 0,
-        latency: 0,
-      },
+    await recordAIUsage({
+      worker: "outline-worker",
+      model,
+      usage,
+      latencyMs,
+      trendId: payload.trendId,
     });
 
     await writingQueue.add("write_blog", {
