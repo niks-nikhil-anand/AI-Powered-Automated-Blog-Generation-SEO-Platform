@@ -11,6 +11,19 @@ import {
 } from "@/components/ui/select";
 import { DataTable } from "@/components/ui/DataTable";
 import { AssetDetailModal } from "@/components/shared/AssetDetailModal";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Pagination,
+  PaginationContent,
+  PaginationEllipsis,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from "@/components/ui/pagination";
+import { getPaginationRange } from "@/lib/utils";
+
+const ASSETS_PAGE_SIZE = 12;
 
 export default function AssetLibraryPage() {
   const [selectedMonth, setSelectedMonth] = useState("All months");
@@ -18,6 +31,8 @@ export default function AssetLibraryPage() {
   const [viewMode, setViewMode] = useState<"card" | "table">("table");
   const [selectedAsset, setSelectedAsset] = useState<any | null>(null);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
+  const [isLoadingAssets, setIsLoadingAssets] = useState(true);
+  const [page, setPage] = useState(1);
   const [assets, setAssets] = useState<{
     id: string;
     name: string;
@@ -46,6 +61,9 @@ export default function AssetLibraryPage() {
         })
         .catch(() => {
           if (mounted) setAssets([]);
+        })
+        .finally(() => {
+          if (mounted) setIsLoadingAssets(false);
         });
     };
     loadAssets();
@@ -63,6 +81,17 @@ export default function AssetLibraryPage() {
     const matchesType = selectedType === "All types" || asset.kind.toLowerCase() === selectedType.toLowerCase();
     return matchesMonth && matchesType;
   });
+
+  const totalPages = Math.max(1, Math.ceil(filteredAssets.length / ASSETS_PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pagedAssets = filteredAssets.slice(
+    (currentPage - 1) * ASSETS_PAGE_SIZE,
+    currentPage * ASSETS_PAGE_SIZE
+  );
+
+  useEffect(() => {
+    setPage(1);
+  }, [selectedMonth, selectedType, viewMode]);
 
   const columns = [
     {
@@ -215,10 +244,48 @@ export default function AssetLibraryPage() {
       </div>
 
       {/* Asset List/Grid View */}
-      {filteredAssets.length > 0 ? (
+      {isLoadingAssets && assets.length === 0 ? (
         viewMode === "card" ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-[12px]">
-            {filteredAssets.map((a, idx) => (
+            {Array.from({ length: 8 }).map((_, idx) => (
+              <div
+                key={idx}
+                className="bg-[var(--card)] border border-[var(--bd)] rounded-[12px] overflow-hidden shadow-[var(--shadow)] flex flex-col"
+              >
+                <Skeleton className="h-[118px] w-full rounded-none" />
+                <div className="p-[9px_10px] flex flex-col gap-[6px]">
+                  <Skeleton className="h-[12px] w-[80%]" />
+                  <Skeleton className="h-[10px] w-[50%]" />
+                  <Skeleton className="h-[9px] w-[90%]" />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="bg-[var(--card)] border border-[var(--bd)] rounded-[12px] shadow-[var(--shadow)] overflow-hidden">
+            <div className="p-[8px_12px] border-b border-[var(--bd)] bg-[var(--card2)]">
+              <Skeleton className="h-[10px] w-full max-w-[600px]" />
+            </div>
+            {Array.from({ length: 8 }).map((_, idx) => (
+              <div
+                key={idx}
+                className="flex items-center gap-[16px] p-[9px_12px] border-b border-[var(--bd)] last:border-b-0"
+              >
+                <Skeleton className="h-[36px] w-[36px] rounded" />
+                <Skeleton className="h-[13px] flex-1 rounded-[4px]" />
+                <Skeleton className="h-[16px] w-[54px] rounded-[5px]" />
+                <Skeleton className="h-[12px] w-[64px]" />
+                <Skeleton className="h-[12px] w-[48px]" />
+                <Skeleton className="h-[12px] w-[130px]" />
+                <Skeleton className="h-[28px] w-[28px] rounded-[6px]" />
+              </div>
+            ))}
+          </div>
+        )
+      ) : filteredAssets.length > 0 ? (
+        viewMode === "card" ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-[12px]">
+            {pagedAssets.map((a, idx) => (
               <button
                 key={idx}
                 aria-label="Open asset preview"
@@ -275,7 +342,7 @@ export default function AssetLibraryPage() {
           <div className="bg-[var(--card)] border border-[var(--bd)] rounded-[12px] shadow-[var(--shadow)] overflow-hidden">
             <DataTable
               columns={columns}
-              data={filteredAssets}
+              data={pagedAssets}
               onRowClick={(row) => {
                 setSelectedAsset(row);
                 setIsDetailOpen(true);
@@ -286,6 +353,48 @@ export default function AssetLibraryPage() {
       ) : (
         <div className="bg-[var(--card)] border border-[var(--bd)] rounded-[12px] p-[32px] text-center text-[12px] text-[var(--mut)] shadow-[var(--shadow)]">
           No assets yet.
+        </div>
+      )}
+
+      {/* Pagination */}
+      {!isLoadingAssets && filteredAssets.length > 0 && (
+        <div className="flex items-center justify-between gap-[10px] flex-wrap">
+          <span className="text-[11px] text-[var(--mut)]">
+            Showing {(currentPage - 1) * ASSETS_PAGE_SIZE + 1}–
+            {Math.min(currentPage * ASSETS_PAGE_SIZE, filteredAssets.length)} of {filteredAssets.length} objects
+          </span>
+          <Pagination className="justify-end w-auto">
+            <PaginationContent>
+              <PaginationItem>
+                <PaginationPrevious
+                  disabled={currentPage === 1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                />
+              </PaginationItem>
+              {getPaginationRange(currentPage, totalPages).map((entry, idx) =>
+                entry === "ellipsis" ? (
+                  <PaginationItem key={`ellipsis-${idx}`}>
+                    <PaginationEllipsis />
+                  </PaginationItem>
+                ) : (
+                  <PaginationItem key={entry}>
+                    <PaginationLink
+                      isActive={entry === currentPage}
+                      onClick={() => setPage(entry)}
+                    >
+                      {entry}
+                    </PaginationLink>
+                  </PaginationItem>
+                )
+              )}
+              <PaginationItem>
+                <PaginationNext
+                  disabled={currentPage === totalPages}
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                />
+              </PaginationItem>
+            </PaginationContent>
+          </Pagination>
         </div>
       )}
 
