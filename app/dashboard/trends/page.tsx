@@ -205,9 +205,17 @@ export default function TrendResearchPage({ onOpenManualTopic }: TrendsPageProps
     currentPage * TRENDS_PAGE_SIZE
   );
 
-  useEffect(() => {
+  // Reset to page 1 whenever a filter/sort/group control changes. Done as a
+  // render-time state adjustment (not a useEffect) per
+  // https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes -
+  // calling setState synchronously inside an effect body triggers an extra
+  // cascading render this repo's lint config flags as an error.
+  const filterKey = `${activeFilter}|${selectedCategory}|${sortBy}|${groupBy}`;
+  const [prevFilterKey, setPrevFilterKey] = useState(filterKey);
+  if (filterKey !== prevFilterKey) {
+    setPrevFilterKey(filterKey);
     setPage(1);
-  }, [activeFilter, selectedCategory, sortBy, groupBy]);
+  }
 
   const groups: { name: string; items: typeof sortedTrends }[] = [];
   if (groupBy === "none") {
