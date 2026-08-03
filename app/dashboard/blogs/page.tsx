@@ -102,9 +102,14 @@ export default function BlogManagementPage() {
     currentPage * BLOGS_PAGE_SIZE
   );
 
-  useEffect(() => {
+  // Render-time reset (not an effect) - see the comment in the Trends page
+  // for why: setState-in-effect is a lint error in this repo's config.
+  const filterKey = `${activeTab}|${searchQuery}|${categoryFilter}`;
+  const [prevFilterKey, setPrevFilterKey] = useState(filterKey);
+  if (filterKey !== prevFilterKey) {
+    setPrevFilterKey(filterKey);
     setPage(1);
-  }, [activeTab, searchQuery, categoryFilter]);
+  }
 
   return (
     <div className="flex flex-col gap-[13px]">
