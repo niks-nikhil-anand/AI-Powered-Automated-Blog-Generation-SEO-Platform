@@ -18,42 +18,67 @@ const MODEL_DEFAULTS: Record<keyof typeof MODEL_SETTING_KEYS, string> = {
 const MODEL_STAGES = Object.keys(MODEL_SETTING_KEYS) as (keyof typeof MODEL_SETTING_KEYS)[];
 
 export async function GET() {
-  const models: Record<string, string> = {};
-  for (const stage of MODEL_STAGES) {
-    models[stage] = await getSetting(MODEL_SETTING_KEYS[stage], MODEL_DEFAULTS[stage]);
-  }
-  const dailyBlogTarget = await getSetting(DAILY_TARGET_KEY, Number(env.DAILY_BLOG_TARGET));
+  try {
+    const models: Record<string, string> = {};
+    for (const stage of MODEL_STAGES) {
+      models[stage] = await getSetting(MODEL_SETTING_KEYS[stage], MODEL_DEFAULTS[stage]);
+    }
+    const dailyBlogTarget = await getSetting(DAILY_TARGET_KEY, Number(env.DAILY_BLOG_TARGET));
 
-  return NextResponse.json({ models, dailyBlogTarget });
+    return NextResponse.json({ models, dailyBlogTarget });
+  } catch (error) {
+    console.error("Failed to fetch settings:", error);
+    return NextResponse.json(
+      { ok: false, error: "Failed to fetch settings" },
+      { status: 500 }
+    );
+  }
 }
 
 export async function PATCH(request: Request) {
-  const body = await request.json().catch(() => ({}));
-  const { key, value } = body as { key?: string; value?: unknown };
-
-  if (key === "dailyBlogTarget") {
-    const num = Number(value);
-    if (!Number.isFinite(num) || num < 1 || num > 20) {
+  try {
+    let body: Record<string, unknown> = {};
+    try {
+      body = await request.json();
+    } catch (parseError) {
       return NextResponse.json(
-        { ok: false, error: "dailyBlogTarget must be a number between 1 and 20." },
-        { status: 422 }
+        { ok: false, error: "Invalid JSON in request body" },
+        { status: 400 }
       );
     }
-    await setSetting(DAILY_TARGET_KEY, Math.round(num));
-    return NextResponse.json({ ok: true, key, value: Math.round(num) });
-  }
 
-  const stage = MODEL_STAGES.find((s) => MODEL_SETTING_KEYS[s] === key);
-  if (stage) {
-    if (typeof value !== "string" || !value.trim()) {
-      return NextResponse.json({ ok: false, error: "Model name must be a non-empty string." }, { status: 422 });
+    const { key, value } = body as { key?: string; value?: unknown };
+
+    if (key === "dailyBlogTarget") {
+      const num = Number(value);
+      if (!Number.isFinite(num) || num < 1 || num > 20) {
+        return NextResponse.json(
+          { ok: false, error: "dailyBlogTarget must be a number between 1 and 20." },
+          { status: 422 }
+        );
+      }
+      await setSetting(DAILY_TARGET_KEY, Math.round(num));
+      return NextResponse.json({ ok: true, key, value: Math.round(num) });
     }
-    await setSetting(MODEL_SETTING_KEYS[stage], value.trim());
-    return NextResponse.json({ ok: true, key, value: value.trim() });
-  }
 
-  return NextResponse.json(
-    { ok: false, error: `Unknown setting key "${key}".` },
-    { status: 422 }
-  );
+    const stage = MODEL_STAGES.find((s) => MODEL_SETTING_KEYS[s] === key);
+    if (stage) {
+      if (typeof value !== "string" || !value.trim()) {
+        return NextResponse.json({ ok: false, error: "Model name must be a non-empty string." }, { status: 422 });
+      }
+      await setSetting(MODEL_SETTING_KEYS[stage], value.trim());
+      return NextResponse.json({ ok: true, key, value: value.trim() });
+    }
+
+    return NextResponse.json(
+      { ok: false, error: `Unknown setting key "${key}".` },
+      { status: 422 }
+    );
+  } catch (error) {
+    console.error("Failed to update settings:", error);
+    return NextResponse.json(
+      { ok: false, error: "Failed to update settings" },
+      { status: 500 }
+    );
+  }
 }
