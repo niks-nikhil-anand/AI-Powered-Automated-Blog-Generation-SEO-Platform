@@ -119,9 +119,12 @@ async function generateBlogForTrend(trendId: string, topic: string, description:
     const latencyMs = Date.now() - startedAt;
 
     // Record spend before the gate: a rejected draft still burned tokens.
+    // draft.model is whatever vertex.ts actually called - which can now be a
+    // dashboard override rather than env.VERTEX_MODEL, so it must come from
+    // the draft, not be re-derived here.
     const usageRecord = await recordAIUsage({
       worker: "writing-worker",
-      model: isVertexConfigured ? env.VERTEX_MODEL : "fallback",
+      model: draft.model,
       usage: draft.usage,
       latencyMs,
       trendId,
