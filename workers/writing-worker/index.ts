@@ -27,12 +27,16 @@ async function getOrCreateCategory(name: string) {
   return prisma.category.create({ data: { name, slug } });
 }
 
-async function uniqueSlug(base: string): Promise<string> {
-  let slug = base || "untitled";
+async function uniqueSlug(base: string, maxAttempts = 100): Promise<string> {
+  const safeBase = base || "untitled";
+  let slug = safeBase;
   let suffix = 0;
   while (await prisma.blog.findUnique({ where: { slug } })) {
     suffix += 1;
-    slug = `${base}-${suffix}`;
+    if (suffix >= maxAttempts) {
+      throw new Error(`Failed to generate unique slug after ${maxAttempts} attempts for base "${safeBase}"`);
+    }
+    slug = `${safeBase}-${suffix}`;
   }
   return slug;
 }
