@@ -78,10 +78,10 @@ model Blog {
   content         String
   html            String
   categoryId      String?
-  category        Category?  @relation(fields: [categoryId], references: [id])
+  category        Category?  @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   status          BlogStatus @default(DRAFT)
   featuredImageId String?
-  featuredImage   Asset?     @relation("FeaturedImage", fields: [featuredImageId], references: [id])
+  featuredImage   Asset?     @relation("FeaturedImage", fields: [featuredImageId], references: [id], onDelete: SetNull)
   seo             BlogSEO?
   qualityReport   QualityReport?
   aiUsage         AIUsage[]
@@ -103,6 +103,8 @@ model ContentPlan {
   outline           ContentOutline?
   createdAt         DateTime       @default(now())
   updatedAt         DateTime       @updatedAt
+
+  @@index([trendId])
 }
 
 model ContentOutline {
@@ -119,6 +121,9 @@ model ContentOutline {
   faqs            Json
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
+
+  @@index([trendId])
+  @@index([planId])
 }
 
 model BlogSEO {
@@ -168,6 +173,9 @@ model Trend {
   outline   ContentOutline?
   createdAt DateTime    @default(now())
   updatedAt DateTime    @updatedAt
+
+  @@index([topic, createdAt])
+  @@index([status])
 }
 
 /// Persisted Winston output. Written by the buffered PrismaTransport in
