@@ -36,6 +36,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           {/* Top Navbar */}
           <Navbar
             onOpenCmdk={() => setCmdkOpen(true)}
+            onOpenRunPipeline={() => setRunPipelineOpen(true)}
           />
 
           {/* Main Page Content */}
