@@ -55,7 +55,7 @@ export async function fetchNVIDIABlogSignals(): Promise<RawSignal[]> {
         signals.push({
           title: item.title,
           url: item.link,
-          source: "nvidia-blog",
+          source: "nvidia_blog",
           snippet: item.description || item["content:encoded"] || "",
           timestamp: new Date(item.pubDate || Date.now()).toISOString(),
         });
