@@ -616,6 +616,22 @@ export async function GET() {
       color: avg >= 90 ? "var(--emerald)" : avg >= 70 ? "var(--amber)" : avg > 0 ? "var(--rose)" : "var(--mut)",
     };
   });
+  // Split "not passing" into the two states the quality page needs to tell
+  // apart: still auto-retrying via writing-worker (attempts 1-3 of 4) vs.
+  // permanently failed (4/4 attempts used, needs a manual decision).
+  const regeneratingRows = blogRows.filter(
+    (blog) => blog.status === "Review" && Number(blog.quality) > 0 && Number(blog.quality) < 90
+  );
+  const permanentlyFailedRows = blogRows.filter((blog) => blog.status === "Failed QA");
+  const passedRowsWithWorkflow = blogRows.filter((blog) => blog.qualityReport?.passed && blog.workflow);
+  const attemptsToPassSamples = passedRowsWithWorkflow.map(
+    (blog) => 1 + (blog.workflow?.attempts.filter((attempt) => attempt.worker === "writing-worker").length ?? 0)
+  );
+  const avgAttemptsToPass =
+    attemptsToPassSamples.length > 0
+      ? Math.round((attemptsToPassSamples.reduce((sum, n) => sum + n, 0) / attemptsToPassSamples.length) * 10) / 10
+      : 1;
+
   const stageTotals = {
     research: trends.length,
     planning: plansCount,
@@ -808,10 +824,33 @@ export async function GET() {
       avgQuality,
       failedCount,
       checkedCount: qualityReportCount,
-      blocked: blogRows.filter((blog) => Number(blog.quality) > 0 && Number(blog.quality) < 90),
+      blocked: permanentlyFailedRows,
+      regenerating: regeneratingRows,
       reports: blogRows.filter((blog) => blog.qualityReport),
       distribution: qualityBuckets,
       checkRates: qualityParameters,
+      avgAttemptsToPass,
+      retryLimit: 4,
+      flow: {
+        writing: {
+          active: writingCounts.active,
+          queued: writingCounts.waiting + writingCounts.delayed,
+          failed: writingCounts.failed,
+        },
+        quality: {
+          active: qualityCounts.active,
+          queued: qualityCounts.waiting + qualityCounts.delayed,
+          failed: qualityCounts.failed,
+        },
+        publish: {
+          active: publishCounts.active,
+          queued: publishCounts.waiting + publishCounts.delayed,
+          failed: publishCounts.failed,
+          published: publishedCount,
+        },
+        regenerating: regeneratingRows.length,
+        failed: permanentlyFailedRows.length,
+      },
     },
   });
 }
