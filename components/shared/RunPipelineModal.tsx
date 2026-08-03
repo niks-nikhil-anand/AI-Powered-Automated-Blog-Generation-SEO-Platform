@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import React, { useCallback, useEffect, useState } from "react";
+import { WorldClocks, useLiveNow } from "./WorldClocks";
 
 type Schedule = {
   id: string;
@@ -48,33 +49,6 @@ interface RunPipelineModalProps {
   onClose: () => void;
 }
 
-/** Clocks the modal shows. US is split because ET and PT differ by 3 hours. */
-const CLOCKS = [
-  { badge: "IN", label: "India", tz: "Asia/Kolkata", primary: true },
-  { badge: "US", label: "US Eastern", tz: "America/New_York", primary: false },
-  { badge: "US", label: "US Pacific", tz: "America/Los_Angeles", primary: false },
-  { badge: "DE", label: "Germany", tz: "Europe/Berlin", primary: false },
-];
-
-function timeIn(date: Date, tz: string) {
-  return date.toLocaleTimeString("en-GB", {
-    timeZone: tz,
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  });
-}
-
-function dateIn(date: Date, tz: string) {
-  return date.toLocaleDateString("en-GB", {
-    timeZone: tz,
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-  });
-}
-
 function shortTimeIn(ms: number, tz: string) {
   return new Date(ms).toLocaleTimeString("en-GB", {
     timeZone: tz,
@@ -117,20 +91,6 @@ function formatDuration(ms: number) {
 const LABEL_CLASS =
   "text-[10px] font-bold uppercase tracking-[0.06em] text-[var(--mut)]";
 
-function subscribeToClock(onChange: () => void) {
-  const timer = window.setInterval(onChange, 1000);
-  return () => window.clearInterval(timer);
-}
-
-function getClockSnapshot() {
-  return Math.floor(Date.now() / 1000) * 1000;
-}
-
-function getClockServerSnapshot() {
-  // Never reached - the parent only mounts this modal on click, client-side.
-  return 0;
-}
-
 /**
  * Rendered only while open - the parent mounts and unmounts it - so all state
  * resets naturally and there is no SSR pass over the live clocks.
@@ -141,11 +101,7 @@ export function RunPipelineModal({ onClose }: RunPipelineModalProps) {
   const [submitting, setSubmitting] = useState(false);
   const [queued, setQueued] = useState<{ jobId: string; queue: string } | null>(null);
   const [error, setError] = useState("");
-  // The system clock is an external mutable source, so it is read through
-  // useSyncExternalStore rather than Date.now() in render (impure) or setState
-  // in an effect (cascading renders). Snapshots are truncated to the second so
-  // repeated calls within one render pass return an identical value.
-  const now = useSyncExternalStore(subscribeToClock, getClockSnapshot, getClockServerSnapshot);
+  const now = useLiveNow();
 
   useEffect(() => {
     let mounted = true;
@@ -232,29 +188,7 @@ export function RunPipelineModal({ onClose }: RunPipelineModalProps) {
 
         {/* World clocks */}
         <div className="p-[12px_16px] border-b border-[var(--bd)]">
-          <div className={LABEL_CLASS}>World clocks</div>
-          <div className="flex flex-col gap-[7px] mt-[9px]">
-            {CLOCKS.map((clock) => (
-              <div key={clock.label} className="flex items-center gap-[10px]">
-                <span
-                  className="font-mono text-[9.5px] font-semibold px-[6px] py-[2px] rounded-[4px] w-[26px] text-center"
-                  style={{
-                    background: clock.primary ? "rgba(99,102,241,0.14)" : "var(--card2)",
-                    color: clock.primary ? "var(--indigo)" : "var(--mut)",
-                  }}
-                >
-                  {clock.badge}
-                </span>
-                <span className="text-[12px] text-[var(--fg2)] flex-1">{clock.label}</span>
-                <span className="font-mono text-[12.5px] font-semibold text-[var(--fg)] tabular-nums">
-                  {timeIn(new Date(now), clock.tz)}
-                </span>
-                <span className="text-[10.5px] text-[var(--faint)] w-[64px] text-right">
-                  {dateIn(new Date(now), clock.tz)}
-                </span>
-              </div>
-            ))}
-          </div>
+          <WorldClocks />
         </div>
 
         {/* Next scheduled runs */}
