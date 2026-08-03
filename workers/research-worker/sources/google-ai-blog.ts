@@ -46,7 +46,7 @@ export async function fetchGoogleAIBlogSignals(): Promise<RawSignal[]> {
       signals.push({
         title: typeof item.title === "string" ? item.title : item.title?.["#text"] || "",
         url: typeof item.link === "string" ? item.link : (item.link as any)?.href || "",
-        source: "google-ai-blog",
+        source: "google_ai_blog",
         snippet: typeof item.summary === "string" ? item.summary : "",
         timestamp: item.published || new Date().toISOString(),
       });
