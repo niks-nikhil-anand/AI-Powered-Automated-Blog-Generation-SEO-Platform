@@ -238,3 +238,13 @@ model AIUsage {
   @@index([worker, createdAt])
   @@index([model, createdAt])
 }
+
+/// Small key/value store for dashboard-editable settings that previously had
+/// no persistence at all (AI model per pipeline stage, daily blog goal).
+/// Read/written through workers/shared/settings.ts by both the Next.js app
+/// and the worker processes, so the two never disagree on a key's spelling.
+model AppSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
