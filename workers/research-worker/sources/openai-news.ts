@@ -46,7 +46,7 @@ export async function fetchOpenAINewsSignals(): Promise<RawSignal[]> {
       signals.push({
         title: item.title,
         url: item.link,
-        source: "openai-news",
+        source: "openai_news",
         snippet: item.description || item["content:encoded"] || "",
         timestamp: new Date(item.pubDate || Date.now()).toISOString(),
       });
