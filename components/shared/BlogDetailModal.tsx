@@ -1,6 +1,14 @@
 "use client";
 
 import React, { useState } from "react";
+import { SeoSnippetPreview } from "./SeoSnippetPreview";
+import {
+  META_DESCRIPTION_BUDGET,
+  META_TITLE_BUDGET,
+  checkJsonLd,
+  lengthStatus,
+  lengthStatusColor,
+} from "@/lib/seo";
 
 export interface BlogItem {
   id?: string;
@@ -73,10 +81,16 @@ export interface BlogItem {
   };
 }
 
+type DetailTab = "overview" | "seo" | "quality" | "assets" | "timeline";
+
 interface BlogDetailModalProps {
   blog: BlogItem | null;
   isOpen: boolean;
   onClose: () => void;
+  /** Opens directly on a specific tab - e.g. the Quality page deep-links into "quality" or "seo". */
+  initialTab?: DetailTab;
+  /** Fired after a Re-run QA / Regenerate / Publish action completes, so the caller can refresh its data. */
+  onActionComplete?: () => void;
 }
 
 const qualityParameterLabels = [
@@ -92,8 +106,10 @@ const qualityParameterLabels = [
   "Publishing Readiness",
 ];
 
-export function BlogDetailModal({ blog, isOpen, onClose }: BlogDetailModalProps) {
-  const [activeTab, setActiveTab] = useState<"overview" | "seo" | "quality" | "assets" | "timeline">("overview");
+export function BlogDetailModal({ blog, isOpen, onClose, initialTab, onActionComplete }: BlogDetailModalProps) {
+  const [activeTab, setActiveTab] = useState<DetailTab>(initialTab ?? "overview");
+  const [actionPending, setActionPending] = useState<"requeue-quality" | "publish" | null>(null);
+  const [actionMessage, setActionMessage] = useState<{ text: string; tone: "ok" | "error" } | null>(null);
   const tabs: { key: typeof activeTab; label: string }[] = [
     { key: "overview", label: "Overview" },
     { key: "seo", label: "SEO & Meta" },
@@ -102,7 +118,74 @@ export function BlogDetailModal({ blog, isOpen, onClose }: BlogDetailModalProps)
     { key: "timeline", label: "Worker History" },
   ];
 
+  // The modal component stays mounted between opens (parents toggle `isOpen`
+  // rather than unmounting it), so activeTab needs to be re-synced to
+  // initialTab every time it's (re)opened - otherwise a second open with a
+  // different initialTab would keep showing whatever tab was last active.
+  // Done as a render-time state adjustment on the isOpen transition rather
+  // than a useEffect, since calling setState synchronously inside an effect
+  // body is a lint error in this repo's config (see
+  // https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes).
+  const [wasOpen, setWasOpen] = useState(isOpen);
+  if (isOpen !== wasOpen) {
+    setWasOpen(isOpen);
+    if (isOpen) {
+      setActiveTab(initialTab ?? "overview");
+      setActionMessage(null);
+    }
+  }
+
   if (!isOpen || !blog) return null;
+
+  const writingAttempts = blog.workflow?.attempts.filter((attempt) => attempt.worker === "writing-worker").length ?? 0;
+  const qualityPassed = blog.qualityReport?.passed ?? false;
+  const retryLimit = 4;
+
+  const handleReRunQa = async () => {
+    if (!blog.id || actionPending) return;
+    setActionPending("requeue-quality");
+    setActionMessage(null);
+    try {
+      const res = await fetch(`/api/blogs/${blog.id}/requeue-quality`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || "Failed to queue quality check");
+      setActionMessage({ text: `Quality check queued (job ${data.jobId}).`, tone: "ok" });
+      onActionComplete?.();
+    } catch (err) {
+      setActionMessage({ text: err instanceof Error ? err.message : "Failed to queue quality check", tone: "error" });
+    } finally {
+      setActionPending(null);
+    }
+  };
+
+  const handlePublish = async () => {
+    if (!blog.id || actionPending) return;
+    let reason = "Published from dashboard (quality gate passed).";
+    if (!qualityPassed) {
+      const input = window.prompt(
+        `This article scored ${blog.quality ?? 0}/100 and hasn't passed the quality gate (>= 90). Enter a reason to override the gate and publish anyway:`
+      );
+      if (!input || !input.trim()) return;
+      reason = input.trim();
+    }
+    setActionPending("publish");
+    setActionMessage(null);
+    try {
+      const res = await fetch(`/api/blogs/${blog.id}/override-publish`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || "Failed to publish");
+      setActionMessage({ text: "Published.", tone: "ok" });
+      onActionComplete?.();
+    } catch (err) {
+      setActionMessage({ text: err instanceof Error ? err.message : "Failed to publish", tone: "error" });
+    } finally {
+      setActionPending(null);
+    }
+  };
 
   const markdownBody = blog.content ?? "";
   const targetKeywords: string[] = blog.keywords ?? [];
@@ -211,15 +294,20 @@ export function BlogDetailModal({ blog, isOpen, onClose }: BlogDetailModalProps)
           <div className="ml-auto flex gap-[7px]">
             <button
               aria-label="Re-run quality QA"
-              className="h-[28px] px-[11px] rounded-[8px] border border-[var(--bd)] bg-[var(--card)] text-[var(--fg2)] text-[11.5px] font-semibold hover:border-[var(--bd2)] transition-colors"
+              disabled={actionPending !== null}
+              onClick={handleReRunQa}
+              className="h-[28px] px-[11px] rounded-[8px] border border-[var(--bd)] bg-[var(--card)] text-[var(--fg2)] text-[11.5px] font-semibold hover:border-[var(--bd2)] transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              Re-run QA
+              {actionPending === "requeue-quality" ? "Queueing…" : "Re-run QA"}
             </button>
             <button
               aria-label="Publish article"
-              className="h-[28px] px-[12px] rounded-[8px] border border-transparent bg-[var(--emerald)] text-white text-[11.5px] font-bold hover:bg-emerald-600 transition-colors"
+              disabled={actionPending !== null || blog.status === "Published"}
+              onClick={handlePublish}
+              title={qualityPassed ? "Publish now" : "Score is below the quality gate - publishing requires an override reason"}
+              className="h-[28px] px-[12px] rounded-[8px] border border-transparent bg-[var(--emerald)] text-white text-[11.5px] font-bold hover:bg-emerald-600 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              Publish
+              {actionPending === "publish" ? "Publishing…" : blog.status === "Published" ? "Published" : qualityPassed ? "Publish" : "Override & publish"}
             </button>
             <button
               aria-label="Close detail"
@@ -232,6 +320,18 @@ export function BlogDetailModal({ blog, isOpen, onClose }: BlogDetailModalProps)
             </button>
           </div>
         </div>
+
+        {actionMessage && (
+          <div
+            className="flex-none px-[14px] py-[6px] text-[11px] font-medium border-b border-[var(--bd)]"
+            style={{
+              background: actionMessage.tone === "ok" ? "rgba(16,185,129,0.10)" : "rgba(244,63,94,0.10)",
+              color: actionMessage.tone === "ok" ? "var(--emerald)" : "var(--rose)",
+            }}
+          >
+            {actionMessage.text}
+          </div>
+        )}
 
         {/* Content Body Grid */}
         <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_400px] overflow-hidden">
@@ -331,50 +431,119 @@ export function BlogDetailModal({ blog, isOpen, onClose }: BlogDetailModalProps)
                 </div>
               )}
 
-              {activeTab === "seo" && (
-                <div className="flex flex-col gap-[11px]">
-                  <div>
-                    <div className="text-[10.5px] font-bold tracking-wider uppercase text-[var(--mut)] mb-[5px]">
-                      Meta Title
+              {activeTab === "seo" && (() => {
+                const metaTitle = blog.metaTitle || blog.title;
+                const metaDescription = blog.metaDescription || "";
+                const titleLen = lengthStatus(metaTitle.length, META_TITLE_BUDGET);
+                const descLen = lengthStatus(metaDescription.length, META_DESCRIPTION_BUDGET);
+                const jsonLd = checkJsonLd(blog.schema);
+                return (
+                  <div className="flex flex-col gap-[13px]">
+                    <div>
+                      <div className="text-[10.5px] font-bold tracking-wider uppercase text-[var(--mut)] mb-[6px]">
+                        Search Result Preview
+                      </div>
+                      <SeoSnippetPreview title={metaTitle} slug={blog.slug} description={metaDescription} />
                     </div>
-                    <div className="border border-[var(--bd)] rounded-[8px] p-[8px_10px] bg-[var(--card2)] text-[11.5px] leading-snug font-medium text-[var(--fg)]">
-                      {blog.metaTitle || blog.title}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-[10.5px] font-bold tracking-wider uppercase text-[var(--mut)] mb-[5px]">
-                      Meta Description
-                    </div>
-                    <div className="border border-[var(--bd)] rounded-[8px] p-[8px_10px] bg-[var(--card2)] text-[11.5px] leading-snug text-[var(--fg2)]">
-                      {blog.metaDescription || "No meta description generated yet."}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-[10.5px] font-bold tracking-wider uppercase text-[var(--mut)] mb-[6px]">
-                      Target Keywords
-                    </div>
-                    <div className="flex gap-[6px] flex-wrap">
-                      {targetKeywords.length > 0 ? targetKeywords.map((kw, i) => (
-                        <span key={i} className="text-[10.5px] font-semibold p-[3px_8px] rounded-[7px] bg-[var(--tint)] text-[var(--indigo)]">
-                          {kw}
+
+                    <div>
+                      <div className="flex items-center justify-between mb-[5px]">
+                        <span className="text-[10.5px] font-bold tracking-wider uppercase text-[var(--mut)]">
+                          Meta Title
                         </span>
-                      )) : (
-                        <span className="text-[11.5px] text-[var(--mut)]">
-                          No target keywords yet.
+                        <span className="font-mono text-[10px] font-semibold" style={{ color: lengthStatusColor(titleLen) }}>
+                          {metaTitle.length} / {META_TITLE_BUDGET}
                         </span>
+                      </div>
+                      <div className="border border-[var(--bd)] rounded-[8px] p-[8px_10px] bg-[var(--card2)] text-[11.5px] leading-snug font-medium text-[var(--fg)]">
+                        {metaTitle}
+                      </div>
+                      {titleLen === "over" && (
+                        <div className="mt-[4px] text-[10px] text-[var(--rose)]">
+                          Over budget - Google will truncate this in search results.
+                        </div>
                       )}
                     </div>
-                  </div>
-                  <div>
-                    <div className="text-[10.5px] font-bold tracking-wider uppercase text-[var(--mut)] mb-[5px]">
-                      JSON-LD Schema
+
+                    <div>
+                      <div className="flex items-center justify-between mb-[5px]">
+                        <span className="text-[10.5px] font-bold tracking-wider uppercase text-[var(--mut)]">
+                          Meta Description
+                        </span>
+                        <span className="font-mono text-[10px] font-semibold" style={{ color: lengthStatusColor(descLen) }}>
+                          {metaDescription.length} / {META_DESCRIPTION_BUDGET}
+                        </span>
+                      </div>
+                      <div className="border border-[var(--bd)] rounded-[8px] p-[8px_10px] bg-[var(--card2)] text-[11.5px] leading-snug text-[var(--fg2)]">
+                        {metaDescription || "No meta description generated yet."}
+                      </div>
+                      {descLen === "over" && (
+                        <div className="mt-[4px] text-[10px] text-[var(--rose)]">
+                          Over budget - Google will truncate this in search results.
+                        </div>
+                      )}
                     </div>
-                    <pre className="border border-[var(--bd)] rounded-[8px] p-[9px_10px] bg-[var(--card2)] font-mono text-[10.5px] leading-relaxed text-[var(--fg2)] overflow-x-auto">
-                      {blog.schema || "No schema generated yet."}
-                    </pre>
+
+                    <div>
+                      <div className="text-[10.5px] font-bold tracking-wider uppercase text-[var(--mut)] mb-[6px]">
+                        Target Keywords
+                      </div>
+                      <div className="flex gap-[6px] flex-wrap">
+                        {targetKeywords.length > 0 ? targetKeywords.map((kw, i) => {
+                          const found = markdownBody.toLowerCase().includes(kw.toLowerCase());
+                          return (
+                            <span
+                              key={i}
+                              className="text-[10.5px] font-semibold p-[3px_8px] rounded-[7px] flex items-center gap-[4px]"
+                              style={{
+                                background: found ? "var(--tint)" : "rgba(244,63,94,0.10)",
+                                color: found ? "var(--indigo)" : "var(--rose)",
+                              }}
+                              title={found ? "Found in article content" : "Not found in article content"}
+                            >
+                              {kw}
+                              <span>{found ? "✓" : "✕"}</span>
+                            </span>
+                          );
+                        }) : (
+                          <span className="text-[11.5px] text-[var(--mut)]">
+                            No target keywords yet.
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="flex items-center justify-between mb-[5px]">
+                        <span className="text-[10.5px] font-bold tracking-wider uppercase text-[var(--mut)]">
+                          JSON-LD Schema
+                        </span>
+                        <span
+                          className="text-[9.5px] font-bold px-[6px] py-[1.5px] rounded-[5px]"
+                          style={{
+                            background: jsonLd.valid ? "rgba(16,185,129,0.12)" : "rgba(244,63,94,0.12)",
+                            color: jsonLd.valid ? "var(--emerald)" : "var(--rose)",
+                          }}
+                        >
+                          {jsonLd.valid ? "Valid" : "Needs attention"}
+                        </span>
+                      </div>
+                      {jsonLd.errors.length > 0 && (
+                        <ul className="mb-[6px] flex flex-col gap-[2px]">
+                          {jsonLd.errors.map((err, i) => (
+                            <li key={i} className="text-[10px] text-[var(--rose)]">
+                              · {err}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                      <pre className="border border-[var(--bd)] rounded-[8px] p-[9px_10px] bg-[var(--card2)] font-mono text-[10.5px] leading-relaxed text-[var(--fg2)] overflow-x-auto">
+                        {jsonLd.pretty || "No schema generated yet."}
+                      </pre>
+                    </div>
                   </div>
-                </div>
-              )}
+                );
+              })()}
 
               {activeTab === "quality" && (
                 <div className="flex flex-col gap-[10px]">
@@ -391,6 +560,25 @@ export function BlogDetailModal({ blog, isOpen, onClose }: BlogDetailModalProps)
                       </div>
                     </div>
                   </div>
+
+                  {!qualityPassed && blog.workflow && (
+                    <div
+                      className="flex items-center gap-[8px] rounded-[8px] p-[8px_10px] border"
+                      style={{
+                        background: writingAttempts >= retryLimit ? "rgba(244,63,94,0.08)" : "var(--tint)",
+                        borderColor: writingAttempts >= retryLimit ? "rgba(244,63,94,0.25)" : "rgba(99,102,241,0.25)",
+                      }}
+                    >
+                      <span
+                        className="text-[11px] font-semibold"
+                        style={{ color: writingAttempts >= retryLimit ? "var(--rose)" : "var(--indigo)" }}
+                      >
+                        {writingAttempts >= retryLimit
+                          ? `Retry budget exhausted (${writingAttempts}/${retryLimit}) - won't regenerate automatically.`
+                          : `Regeneration attempt ${writingAttempts}/${retryLimit} - will retry via writing-worker automatically.`}
+                      </span>
+                    </div>
+                  )}
 
                   {qualityChecks.length > 0 ? qualityChecks.map((q, idx) => (
                     <div key={idx}>
