@@ -16,10 +16,6 @@ export default function SettingsPage() {
   const [cron, setCron] = useState("0 */2 * * *");
   const [autoPublish, setAutoPublish] = useState(true);
   const [slackNotif, setSlackNotif] = useState(true);
-  const [gcsBucket, setGcsBucket] = useState("");
-  const [cdnUrl, setCdnUrl] = useState("");
-  const [redisUrl, setRedisUrl] = useState("");
-  const [redisTested, setRedisTested] = useState(false);
 
   const modelRows = [
     { stage: "Research", model: "gemini-2.5-flash", cost: "$0.002" },
@@ -195,74 +191,6 @@ export default function SettingsPage() {
                 </span>
               </div>
             ))}
-          </div>
-        </div>
-
-        {/* Cloud & Storage Config (Full Width) */}
-        <div className="bg-[var(--card)] border border-[var(--bd)] rounded-[12px] shadow-[var(--shadow)] overflow-hidden md:col-span-2">
-          <div className="p-[12px_14px] border-b border-[var(--bd)] text-[13px] font-bold text-[var(--fg)]">
-            Cloud Infrastructure & Storage Connection
-          </div>
-          <div className="p-[14px] grid grid-cols-1 md:grid-cols-3 gap-[12px]">
-            <div>
-              <label
-                htmlFor="input-gcs"
-                className="text-[11.5px] font-semibold text-[var(--fg2)] block mb-[6px]"
-              >
-                GCS Bucket Name
-              </label>
-              <input
-                id="input-gcs"
-                aria-label="GCS bucket name"
-                value={gcsBucket}
-                onChange={(e) => setGcsBucket(e.target.value)}
-                className="w-full h-[31px] px-[10px] rounded-[8px] border border-[var(--bd)] bg-[var(--card2)] text-[var(--fg)] font-mono text-[11.5px] outline-none"
-              />
-            </div>
-            <div>
-              <label
-                htmlFor="input-cdn"
-                className="text-[11.5px] font-semibold text-[var(--fg2)] block mb-[6px]"
-              >
-                CDN Base URL
-              </label>
-              <input
-                id="input-cdn"
-                aria-label="CDN base URL"
-                value={cdnUrl}
-                onChange={(e) => setCdnUrl(e.target.value)}
-                className="w-full h-[31px] px-[10px] rounded-[8px] border border-[var(--bd)] bg-[var(--card2)] text-[var(--fg)] font-mono text-[11.5px] outline-none"
-              />
-            </div>
-            <div>
-              <label
-                htmlFor="input-redis"
-                className="text-[11.5px] font-semibold text-[var(--fg2)] block mb-[6px]"
-              >
-                Redis URL (BullMQ Queue)
-              </label>
-              <div className="flex gap-[7px]">
-                <input
-                  id="input-redis"
-                  aria-label="Redis connection URL"
-                  value={redisUrl}
-                  onChange={(e) => setRedisUrl(e.target.value)}
-                  className="flex-1 h-[31px] px-[10px] rounded-[8px] border border-[var(--bd)] bg-[var(--card2)] text-[var(--fg)] font-mono text-[11.5px] outline-none"
-                />
-                <button
-                  id="btn-test-redis"
-                  type="button"
-                  aria-label="Test Redis connection"
-                  onClick={() => {
-                    setRedisTested(true);
-                    setTimeout(() => alert("Redis Connection Successful! (PONG 0.4ms)"), 200);
-                  }}
-                  className="h-[31px] px-[11px] rounded-[8px] border border-[var(--bd)] bg-[var(--card)] text-[var(--fg2)] text-[11.5px] font-semibold hover:border-[var(--emerald)] hover:text-[var(--emerald)] transition-colors whitespace-nowrap"
-                >
-                  {redisTested ? "Connected ✓" : "Test Connection"}
-                </button>
-              </div>
-            </div>
           </div>
         </div>
       </div>
