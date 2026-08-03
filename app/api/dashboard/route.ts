@@ -203,7 +203,8 @@ function queueColor(counts: QueueCountsResult, total: number, doneColor = "var(-
 }
 
 export async function GET() {
-  const today = startOfToday();
+  try {
+    const today = startOfToday();
   const [
     blogs,
     blogCount,
@@ -897,4 +898,11 @@ export async function GET() {
       },
     },
   });
+} catch (error) {
+  console.error("Failed to fetch dashboard data:", error);
+  return NextResponse.json(
+    { ok: false, error: "Failed to fetch dashboard data" },
+    { status: 500 }
+  );
+}
 }
