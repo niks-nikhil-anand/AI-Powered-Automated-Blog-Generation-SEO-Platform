@@ -1,6 +1,16 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
+import { LayoutGrid, List, Eye } from "lucide-react";
+import { DataTable } from "@/components/ui/DataTable";
+import { TrendDetailModal } from "@/components/shared/TrendDetailModal";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 interface TrendsPageProps {
   onOpenManualTopic?: () => void;
@@ -8,7 +18,13 @@ interface TrendsPageProps {
 
 export default function TrendResearchPage({ onOpenManualTopic }: TrendsPageProps) {
   const [activeFilter, setActiveFilter] = useState("All sources");
+  const [selectedCategory, setSelectedCategory] = useState("All categories");
+  const [sortBy, setSortBy] = useState("score-desc");
+  const [groupBy, setGroupBy] = useState("none");
   const [trends, setTrends] = useState<TrendRow[]>([]);
+  const [viewMode, setViewMode] = useState<"card" | "table">("table");
+  const [selectedTrend, setSelectedTrend] = useState<TrendRow | null>(null);
+  const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<TrendRow | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState("");
@@ -140,9 +156,51 @@ export default function TrendResearchPage({ onOpenManualTopic }: TrendsPageProps
     { label: "GitHub Trending", count: trends.filter((t) => t.source === "GitHub Trending").length },
   ];
 
-  const filteredTrends = activeFilter === "All sources"
-    ? trends
-    : trends.filter((t) => t.source.toLowerCase().includes(activeFilter.toLowerCase()));
+  const categories = Array.from(new Set(trends.map((t) => t.cat).filter(Boolean))).sort();
+
+  const filteredTrends = trends.filter((t) => {
+    const matchesSource = activeFilter === "All sources" || t.source.toLowerCase().includes(activeFilter.toLowerCase());
+    const matchesCategory = selectedCategory === "All categories" || t.cat === selectedCategory;
+    return matchesSource && matchesCategory;
+  });
+
+  const sortedTrends = [...filteredTrends].sort((a, b) => {
+    if (sortBy === "score-desc") {
+      return Number(b.score) - Number(a.score);
+    }
+    if (sortBy === "score-asc") {
+      return Number(a.score) - Number(b.score);
+    }
+    if (sortBy === "title-asc") {
+      return a.title.localeCompare(b.title);
+    }
+    if (sortBy === "title-desc") {
+      return b.title.localeCompare(a.title);
+    }
+    return 0;
+  });
+
+  const groups: { name: string; items: typeof sortedTrends }[] = [];
+  if (groupBy === "none") {
+    groups.push({ name: "", items: sortedTrends });
+  } else if (groupBy === "source") {
+    const sourceNames = Array.from(new Set(sortedTrends.map((t) => t.source))).sort();
+    sourceNames.forEach((src) => {
+      groups.push({
+        name: src,
+        items: sortedTrends.filter((t) => t.source === src),
+      });
+    });
+  } else if (groupBy === "category") {
+    const catNames = Array.from(new Set(sortedTrends.map((t) => t.cat))).sort();
+    catNames.forEach((cat) => {
+      groups.push({
+        name: cat,
+        items: sortedTrends.filter((t) => t.cat === cat),
+      });
+    });
+  }
+
   const minWritingScore = 90;
 
   return (
@@ -181,129 +239,367 @@ export default function TrendResearchPage({ onOpenManualTopic }: TrendsPageProps
         </div>
       )}
 
-      {/* Filter Tabs */}
-      <div className="flex gap-[7px] flex-wrap items-center">
-        {trendFilters.map((f, i) => {
-          const isActive = activeFilter === f.label;
-          return (
+      {/* Filter Tabs & Selectors */}
+      <div className="flex flex-wrap items-center justify-between gap-[10px] bg-[var(--card2)] border border-[var(--bd)] p-[8px_12px] rounded-[12px]">
+        <div className="flex gap-[6px] flex-wrap items-center">
+          {trendFilters.map((f, i) => {
+            const isActive = activeFilter === f.label;
+            return (
+              <button
+                key={i}
+                aria-label="Filter trends"
+                onClick={() => setActiveFilter(f.label)}
+                className={`h-[26px] px-[10px] rounded-full border text-[11px] font-semibold transition-colors ${
+                  isActive
+                    ? "bg-[var(--tint)] text-[var(--indigo)] border-[rgba(99,102,241,0.3)]"
+                    : "bg-[var(--card)] text-[var(--fg2)] border-[var(--bd)] hover:border-[var(--bd2)]"
+                }`}
+              >
+                {f.label} ({f.count})
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="flex gap-[7px] items-center flex-wrap">
+          {/* Category Filter */}
+          <Select value={selectedCategory} onValueChange={(val) => setSelectedCategory(val ?? "All categories")}>
+            <SelectTrigger className="h-[28px] min-w-[120px] text-[11px] font-semibold border-[var(--bd)] bg-[var(--card)] text-[var(--fg2)] rounded-[8px] outline-none">
+              <SelectValue placeholder="All categories" />
+            </SelectTrigger>
+            <SelectContent className="bg-[var(--card)] border border-[var(--bd)] text-[var(--fg)]">
+              <SelectItem value="All categories">All categories</SelectItem>
+              {categories.map((cat) => (
+                <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          {/* Group By Selector */}
+          <Select value={groupBy} onValueChange={(val) => setGroupBy(val ?? "none")}>
+            <SelectTrigger className="h-[28px] min-w-[110px] text-[11px] font-semibold border-[var(--bd)] bg-[var(--card)] text-[var(--fg2)] rounded-[8px] outline-none">
+              <SelectValue placeholder="Group by" />
+            </SelectTrigger>
+            <SelectContent className="bg-[var(--card)] border border-[var(--bd)] text-[var(--fg)]">
+              <SelectItem value="none">No Grouping</SelectItem>
+              <SelectItem value="source">Group by Source</SelectItem>
+              <SelectItem value="category">Group by Category</SelectItem>
+            </SelectContent>
+          </Select>
+
+          {/* Sort By Selector */}
+          <Select value={sortBy} onValueChange={(val) => setSortBy(val ?? "score-desc")}>
+            <SelectTrigger className="h-[28px] min-w-[120px] text-[11px] font-semibold border-[var(--bd)] bg-[var(--card)] text-[var(--fg2)] rounded-[8px] outline-none">
+              <SelectValue placeholder="Sort by" />
+            </SelectTrigger>
+            <SelectContent className="bg-[var(--card)] border border-[var(--bd)] text-[var(--fg)]">
+              <SelectItem value="score-desc">Score: High to Low</SelectItem>
+              <SelectItem value="score-asc">Score: Low to High</SelectItem>
+              <SelectItem value="title-asc">Title: A to Z</SelectItem>
+              <SelectItem value="title-desc">Title: Z to A</SelectItem>
+            </SelectContent>
+          </Select>
+
+          {/* View Switcher */}
+          <div className="flex bg-[var(--card)] border border-[var(--bd)] p-[2px] rounded-[8px] h-[28px] items-center">
             <button
-              key={i}
-              aria-label="Filter trends"
-              onClick={() => setActiveFilter(f.label)}
-              className={`h-[27px] px-[11px] rounded-full border text-[11.5px] font-semibold transition-colors ${
-                isActive
-                  ? "bg-[var(--tint)] text-[var(--indigo)] border-[rgba(99,102,241,0.3)]"
-                  : "bg-[var(--card)] text-[var(--fg2)] border-[var(--bd)] hover:border-[var(--bd2)]"
+              onClick={() => setViewMode("card")}
+              className={`p-[3px_6px] rounded-[6px] transition-colors flex items-center gap-[3px] text-[10px] font-semibold ${
+                viewMode === "card"
+                  ? "bg-[var(--indigo)] text-white"
+                  : "text-[var(--mut)] hover:text-[var(--fg)]"
               }`}
+              title="Card View"
             >
-              {f.label} ({f.count})
+              <LayoutGrid size={11} />
+              Cards
             </button>
-          );
-        })}
-        <span className="ml-auto text-[11px] text-[var(--mut)]">
-          Showing {filteredTrends.length} topics
-        </span>
+            <button
+              onClick={() => setViewMode("table")}
+              className={`p-[3px_6px] rounded-[6px] transition-colors flex items-center gap-[3px] text-[10px] font-semibold ${
+                viewMode === "table"
+                  ? "bg-[var(--indigo)] text-white"
+                  : "text-[var(--mut)] hover:text-[var(--fg)]"
+              }`}
+              title="Table View"
+            >
+              <List size={11} />
+              Table
+            </button>
+          </div>
+        </div>
       </div>
 
-      {/* Trends Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-[12px]">
-        {filteredTrends.length > 0 ? filteredTrends.map((t, idx) => {
-          const canApprove = Number(t.score) >= minWritingScore;
-          return (
-          <div
-            key={idx}
-            className="bg-[var(--card)] border border-[var(--bd)] rounded-[12px] p-[13px] shadow-[var(--shadow)] flex flex-col gap-[9px] hover:border-[var(--bd2)] transition-colors"
-          >
-            {/* Header */}
-            <div className="flex items-center gap-[8px]">
-              <span
-                className="w-[22px] h-[22px] flex-none rounded-[6px] flex items-center justify-center font-mono font-extrabold text-[9px] text-white"
-                style={{ background: t.srcColor }}
-              >
-                {t.srcInitial}
+      {/* Columns Definition for Table View */}
+      {(() => {
+        const columns = [
+          {
+            key: "source",
+            header: "Source",
+            render: (row: TrendRow) => (
+              <span className="text-[11.5px] font-semibold text-[var(--fg2)] flex items-center gap-[6px]">
+                <span
+                  className="w-[18px] h-[18px] rounded-[5px] flex items-center justify-center font-mono font-extrabold text-[8px] text-white"
+                  style={{ background: row.srcColor }}
+                >
+                  {row.srcInitial}
+                </span>
+                {row.source}
               </span>
-              <span className="text-[10.5px] font-semibold text-[var(--mut)]">
-                {t.source}
+            )
+          },
+          {
+            key: "title",
+            header: "Topic / Title",
+            render: (row: TrendRow) => (
+              <span className="font-bold text-[var(--fg)] leading-snug">
+                {row.title}
               </span>
-              <span
-                className="ml-auto font-mono text-[11px] font-bold p-[2px_7px] rounded-[6px]"
-                style={{ background: t.scoreBg, color: t.scoreFg }}
-              >
-                {t.score}
-              </span>
-              <button
-                aria-label={`Delete trend ${t.title}`}
-                title="Delete trend"
-                onClick={() => {
-                  setDeleteTarget(t);
-                  setDeleteError("");
-                }}
-                className="w-[24px] h-[24px] rounded-[7px] border border-[var(--bd)] bg-[var(--card)] text-[var(--mut)] inline-flex items-center justify-center hover:border-[var(--rose)] hover:text-[var(--rose)] transition-colors"
-              >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M3 6h18" />
-                  <path d="M8 6V4h8v2" />
-                  <path d="M19 6l-1 14H6L5 6" />
-                  <path d="M10 11v5M14 11v5" />
-                </svg>
-              </button>
-            </div>
-
-            {/* Title */}
-            <div className="text-[13.5px] font-bold leading-snug tracking-tight text-[var(--fg)]">
-              {t.title}
-            </div>
-
-            {/* Badges */}
-            <div className="flex gap-[6px] flex-wrap items-center">
+            )
+          },
+          {
+            key: "cat",
+            header: "Category",
+            render: (row: TrendRow) => (
               <span className="text-[10px] font-semibold p-[2px_7px] rounded-[6px] bg-[var(--card2)] text-[var(--fg2)]">
-                {t.cat}
+                {row.cat}
               </span>
+            )
+          },
+          {
+            key: "score",
+            header: "Score",
+            render: (row: TrendRow) => (
               <span
-                className="text-[10px] font-semibold p-[2px_7px] rounded-[6px]"
-                style={{ background: t.recBg, color: t.recFg }}
+                className="font-mono text-[10.5px] font-bold px-[6px] py-[2px] rounded-[5px]"
+                style={{ background: row.scoreBg, color: row.scoreFg }}
               >
-                {t.rec}
+                {row.score}%
               </span>
-              <span className="text-[10px] font-medium p-[2px_7px] rounded-[6px] text-[var(--faint)]">
-                {t.volume}
+            )
+          },
+          {
+            key: "volume",
+            header: "Volume / Age",
+            render: (row: TrendRow) => (
+              <span className="text-[10.5px] text-[var(--mut)]">
+                {row.volume}
               </span>
-            </div>
-
-            {/* Score Bar */}
-            <div className="h-[3px] rounded-[2px] bg-[var(--card2)] overflow-hidden">
-              <div
-                className="h-full rounded-[2px]"
-                style={{ width: t.scorePct, background: t.scoreFg }}
-              />
-            </div>
-
-            {/* Actions */}
-            <div className="flex gap-[7px] mt-auto pt-[3px]">
-              <button
-                aria-label="Approve topic and send to pipeline"
-                disabled={!canApprove}
-                onClick={() => openApproveModal(t)}
-                className="flex-1 h-[28px] rounded-[8px] border border-transparent bg-[var(--indigo)] text-white text-[11px] font-semibold hover:bg-[#4f46e5] transition-colors disabled:bg-[var(--card2)] disabled:text-[var(--mut)] disabled:border-[var(--bd)] disabled:cursor-not-allowed"
+            )
+          },
+          {
+            key: "rec",
+            header: "Recommendation",
+            render: (row: TrendRow) => (
+              <span
+                className="text-[10px] font-semibold px-[7px] py-[2.5px] rounded-[6px] whitespace-nowrap"
+                style={{ background: row.recBg, color: row.recFg }}
               >
-                {canApprove ? "Approve → Pipeline" : "Score too low"}
-              </button>
-              <button
-                aria-label="Dismiss topic"
-                onClick={() => alert(`Skipped topic "${t.title}"`)}
-                className="h-[28px] px-[10px] rounded-[8px] border border-[var(--bd)] bg-[var(--card)] text-[var(--mut)] text-[11px] font-semibold hover:border-[var(--rose)] hover:text-[var(--rose)] transition-colors"
-              >
-                Skip
-              </button>
+                {row.rec}
+              </span>
+            )
+          },
+          {
+            key: "actions",
+            header: "Actions",
+            align: "right" as const,
+            render: (row: TrendRow) => {
+              const canApprove = Number(row.score) >= minWritingScore;
+              return (
+                <div className="flex gap-[6px] justify-end items-center">
+                  {canApprove ? (
+                    <button
+                      aria-label="Approve topic and send to pipeline"
+                      onClick={() => openApproveModal(row)}
+                      className="h-[26px] px-[8px] rounded-[6px] border border-transparent bg-[var(--emerald)] text-white text-[10px] font-semibold hover:bg-[#059669] transition-colors whitespace-nowrap"
+                    >
+                      Approve
+                    </button>
+                  ) : (
+                    <span className="h-[26px] px-[8px] rounded-[6px] border border-[rgba(244,63,94,0.25)] bg-[rgba(244,63,94,0.08)] text-[var(--rose)] text-[10px] font-semibold inline-flex items-center justify-center select-none whitespace-nowrap">
+                      Low Score
+                    </span>
+                  )}
+                  <button
+                    aria-label="View trend details"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedTrend(row);
+                      setIsDetailOpen(true);
+                    }}
+                    className="w-[26px] h-[26px] rounded-[6px] border border-[var(--bd)] bg-[var(--card)] text-[var(--mut)] hover:text-[var(--indigo)] hover:border-[var(--indigo)] flex items-center justify-center transition-colors"
+                    title="View Details"
+                  >
+                    <Eye size={12} />
+                  </button>
+                  <button
+                    aria-label={`Delete trend ${row.title}`}
+                    title="Delete trend"
+                    onClick={() => {
+                      setDeleteTarget(row);
+                      setDeleteError("");
+                    }}
+                    className="w-[26px] h-[26px] rounded-[6px] border border-[var(--bd)] bg-[var(--card)] text-[var(--mut)] inline-flex items-center justify-center hover:border-[var(--rose)] hover:text-[var(--rose)] transition-colors"
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M3 6h18" />
+                      <path d="M8 6V4h8v2" />
+                      <path d="M19 6l-1 14H6L5 6" />
+                    </svg>
+                  </button>
+                </div>
+              );
+            }
+          }
+        ];
+
+        if (filteredTrends.length === 0) {
+          return (
+            <div className="bg-[var(--card)] border border-[var(--bd)] rounded-[12px] p-[32px] text-center text-[12px] text-[var(--mut)] shadow-[var(--shadow)]">
+              No trend signals found matching filters.
             </div>
-          </div>
           );
-        }) : (
-          <div className="sm:col-span-2 lg:col-span-3 bg-[var(--card)] border border-[var(--bd)] rounded-[12px] p-[32px] text-center text-[12px] text-[var(--mut)] shadow-[var(--shadow)]">
-            No trend signals yet.
+        }
+
+        return (
+          <div className="flex flex-col gap-[16px]">
+            {groups.map((group, gIdx) => {
+              if (group.items.length === 0) return null;
+              return (
+                <div key={gIdx} className="flex flex-col gap-[10px]">
+                  {group.name && (
+                    <h2 className="text-[12px] font-bold text-[var(--indigo)] mt-[6px] uppercase tracking-wider flex items-center gap-[6px]">
+                      <span>{group.name}</span>
+                      <span className="font-mono text-[10.5px] p-[1px_6px] rounded-full bg-[var(--tint)]">
+                        {group.items.length}
+                      </span>
+                    </h2>
+                  )}
+                  {viewMode === "card" ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-[12px]">
+                      {group.items.map((t, idx) => {
+                        const canApprove = Number(t.score) >= minWritingScore;
+                        return (
+                          <div
+                            key={idx}
+                            className="bg-[var(--card)] border border-[var(--bd)] rounded-[12px] p-[13px] shadow-[var(--shadow)] flex flex-col gap-[9px] hover:border-[var(--bd2)] transition-colors"
+                          >
+                            {/* Header */}
+                            <div className="flex items-center gap-[8px]">
+                              <span
+                                className="w-[22px] h-[22px] flex-none rounded-[6px] flex items-center justify-center font-mono font-extrabold text-[9px] text-white"
+                                style={{ background: t.srcColor }}
+                              >
+                                {t.srcInitial}
+                              </span>
+                              <span className="text-[10.5px] font-semibold text-[var(--mut)]">
+                                {t.source}
+                              </span>
+                              <span
+                                className="ml-auto font-mono text-[11px] font-bold p-[2px_7px] rounded-[6px]"
+                                style={{ background: t.scoreBg, color: t.scoreFg }}
+                              >
+                                {t.score}
+                              </span>
+                              <button
+                                aria-label="View trend details"
+                                onClick={() => {
+                                  setSelectedTrend(t);
+                                  setIsDetailOpen(true);
+                                }}
+                                className="w-[24px] h-[24px] rounded-[7px] border border-[var(--bd)] bg-[var(--card)] text-[var(--mut)] inline-flex items-center justify-center hover:border-[var(--indigo)] hover:text-[var(--indigo)] transition-colors"
+                                title="View Details"
+                              >
+                                <Eye size={12} />
+                              </button>
+                              <button
+                                aria-label={`Delete trend ${t.title}`}
+                                title="Delete trend"
+                                onClick={() => {
+                                  setDeleteTarget(t);
+                                  setDeleteError("");
+                                }}
+                                className="w-[24px] h-[24px] rounded-[7px] border border-[var(--bd)] bg-[var(--card)] text-[var(--mut)] inline-flex items-center justify-center hover:border-[var(--rose)] hover:text-[var(--rose)] transition-colors"
+                              >
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                  <path d="M3 6h18" />
+                                  <path d="M8 6V4h8v2" />
+                                  <path d="M19 6l-1 14H6L5 6" />
+                                  <path d="M10 11v5M14 11v5" />
+                                </svg>
+                              </button>
+                            </div>
+
+                            {/* Title */}
+                            <div className="text-[13.5px] font-bold leading-snug tracking-tight text-[var(--fg)]">
+                              {t.title}
+                            </div>
+
+                            {/* Badges */}
+                            <div className="flex gap-[6px] flex-wrap items-center">
+                              <span className="text-[10px] font-semibold p-[2px_7px] rounded-[6px] bg-[var(--card2)] text-[var(--fg2)]">
+                                {t.cat}
+                              </span>
+                              <span
+                                className="text-[10px] font-semibold p-[2px_7px] rounded-[6px]"
+                                style={{ background: t.recBg, color: t.recFg }}
+                              >
+                                {t.rec}
+                              </span>
+                              <span className="text-[10px] font-medium p-[2px_7px] rounded-[6px] text-[var(--faint)]">
+                                {t.volume}
+                              </span>
+                            </div>
+
+                            {/* Score Bar */}
+                            <div className="h-[3px] rounded-[2px] bg-[var(--card2)] overflow-hidden">
+                              <div
+                                className="h-full rounded-[2px]"
+                                style={{ width: t.scorePct, background: t.scoreFg }}
+                              />
+                            </div>
+
+                            {/* Actions */}
+                            <div className="flex gap-[7px] mt-auto pt-[3px]">
+                              {canApprove ? (
+                                <button
+                                  aria-label="Approve topic and send to pipeline"
+                                  onClick={() => openApproveModal(t)}
+                                  className="flex-1 h-[28px] rounded-[8px] border border-transparent bg-[var(--emerald)] text-white text-[11px] font-semibold hover:bg-[#059669] transition-colors"
+                                >
+                                  Approve → Pipeline
+                                </button>
+                              ) : (
+                                <span className="flex-1 h-[28px] rounded-[8px] border border-[rgba(244,63,94,0.25)] bg-[rgba(244,63,94,0.08)] text-[var(--rose)] text-[11px] font-semibold inline-flex items-center justify-center select-none text-center">
+                                  Score too low
+                                </span>
+                              )}
+                              <button
+                                aria-label="Dismiss topic"
+                                onClick={() => alert(`Skipped topic "${t.title}"`)}
+                                className="h-[28px] px-[10px] rounded-[8px] border border-[var(--bd)] bg-[var(--card)] text-[var(--mut)] text-[11px] font-semibold hover:border-[var(--rose)] hover:text-[var(--rose)] transition-colors"
+                              >
+                                Skip
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="bg-[var(--card)] border border-[var(--bd)] rounded-[12px] shadow-[var(--shadow)] overflow-hidden">
+                      <DataTable
+                        columns={columns}
+                        data={group.items}
+                      />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
-        )}
-      </div>
+        );
+      })()}
 
       {approveTarget && (
         <div
@@ -344,31 +640,75 @@ export default function TrendResearchPage({ onOpenManualTopic }: TrendsPageProps
             </div>
 
             <div className="p-[16px] flex flex-col gap-[14px]">
-              <div className="rounded-[12px] border border-[var(--bd)] bg-[var(--card2)] p-[13px]">
-                <div className="flex items-center gap-[8px] flex-wrap mb-[8px]">
-                  <span
-                    className="w-[24px] h-[24px] rounded-[7px] flex items-center justify-center font-mono font-extrabold text-[9px] text-white"
-                    style={{ background: approveTarget.srcColor }}
-                  >
-                    {approveTarget.srcInitial}
+              {/* Detailed Metadata Grid */}
+              <div className="grid grid-cols-2 gap-[12px] rounded-[12px] border border-[var(--bd)] bg-[var(--card2)] p-[14px]">
+                <div className="col-span-2">
+                  <span className="text-[10px] uppercase font-bold tracking-wider text-[var(--mut)] block mb-[3px]">
+                    Topic / Title
                   </span>
-                  <span className="text-[10.5px] font-semibold text-[var(--mut)]">{approveTarget.source}</span>
-                  <span className="text-[10.5px] font-semibold p-[2px_7px] rounded-[6px] bg-[var(--card)] text-[var(--fg2)]">
+                  <span className="text-[13.5px] font-bold text-[var(--fg)] leading-snug">
+                    {approveTarget.title}
+                  </span>
+                </div>
+
+                <div>
+                  <span className="text-[10px] uppercase font-bold tracking-wider text-[var(--mut)] block mb-[3px]">
+                    Source
+                  </span>
+                  <span className="text-[11.5px] font-semibold text-[var(--fg2)] flex items-center gap-[6px]">
+                    <span
+                      className="w-[18px] h-[18px] rounded-[5px] flex items-center justify-center font-mono font-extrabold text-[8px] text-white"
+                      style={{ background: approveTarget.srcColor }}
+                    >
+                      {approveTarget.srcInitial}
+                    </span>
+                    {approveTarget.source}
+                  </span>
+                </div>
+
+                <div>
+                  <span className="text-[10px] uppercase font-bold tracking-wider text-[var(--mut)] block mb-[3px]">
+                    Category
+                  </span>
+                  <span className="text-[11.5px] font-semibold text-[var(--fg2)]">
                     {approveTarget.cat}
                   </span>
+                </div>
+
+                <div>
+                  <span className="text-[10px] uppercase font-bold tracking-wider text-[var(--mut)] block mb-[3px]">
+                    Trend Score
+                  </span>
                   <span
-                    className="ml-auto font-mono text-[11px] font-bold p-[2px_8px] rounded-[7px]"
+                    className="font-mono text-[10.5px] font-bold px-[6px] py-[2px] rounded-[5px] inline-block"
                     style={{ background: approveTarget.scoreBg, color: approveTarget.scoreFg }}
                   >
-                    score {approveTarget.score}
+                    {approveTarget.score}%
                   </span>
                 </div>
-                <div className="text-[13px] font-bold leading-snug text-[var(--fg)]">
-                  {approveTarget.title}
+
+                <div>
+                  <span className="text-[10px] uppercase font-bold tracking-wider text-[var(--mut)] block mb-[3px]">
+                    Volume / Age
+                  </span>
+                  <span className="text-[11.5px] font-medium text-[var(--fg2)]">
+                    {approveTarget.volume}
+                  </span>
                 </div>
-                <div className="text-[11px] text-[var(--mut)] mt-[8px]">
-                  {approveTarget.volume}
-                </div>
+
+                {approveTarget.rec && (
+                  <div className="col-span-2 border-t border-[var(--bd)] pt-[8px] mt-[4px]">
+                    <span className="text-[10px] uppercase font-bold tracking-wider text-[var(--mut)] block mb-[3px]">
+                      Recommendation
+                    </span>
+                    <span
+                      className="text-[10px] font-semibold px-[7px] py-[2.5px] rounded-[6px] inline-block"
+                      style={{ background: approveTarget.recBg, color: approveTarget.recFg }}
+                    >
+                      {approveTarget.rec}
+                    </span>
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-[9px]">
@@ -441,46 +781,64 @@ export default function TrendResearchPage({ onOpenManualTopic }: TrendsPageProps
           onClick={() => !isDeleting && setDeleteTarget(null)}
         >
           <div
-            className="w-full max-w-[460px] bg-[var(--card)] border border-[var(--bd)] rounded-[14px] shadow-[var(--shadow)] overflow-hidden"
+            className="w-full max-w-[480px] bg-[var(--card)] border border-[var(--bd)] rounded-[16px] shadow-[var(--shadow)] overflow-hidden flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="p-[14px_16px] border-b border-[var(--bd)] flex items-center gap-[10px]">
-              <div className="w-[30px] h-[30px] rounded-[9px] bg-[rgba(244,63,94,0.12)] text-[var(--rose)] flex items-center justify-center">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M3 6h18" />
-                  <path d="M8 6V4h8v2" />
-                  <path d="M19 6l-1 14H6L5 6" />
+            {/* Header */}
+            <div className="p-[14px_16px] border-b border-[var(--bd)] flex items-center gap-[12px]">
+              <div className="w-[34px] h-[34px] rounded-[10px] bg-[rgba(244,63,94,0.12)] text-[var(--rose)] flex items-center justify-center flex-none">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M10 11v6M14 11v6" />
                 </svg>
               </div>
-              <div>
-                <div className="text-[13px] font-bold text-[var(--fg)]">Delete trend</div>
-                <div className="text-[11px] text-[var(--mut)] mt-[2px]">This removes the research topic and linked plan/outline.</div>
+              <div className="min-w-0">
+                <div className="text-[13.5px] font-extrabold tracking-tight text-[var(--fg)]">
+                  Delete trend signal
+                </div>
+                <div className="text-[11px] text-[var(--mut)] mt-[2px] leading-normal">
+                  This removes the research topic and linked plan/outline.
+                </div>
               </div>
+              <button
+                aria-label="Close delete modal"
+                disabled={isDeleting}
+                onClick={() => setDeleteTarget(null)}
+                className="ml-auto w-[28px] h-[28px] rounded-[8px] border border-[var(--bd)] bg-[var(--card)] text-[var(--mut)] flex items-center justify-center hover:text-[var(--fg)] disabled:opacity-50 text-[10px]"
+              >
+                ✕
+              </button>
             </div>
-            <div className="p-[16px]">
-              <div className="text-[12.5px] font-semibold leading-snug text-[var(--fg)]">
-                {deleteTarget.title}
+
+            {/* Content */}
+            <div className="p-[16px] flex flex-col gap-[12px]">
+              <div className="border-l-[3.5px] border-[var(--rose)] bg-[var(--card2)] p-[12px_14px] rounded-[0_10px_10px_0] flex flex-col gap-[6px]">
+                <div className="text-[13px] font-bold leading-snug text-[var(--fg)]">
+                  {deleteTarget.title}
+                </div>
+                <div className="flex gap-[6px] flex-wrap items-center mt-[2px]">
+                  <span className="text-[9.5px] font-semibold p-[2px_7px] rounded-[5px] bg-[var(--card)] border border-[var(--bd)] text-[var(--fg2)]">
+                    {deleteTarget.source}
+                  </span>
+                  <span className="text-[9.5px] font-semibold p-[2px_7px] rounded-[5px] bg-[rgba(244,63,94,0.10)] border border-[rgba(244,63,94,0.2)] text-[var(--rose)]">
+                    score {deleteTarget.score}
+                  </span>
+                </div>
               </div>
-              <div className="mt-[8px] flex gap-[6px] flex-wrap">
-                <span className="text-[10px] font-semibold p-[2px_7px] rounded-[6px] bg-[var(--card2)] text-[var(--fg2)]">
-                  {deleteTarget.source}
-                </span>
-                <span className="text-[10px] font-semibold p-[2px_7px] rounded-[6px] bg-[rgba(244,63,94,0.12)] text-[var(--rose)]">
-                  score {deleteTarget.score}
-                </span>
-              </div>
+
               {deleteError && (
-                <div className="mt-[12px] text-[11px] text-[var(--rose)] bg-[rgba(244,63,94,0.10)] border border-[rgba(244,63,94,0.25)] rounded-[8px] p-[8px_10px]">
+                <div className="text-[11px] text-[var(--rose)] bg-[rgba(244,63,94,0.10)] border border-[rgba(244,63,94,0.25)] rounded-[9px] p-[9px_10px]">
                   {deleteError}
                 </div>
               )}
             </div>
-            <div className="p-[12px_16px] border-t border-[var(--bd)] flex justify-end gap-[8px]">
+
+            {/* Footer */}
+            <div className="p-[12px_16px] border-t border-[var(--bd)] flex justify-end gap-[8px] bg-[var(--card2)]">
               <button
                 type="button"
                 disabled={isDeleting}
                 onClick={() => setDeleteTarget(null)}
-                className="h-[30px] px-[12px] rounded-[8px] border border-[var(--bd)] bg-[var(--card)] text-[var(--fg2)] text-[11.5px] font-semibold hover:border-[var(--bd2)] disabled:opacity-60"
+                className="h-[32px] px-[14px] rounded-[8px] border border-[var(--bd)] bg-[var(--card)] text-[var(--fg2)] text-[12px] font-semibold hover:border-[var(--bd2)] transition-colors disabled:opacity-60"
               >
                 Cancel
               </button>
@@ -488,7 +846,7 @@ export default function TrendResearchPage({ onOpenManualTopic }: TrendsPageProps
                 type="button"
                 disabled={isDeleting}
                 onClick={handleDeleteTrend}
-                className="h-[30px] px-[12px] rounded-[8px] border border-transparent bg-[var(--rose)] text-white text-[11.5px] font-bold hover:bg-rose-600 disabled:opacity-60"
+                className="h-[32px] px-[14px] rounded-[8px] border border-transparent bg-[var(--rose)] text-white text-[12px] font-bold hover:bg-rose-600 shadow-sm transition-colors disabled:opacity-60"
               >
                 {isDeleting ? "Deleting..." : "Delete trend"}
               </button>
@@ -496,6 +854,23 @@ export default function TrendResearchPage({ onOpenManualTopic }: TrendsPageProps
           </div>
         </div>
       )}
+
+      {/* Trend Detail Modal */}
+      <TrendDetailModal
+        isOpen={isDetailOpen}
+        onClose={() => {
+          setIsDetailOpen(false);
+          setSelectedTrend(null);
+        }}
+        trend={selectedTrend}
+        onApprove={openApproveModal}
+        onSkip={(t) => alert(`Skipped topic "${t.title}"`)}
+        onDelete={(t) => {
+          setDeleteTarget(t);
+          setDeleteError("");
+        }}
+        minWritingScore={minWritingScore}
+      />
     </div>
   );
 }
