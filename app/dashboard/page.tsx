@@ -165,12 +165,18 @@ export default function ExecutiveDashboard({ onOpenBlogModal, onOpenRunPipeline 
     completed: 0,
     state: "idle",
   });
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
     const loadDashboard = () => {
       fetch("/api/dashboard", { cache: "no-store" })
-        .then((res) => res.json())
+        .then((res) => {
+          if (!res.ok) {
+            throw new Error(`API error: ${res.status} ${res.statusText}`);
+          }
+          return res.json();
+        })
         .then((data) => {
           if (!mounted) return;
           setDashboardMetrics(data.metrics);
@@ -179,8 +185,13 @@ export default function ExecutiveDashboard({ onOpenBlogModal, onOpenRunPipeline 
           setStageStatus({ ...emptyStageStatus, ...(data.stageStatus ?? {}) });
           setPipeline(data.pipeline ?? { active: 0, waiting: 0, delayed: 0, failed: 0, completed: 0, state: "idle" });
           setRecentBlogs((data.blogs ?? []).slice(0, 6));
+          setLoadError(null);
         })
-        .catch(() => { });
+        .catch((err) => {
+          if (!mounted) return;
+          console.error("Failed to load dashboard data:", err);
+          setLoadError(`Failed to load dashboard: ${err instanceof Error ? err.message : String(err)}`);
+        });
     };
     loadDashboard();
     const timer = window.setInterval(loadDashboard, 3000);
@@ -349,6 +360,17 @@ export default function ExecutiveDashboard({ onOpenBlogModal, onOpenRunPipeline 
           </button>
         </div>
       </div>
+
+      {/* Error Banner */}
+      {loadError && (
+        <div className="rounded-[8px] border border-[var(--rose)] bg-[rgba(244,63,94,0.08)] p-[10px_14px] text-[12px] text-[var(--rose)] flex items-start gap-[10px]">
+          <span className="text-[14px] leading-none flex-shrink-0">⚠️</span>
+          <div>
+            <span className="font-semibold">Dashboard Error:</span> {loadError}
+            <div className="text-[11px] text-[var(--faint)] mt-[4px]">Data will refresh automatically when connection is restored.</div>
+          </div>
+        </div>
+      )}
 
       {/* Metrics Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-[12px]">
