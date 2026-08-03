@@ -1,5 +1,6 @@
 import { env, isVertexConfigured } from "../shared/env";
 import { generateVertexJson } from "../shared/vertex";
+import { getSetting, MODEL_SETTING_KEYS } from "../shared/settings";
 import { PlanningResult } from "./types";
 
 function buildPrompt(topic: string, category: string, score: number, evidenceSummary: string): string {
@@ -56,9 +57,10 @@ export async function generateContentPlan(
     };
   }
 
+  const model = await getSetting(MODEL_SETTING_KEYS.planning, env.VERTEX_FLASH);
   const result = await generateVertexJson<PlanningResult>(
-    env.VERTEX_FLASH,
+    model,
     buildPrompt(topic, category, score, evidenceSummary)
   );
-  return { plan: result.data, usage: result.usage, model: env.VERTEX_FLASH };
+  return { plan: result.data, usage: result.usage, model };
 }
