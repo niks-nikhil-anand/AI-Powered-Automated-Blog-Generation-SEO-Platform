@@ -2,6 +2,19 @@
 
 import React, { useEffect, useState } from "react";
 import { BlogDetailModal, BlogItem } from "../../../components/shared/BlogDetailModal";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Pagination,
+  PaginationContent,
+  PaginationEllipsis,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from "@/components/ui/pagination";
+import { getPaginationRange } from "@/lib/utils";
+
+const BLOGS_PAGE_SIZE = 10;
 
 export default function BlogManagementPage() {
   const [activeTab, setActiveTab] = useState("all");
@@ -11,6 +24,8 @@ export default function BlogManagementPage() {
   const [blogRows, setBlogRows] = useState<(BlogItem & { words: string; cost: string })[]>([]);
   const [selectedBlog, setSelectedBlog] = useState<BlogItem | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
+  const [isLoadingBlogs, setIsLoadingBlogs] = useState(true);
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
     let mounted = true;
@@ -22,6 +37,9 @@ export default function BlogManagementPage() {
         })
         .catch(() => {
           if (mounted) setBlogRows([]);
+        })
+        .finally(() => {
+          if (mounted) setIsLoadingBlogs(false);
         });
     };
     loadBlogs();
@@ -76,6 +94,17 @@ export default function BlogManagementPage() {
       (activeTab === "pipeline" && row.status === "Review");
     return matchesSearch && matchesCat && matchesTab;
   });
+
+  const totalPages = Math.max(1, Math.ceil(filteredRows.length / BLOGS_PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pageRows = filteredRows.slice(
+    (currentPage - 1) * BLOGS_PAGE_SIZE,
+    currentPage * BLOGS_PAGE_SIZE
+  );
+
+  useEffect(() => {
+    setPage(1);
+  }, [activeTab, searchQuery, categoryFilter]);
 
   return (
     <div className="flex flex-col gap-[13px]">
@@ -215,7 +244,43 @@ export default function BlogManagementPage() {
               </tr>
             </thead>
             <tbody>
-              {filteredRows.length > 0 ? filteredRows.map((b) => (
+              {isLoadingBlogs && blogRows.length === 0 ? (
+                Array.from({ length: 8 }).map((_, idx) => (
+                  <tr key={idx} className="border-b border-[var(--bd)]">
+                    <td className="p-[9px_0_9px_12px]">
+                      <Skeleton className="h-[13px] w-[13px] rounded-[3px]" />
+                    </td>
+                    <td className="p-[9px_8px]">
+                      <Skeleton className="h-[13px] w-[220px]" />
+                      <Skeleton className="h-[10px] w-[140px] mt-[6px]" />
+                    </td>
+                    <td className="p-[9px_8px]">
+                      <Skeleton className="h-[16px] w-[70px] rounded-[6px]" />
+                    </td>
+                    <td className="p-[9px_8px] text-right">
+                      <Skeleton className="h-[12px] w-[40px] ml-auto" />
+                    </td>
+                    <td className="p-[9px_8px] text-right">
+                      <Skeleton className="h-[12px] w-[32px] ml-auto" />
+                    </td>
+                    <td className="p-[9px_8px] text-right">
+                      <Skeleton className="h-[16px] w-[40px] ml-auto rounded-[6px]" />
+                    </td>
+                    <td className="p-[9px_8px] text-right">
+                      <Skeleton className="h-[12px] w-[36px] ml-auto" />
+                    </td>
+                    <td className="p-[9px_8px]">
+                      <Skeleton className="h-[16px] w-[64px] rounded-full" />
+                    </td>
+                    <td className="p-[9px_8px]">
+                      <Skeleton className="h-[12px] w-[56px]" />
+                    </td>
+                    <td className="p-[9px_12px] text-right">
+                      <Skeleton className="h-[28px] w-[28px] rounded-[7px] ml-auto" />
+                    </td>
+                  </tr>
+                ))
+              ) : pageRows.length > 0 ? pageRows.map((b) => (
                 <tr
                   key={b.id}
                   className="border-b border-[var(--bd)] hover:bg-[var(--card2)] transition-colors"
@@ -295,22 +360,45 @@ export default function BlogManagementPage() {
         </div>
 
         {/* Footer Pagination */}
-        <div className="flex items-center justify-between p-[9px_12px] text-[11px] text-[var(--mut)] border-t border-[var(--bd)]">
-          <span>Page 1 of 1</span>
-          <div className="flex gap-[6px]">
-            <button
-              aria-label="Previous page"
-              className="h-[26px] px-[10px] rounded-[7px] border border-[var(--bd)] bg-[var(--card)] text-[var(--faint)] text-[11px] font-semibold"
-            >
-              Prev
-            </button>
-            <button
-              aria-label="Next page"
-              className="h-[26px] px-[10px] rounded-[7px] border border-[var(--bd)] bg-[var(--card)] text-[var(--fg2)] text-[11px] font-semibold hover:border-[var(--bd2)]"
-            >
-              Next
-            </button>
-          </div>
+        <div className="flex items-center justify-between gap-[10px] flex-wrap p-[9px_12px] text-[11px] text-[var(--mut)] border-t border-[var(--bd)]">
+          <span>
+            {filteredRows.length > 0
+              ? `Showing ${(currentPage - 1) * BLOGS_PAGE_SIZE + 1}–${Math.min(currentPage * BLOGS_PAGE_SIZE, filteredRows.length)} of ${filteredRows.length}`
+              : "No rows"}{" "}
+            · Page {currentPage} of {totalPages}
+          </span>
+          <Pagination className="justify-end w-auto">
+            <PaginationContent>
+              <PaginationItem>
+                <PaginationPrevious
+                  disabled={currentPage === 1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                />
+              </PaginationItem>
+              {getPaginationRange(currentPage, totalPages).map((entry, idx) =>
+                entry === "ellipsis" ? (
+                  <PaginationItem key={`ellipsis-${idx}`}>
+                    <PaginationEllipsis />
+                  </PaginationItem>
+                ) : (
+                  <PaginationItem key={entry}>
+                    <PaginationLink
+                      isActive={entry === currentPage}
+                      onClick={() => setPage(entry)}
+                    >
+                      {entry}
+                    </PaginationLink>
+                  </PaginationItem>
+                )
+              )}
+              <PaginationItem>
+                <PaginationNext
+                  disabled={currentPage === totalPages}
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                />
+              </PaginationItem>
+            </PaginationContent>
+          </Pagination>
         </div>
       </div>
       <BlogDetailModal
