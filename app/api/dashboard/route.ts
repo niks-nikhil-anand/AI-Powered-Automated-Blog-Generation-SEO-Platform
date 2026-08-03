@@ -265,6 +265,49 @@ export async function GET() {
     : [];
   const workflowsByBlogId = new Map(workflowRuns.filter((run) => run.blogId).map((run) => [run.blogId!, run]));
 
+  // Settings page "Worker Activity" panel, for the six workers that have no
+  // schedule (they run reactively - see workers/shared/settings.ts). Built
+  // from the WorkerAttempt rows already fetched above rather than a new
+  // query. Known gap: workflowRuns is scoped to the 50 latest *blogs*, so a
+  // planning/outline attempt that failed before a Blog row ever existed
+  // (no blogId got attached to that run) won't be counted here - this is a
+  // "recent activity" view, not an exhaustive audit log.
+  const REACTIVE_WORKERS = [
+    "planning-worker",
+    "outline-worker",
+    "writing-worker",
+    "image-worker",
+    "quality-worker",
+    "publish-worker",
+  ] as const;
+  const attemptsByWorker = new Map<string, { startedAt: Date; finishedAt: Date | null; status: string }[]>();
+  for (const run of workflowRuns) {
+    for (const attempt of run.attempts) {
+      const list = attemptsByWorker.get(attempt.worker) ?? [];
+      list.push({ startedAt: attempt.startedAt, finishedAt: attempt.finishedAt, status: attempt.status });
+      attemptsByWorker.set(attempt.worker, list);
+    }
+  }
+  const workerActivity = REACTIVE_WORKERS.map((worker) => {
+    const attempts = (attemptsByWorker.get(worker) ?? []).sort(
+      (a, b) => b.startedAt.getTime() - a.startedAt.getTime()
+    );
+    const last = attempts[0];
+    const durations = attempts
+      .filter((a) => a.finishedAt)
+      .map((a) => a.finishedAt!.getTime() - a.startedAt.getTime());
+    const avgDurationMs = durations.length
+      ? Math.round(durations.reduce((sum, ms) => sum + ms, 0) / durations.length)
+      : null;
+    return {
+      worker,
+      lastRanAt: last ? last.startedAt.toISOString() : null,
+      lastStatus: last?.status ?? null,
+      avgDurationMs,
+      sampleCount: attempts.length,
+    };
+  });
+
   // Cost attributed to each blog (used by blog rows and the cost tables below).
   const usageByBlog = new Map<string, { cost: number; tokens: number; calls: number; models: Set<string> }>();
   for (const row of aiUsage) {
@@ -771,6 +814,7 @@ export async function GET() {
       color: modelColor(row.model),
       createdAt: row.createdAt,
     })),
+    workerActivity,
     queues: queueSnapshots.map((queue) => ({
       name: queue.name,
       waiting: String(queue.counts.waiting + queue.counts.delayed),
