@@ -22,41 +22,58 @@ type RouteContext = {
 };
 
 export async function PATCH(request: Request, context: RouteContext) {
-  const { id } = await context.params;
-  if (!SLOT_LABELS[id]) {
-    return NextResponse.json({ ok: false, error: `Unknown schedule "${id}".` }, { status: 404 });
-  }
+  try {
+    const { id } = await context.params;
+    if (!SLOT_LABELS[id]) {
+      return NextResponse.json({ ok: false, error: `Unknown schedule "${id}".` }, { status: 404 });
+    }
 
-  const body = await request.json().catch(() => ({}));
-  const hour = Number(body.hour);
-  const minute = Number(body.minute);
-  if (!Number.isInteger(hour) || hour < 0 || hour > 23 || !Number.isInteger(minute) || minute < 0 || minute > 59) {
+    let body: Record<string, unknown> = {};
+    try {
+      body = await request.json();
+    } catch (parseError) {
+      return NextResponse.json(
+        { ok: false, error: "Invalid JSON in request body" },
+        { status: 400 }
+      );
+    }
+
+    const hour = Number(body.hour);
+    const minute = Number(body.minute);
+    if (!Number.isInteger(hour) || hour < 0 || hour > 23 || !Number.isInteger(minute) || minute < 0 || minute > 59) {
+      return NextResponse.json(
+        { ok: false, error: "hour must be 0-23 and minute must be 0-59." },
+        { status: 422 }
+      );
+    }
+
+    const pattern = `${minute} ${hour} * * *`;
+
+    // upsertJobScheduler is idempotent and takes effect immediately in
+    // Redis - no worker restart needed, the next fire time recalculates as
+    // soon as this resolves.
+    await researchQueue.upsertJobScheduler(
+      id,
+      { pattern, tz: env.TIMEZONE },
+      { name: "scheduled-research", data: { slot: id } }
+    );
+
+    const schedulers = await researchQueue.getJobSchedulers();
+    const updated = schedulers.find((scheduler) => scheduler.key === id);
+
+    return NextResponse.json({
+      ok: true,
+      id,
+      label: SLOT_LABELS[id],
+      pattern,
+      tz: env.TIMEZONE,
+      next: updated?.next ?? null,
+    });
+  } catch (error) {
+    console.error("Failed to update schedule:", error);
     return NextResponse.json(
-      { ok: false, error: "hour must be 0-23 and minute must be 0-59." },
-      { status: 422 }
+      { ok: false, error: "Failed to update schedule" },
+      { status: 500 }
     );
   }
-
-  const pattern = `${minute} ${hour} * * *`;
-
-  // upsertJobScheduler is idempotent and takes effect immediately in
-  // Redis - no worker restart needed, the next fire time recalculates as
-  // soon as this resolves.
-  await researchQueue.upsertJobScheduler(
-    id,
-    { pattern, tz: env.TIMEZONE },
-    { name: "scheduled-research", data: { slot: id } }
-  );
-
-  const schedulers = await researchQueue.getJobSchedulers();
-  const updated = schedulers.find((scheduler) => scheduler.key === id);
-
-  return NextResponse.json({
-    ok: true,
-    id,
-    label: SLOT_LABELS[id],
-    pattern,
-    tz: env.TIMEZONE,
-    next: updated?.next ?? null,
-  });
 }
