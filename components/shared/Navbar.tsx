@@ -54,7 +54,7 @@ export function Navbar({ onOpenCmdk, onOpenRunPipeline }: NavbarProps) {
       case "/dashboard/logs":
         return "Streaming System Logs";
       case "/dashboard/settings":
-        return "Settings & AI Models";
+        return "Settings ";
       default:
         return "Executive Dashboard";
     }
