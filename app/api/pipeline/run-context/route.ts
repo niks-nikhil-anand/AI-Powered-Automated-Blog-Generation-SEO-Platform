@@ -26,7 +26,8 @@ function asRecord(value: unknown): Record<string, unknown> {
 }
 
 export async function GET() {
-  const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+  try {
+    const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
 
   const [schedulers, queues, workersConnected, lastAttempt, usageRows, passedRuns] =
     await Promise.all([
@@ -118,4 +119,11 @@ export async function GET() {
       basedOnRuns: blogCosts.length,
     },
   });
+  } catch (error) {
+    console.error("Failed to fetch pipeline context:", error);
+    return NextResponse.json(
+      { ok: false, error: "Failed to fetch pipeline context" },
+      { status: 500 }
+    );
+  }
 }
