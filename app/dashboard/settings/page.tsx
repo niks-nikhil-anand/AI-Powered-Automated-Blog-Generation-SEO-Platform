@@ -32,7 +32,7 @@ export default function SettingsPage() {
       {/* Header */}
       <div>
         <h1 className="margin-0 text-[19px] font-extrabold tracking-tight text-[var(--fg)]">
-          Settings & AI Models
+          Settings
         </h1>
         <p className="margin-0 text-[12px] text-[var(--mut)] mt-[3px]">
           Pipeline configuration · no saved configuration yet
