@@ -129,7 +129,7 @@ export function Sidebar({ collapsed: externalCollapsed, onToggleCollapse }: Side
       title: "System",
       items: [
         {
-          label: "Settings & AI Models",
+          label: "Settings",
           href: "/dashboard/settings",
           badge: null,
           icon: (
