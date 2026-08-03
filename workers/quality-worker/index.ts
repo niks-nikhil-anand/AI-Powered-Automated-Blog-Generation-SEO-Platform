@@ -82,15 +82,11 @@ export async function runQualityCheck(payload: QualityJobPayload) {
         attempts: {
           where: { worker: "writing-worker" },
           orderBy: { startedAt: "desc" },
-          take: 1,
         },
       },
     });
-    const writingAttemptCount = workflow
-      ? await prisma.workerAttempt.count({
-          where: { workflowRunId: workflow.id, worker: "writing-worker" },
-        })
-      : 0;
+    // Use fetched attempts array instead of separate count query (N+1 optimization)
+    const writingAttemptCount = workflow?.attempts.length ?? 0;
     const lastWritingInput = workflow?.attempts[0]?.input as WritingJobPayload | undefined;
 
     if (lastWritingInput && writingAttemptCount < 4) {
