@@ -58,7 +58,7 @@ export async function fetchVergeSignals(): Promise<RawSignal[]> {
         signals.push({
           title: item.title,
           url: item.link,
-          source: "the-verge",
+          source: "the_verge",
           snippet: item.description || "",
           timestamp: new Date(item.pubDate || Date.now()).toISOString(),
         });
