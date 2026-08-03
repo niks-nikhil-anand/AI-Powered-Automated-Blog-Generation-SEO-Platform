@@ -1,15 +1,28 @@
-export type ResearchSourceName = "google_trends" | "google_news" | "github_trending";
+export type ResearchSourceName =
+  | "google_trends"
+  | "google_news"
+  | "github_trending"
+  | "techcrunch"
+  | "the_verge"
+  | "google_ai_blog"
+  | "openai_news"
+  | "anthropic_news"
+  | "microsoft_ai_blog"
+  | "nvidia_blog"
+  | "hackernews";
 
 export type RawSignal = {
   source: ResearchSourceName;
   title: string;
   url?: string;
   description?: string;
+  snippet?: string;
   publishedAt?: Date;
+  timestamp?: string;
   volume?: number;
   engagement?: number;
   tags?: string[];
-  raw: unknown;
+  raw?: unknown;
 };
 
 export type NormalizedSignal = RawSignal & {
@@ -39,5 +52,7 @@ export type ResearchCandidate = {
 
 export type ResearchSource = {
   name: ResearchSourceName;
-  fetchSignals: () => Promise<RawSignal[]>;
+  displayName?: string;
+  fetch?: () => Promise<RawSignal[]>;
+  fetchSignals?: () => Promise<RawSignal[]>;
 };
