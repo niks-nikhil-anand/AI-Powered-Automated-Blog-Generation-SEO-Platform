@@ -37,7 +37,7 @@ export function DataTable({ columns, data, onRowClick, minWidth = "100%" }: Data
         <tbody>
           {data.map((row, rIdx) => (
             <tr
-              key={row.id || rIdx}
+              key={row.id ?? `row-${rIdx}`}
               onClick={() => onRowClick && onRowClick(row)}
               className="border-b border-[var(--bd)] hover:bg-[var(--card2)] transition-colors cursor-pointer"
             >
@@ -48,7 +48,7 @@ export function DataTable({ columns, data, onRowClick, minWidth = "100%" }: Data
                     col.align === "right" ? "text-right" : col.align === "center" ? "text-center" : "text-left"
                   }`}
                 >
-                  {col.render ? col.render(row) : row[col.key]}
+                  {col.render ? col.render(row) : row[col.key] ?? "-"}
                 </td>
               ))}
             </tr>
