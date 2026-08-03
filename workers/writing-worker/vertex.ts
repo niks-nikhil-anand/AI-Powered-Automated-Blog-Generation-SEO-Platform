@@ -1,6 +1,7 @@
 import { env, isVertexConfigured } from "../shared/env";
 import { logger } from "../shared/logger";
 import { generateVertexText, slugify } from "../shared/vertex";
+import { getSetting, MODEL_SETTING_KEYS } from "../shared/settings";
 
 const log = logger.child({ worker: "writing-worker" });
 
@@ -13,6 +14,8 @@ export type BlogDraft = {
   keywords: string[];
   markdown: string;
   usage: { promptTokens: number; completionTokens: number };
+  /** Actual model used for this draft - the dashboard can override the env default per stage, so index.ts should trust this rather than re-deriving it from env.VERTEX_MODEL. */
+  model: string;
 };
 
 export type WritingContext = {
@@ -164,12 +167,14 @@ async function generateMock(topic: string, description: string, context: Writing
     keywords: [topic.toLowerCase()],
     markdown,
     usage: { promptTokens: 0, completionTokens: 0 },
+    model: "fallback",
   };
 }
 
 async function generateWithVertex(topic: string, description: string, context: WritingContext = {}): Promise<BlogDraft> {
+  const model = await getSetting(MODEL_SETTING_KEYS.writing, env.VERTEX_MODEL);
   const prompt = buildPrompt(topic, description, context);
-  const result = await generateVertexText(env.VERTEX_MODEL, prompt, {
+  const result = await generateVertexText(model, prompt, {
     maxOutputTokens: 8192,
     temperature: 0.35,
   });
@@ -189,6 +194,7 @@ async function generateWithVertex(topic: string, description: string, context: W
     keywords: keywords.length > 0 ? keywords.slice(0, 8) : [topic.toLowerCase()],
     markdown: enforceSingleH1(result.text, title),
     usage: result.usage,
+    model,
   };
 }
 
