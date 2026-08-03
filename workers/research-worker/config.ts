@@ -2,7 +2,19 @@ import { env } from "../shared/env";
 import { ResearchSourceName } from "./types";
 
 export const researchConfig = {
-  enabledSources: ["google_trends", "google_news", "github_trending"] as ResearchSourceName[],
+  enabledSources: [
+    "google_trends",
+    "google_news",
+    "github_trending",
+    "techcrunch",
+    "the_verge",
+    "google_ai_blog",
+    "openai_news",
+    "anthropic_news",
+    "microsoft_ai_blog",
+    "nvidia_blog",
+    "hackernews",
+  ] as ResearchSourceName[],
   region: env.GOOGLE_TRENDS_GEO,
   language: "en",
   maxSignalsPerSource: env.RESEARCH_MAX_SIGNALS_PER_SOURCE,
