@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import { ThemeProvider } from "../../components/shared/ThemeProvider";
+import { ErrorBoundary } from "../../components/shared/ErrorBoundary";
 import { Sidebar } from "../../components/shared/Sidebar";
 import { Navbar } from "../../components/shared/Navbar";
 import { GlobalSearchModal } from "../../components/shared/GlobalSearchModal";
@@ -41,17 +42,19 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
           {/* Main Page Content */}
           <main className="flex-1 min-w-0 p-[18px]">
-            {React.isValidElement(children)
-              ? React.cloneElement(children as React.ReactElement<{
-                onOpenBlogModal?: (blog: BlogItem) => void;
-                onOpenManualTopic?: () => void;
-                onOpenRunPipeline?: () => void;
-              }>, {
-                onOpenBlogModal: handleOpenBlogDetail,
-                onOpenManualTopic: () => setManualTopicOpen(true),
-                onOpenRunPipeline: () => setRunPipelineOpen(true),
-              })
-              : children}
+            <ErrorBoundary>
+              {React.isValidElement(children)
+                ? React.cloneElement(children as React.ReactElement<{
+                  onOpenBlogModal?: (blog: BlogItem) => void;
+                  onOpenManualTopic?: () => void;
+                  onOpenRunPipeline?: () => void;
+                }>, {
+                  onOpenBlogModal: handleOpenBlogDetail,
+                  onOpenManualTopic: () => setManualTopicOpen(true),
+                  onOpenRunPipeline: () => setRunPipelineOpen(true),
+                })
+                : children}
+            </ErrorBoundary>
           </main>
         </div>
 
