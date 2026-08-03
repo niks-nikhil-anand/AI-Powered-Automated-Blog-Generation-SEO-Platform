@@ -11,6 +11,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Pagination,
+  PaginationContent,
+  PaginationEllipsis,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from "@/components/ui/pagination";
+import { getPaginationRange } from "@/lib/utils";
+
+const TRENDS_PAGE_SIZE = 9;
 
 interface TrendsPageProps {
   onOpenManualTopic?: () => void;
@@ -34,6 +47,8 @@ export default function TrendResearchPage({ onOpenManualTopic }: TrendsPageProps
   const [approveResult, setApproveResult] = useState<{ jobId: string; queue: string } | null>(null);
   const [isResearchRunning, setIsResearchRunning] = useState(false);
   const [researchMessage, setResearchMessage] = useState("");
+  const [isLoadingTrends, setIsLoadingTrends] = useState(true);
+  const [page, setPage] = useState(1);
 
   type TrendRow = {
     id: string;
@@ -62,6 +77,9 @@ export default function TrendResearchPage({ onOpenManualTopic }: TrendsPageProps
         })
         .catch(() => {
           if (mounted) setTrends([]);
+        })
+        .finally(() => {
+          if (mounted) setIsLoadingTrends(false);
         });
     };
     loadTrends();
@@ -180,23 +198,34 @@ export default function TrendResearchPage({ onOpenManualTopic }: TrendsPageProps
     return 0;
   });
 
+  const totalPages = Math.max(1, Math.ceil(sortedTrends.length / TRENDS_PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pageTrends = sortedTrends.slice(
+    (currentPage - 1) * TRENDS_PAGE_SIZE,
+    currentPage * TRENDS_PAGE_SIZE
+  );
+
+  useEffect(() => {
+    setPage(1);
+  }, [activeFilter, selectedCategory, sortBy, groupBy]);
+
   const groups: { name: string; items: typeof sortedTrends }[] = [];
   if (groupBy === "none") {
-    groups.push({ name: "", items: sortedTrends });
+    groups.push({ name: "", items: pageTrends });
   } else if (groupBy === "source") {
-    const sourceNames = Array.from(new Set(sortedTrends.map((t) => t.source))).sort();
+    const sourceNames = Array.from(new Set(pageTrends.map((t) => t.source))).sort();
     sourceNames.forEach((src) => {
       groups.push({
         name: src,
-        items: sortedTrends.filter((t) => t.source === src),
+        items: pageTrends.filter((t) => t.source === src),
       });
     });
   } else if (groupBy === "category") {
-    const catNames = Array.from(new Set(sortedTrends.map((t) => t.cat))).sort();
+    const catNames = Array.from(new Set(pageTrends.map((t) => t.cat))).sort();
     catNames.forEach((cat) => {
       groups.push({
         name: cat,
-        items: sortedTrends.filter((t) => t.cat === cat),
+        items: pageTrends.filter((t) => t.cat === cat),
       });
     });
   }
@@ -453,6 +482,55 @@ export default function TrendResearchPage({ onOpenManualTopic }: TrendsPageProps
           }
         ];
 
+        if (isLoadingTrends && trends.length === 0) {
+          return viewMode === "card" ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-[12px]">
+              {Array.from({ length: 6 }).map((_, idx) => (
+                <div
+                  key={idx}
+                  className="bg-[var(--card)] border border-[var(--bd)] rounded-[12px] p-[13px] shadow-[var(--shadow)] flex flex-col gap-[10px]"
+                >
+                  <div className="flex items-center gap-[8px]">
+                    <Skeleton className="w-[22px] h-[22px] rounded-[6px]" />
+                    <Skeleton className="h-[10px] w-[70px]" />
+                    <Skeleton className="ml-auto h-[16px] w-[34px] rounded-[6px]" />
+                  </div>
+                  <Skeleton className="h-[14px] w-[85%]" />
+                  <Skeleton className="h-[14px] w-[55%]" />
+                  <div className="flex gap-[6px]">
+                    <Skeleton className="h-[16px] w-[54px] rounded-[6px]" />
+                    <Skeleton className="h-[16px] w-[70px] rounded-[6px]" />
+                  </div>
+                  <Skeleton className="h-[3px] w-full rounded-[2px]" />
+                  <div className="flex gap-[7px] mt-[3px]">
+                    <Skeleton className="h-[28px] flex-1 rounded-[8px]" />
+                    <Skeleton className="h-[28px] w-[54px] rounded-[8px]" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="bg-[var(--card)] border border-[var(--bd)] rounded-[12px] shadow-[var(--shadow)] overflow-hidden">
+              <div className="p-[8px_12px] border-b border-[var(--bd)] bg-[var(--card2)]">
+                <Skeleton className="h-[10px] w-full max-w-[600px]" />
+              </div>
+              {Array.from({ length: 7 }).map((_, idx) => (
+                <div
+                  key={idx}
+                  className="flex items-center gap-[16px] p-[10px_12px] border-b border-[var(--bd)] last:border-b-0"
+                >
+                  <Skeleton className="h-[18px] w-[110px] rounded-[5px]" />
+                  <Skeleton className="h-[13px] flex-1 rounded-[4px]" />
+                  <Skeleton className="h-[16px] w-[64px] rounded-[6px]" />
+                  <Skeleton className="h-[16px] w-[40px] rounded-[5px]" />
+                  <Skeleton className="h-[16px] w-[80px] rounded-[6px]" />
+                  <Skeleton className="h-[26px] w-[64px] rounded-[6px]" />
+                </div>
+              ))}
+            </div>
+          );
+        }
+
         if (filteredTrends.length === 0) {
           return (
             <div className="bg-[var(--card)] border border-[var(--bd)] rounded-[12px] p-[32px] text-center text-[12px] text-[var(--mut)] shadow-[var(--shadow)]">
@@ -600,6 +678,48 @@ export default function TrendResearchPage({ onOpenManualTopic }: TrendsPageProps
           </div>
         );
       })()}
+
+      {/* Pagination */}
+      {!isLoadingTrends && sortedTrends.length > 0 && (
+        <div className="flex items-center justify-between gap-[10px] flex-wrap">
+          <span className="text-[11px] text-[var(--mut)]">
+            Showing {(currentPage - 1) * TRENDS_PAGE_SIZE + 1}–
+            {Math.min(currentPage * TRENDS_PAGE_SIZE, sortedTrends.length)} of {sortedTrends.length} topics
+          </span>
+          <Pagination className="justify-end w-auto">
+            <PaginationContent>
+              <PaginationItem>
+                <PaginationPrevious
+                  disabled={currentPage === 1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                />
+              </PaginationItem>
+              {getPaginationRange(currentPage, totalPages).map((entry, idx) =>
+                entry === "ellipsis" ? (
+                  <PaginationItem key={`ellipsis-${idx}`}>
+                    <PaginationEllipsis />
+                  </PaginationItem>
+                ) : (
+                  <PaginationItem key={entry}>
+                    <PaginationLink
+                      isActive={entry === currentPage}
+                      onClick={() => setPage(entry)}
+                    >
+                      {entry}
+                    </PaginationLink>
+                  </PaginationItem>
+                )
+              )}
+              <PaginationItem>
+                <PaginationNext
+                  disabled={currentPage === totalPages}
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                />
+              </PaginationItem>
+            </PaginationContent>
+          </Pagination>
+        </div>
+      )}
 
       {approveTarget && (
         <div
