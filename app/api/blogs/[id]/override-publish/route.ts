@@ -16,47 +16,65 @@ type RouteContext = {
 };
 
 export async function POST(request: Request, context: RouteContext) {
-  const { id } = await context.params;
-  const body = await request.json().catch(() => ({}));
-  const reason = typeof body.reason === "string" ? body.reason.trim() : "";
+  try {
+    const { id } = await context.params;
+    let body: Record<string, unknown> = {};
 
-  const blog = await prisma.blog.findUnique({
-    where: { id },
-    include: { qualityReport: true },
-  });
-  if (!blog) {
-    return NextResponse.json({ ok: false, error: "Blog not found" }, { status: 404 });
-  }
+    try {
+      body = await request.json();
+    } catch (parseError) {
+      return NextResponse.json(
+        { ok: false, error: "Invalid JSON in request body" },
+        { status: 400 }
+      );
+    }
 
-  if (blog.status === "PUBLISHED") {
-    return NextResponse.json({ ok: false, error: "This article is already published." }, { status: 409 });
-  }
+    const reason = typeof body.reason === "string" ? body.reason.trim() : "";
 
-  if (!reason) {
+    const blog = await prisma.blog.findUnique({
+      where: { id },
+      include: { qualityReport: true },
+    });
+    if (!blog) {
+      return NextResponse.json({ ok: false, error: "Blog not found" }, { status: 404 });
+    }
+
+    if (blog.status === "PUBLISHED") {
+      return NextResponse.json({ ok: false, error: "This article is already published." }, { status: 409 });
+    }
+
+    if (!reason) {
+      return NextResponse.json(
+        { ok: false, error: "A reason is required to override the quality gate." },
+        { status: 422 }
+      );
+    }
+
+    await prisma.blog.update({
+      where: { id: blog.id },
+      data: { status: "PUBLISHED" },
+    });
+
+    await prisma.logEntry.create({
+      data: {
+        level: "WARN",
+        worker: "manual-override",
+        message: `Quality gate manually overridden for "${blog.title}" and published without passing (score ${blog.qualityReport?.overallScore ?? "unknown"}).`,
+        blogId: blog.id,
+        meta: {
+          reason,
+          previousStatus: blog.status,
+          previousScore: blog.qualityReport?.overallScore ?? null,
+        },
+      },
+    });
+
+    return NextResponse.json({ ok: true, blogId: blog.id, status: "PUBLISHED" });
+  } catch (error) {
+    console.error("Failed to override publish:", error);
     return NextResponse.json(
-      { ok: false, error: "A reason is required to override the quality gate." },
-      { status: 422 }
+      { ok: false, error: "Failed to override publish" },
+      { status: 500 }
     );
   }
-
-  await prisma.blog.update({
-    where: { id: blog.id },
-    data: { status: "PUBLISHED" },
-  });
-
-  await prisma.logEntry.create({
-    data: {
-      level: "WARN",
-      worker: "manual-override",
-      message: `Quality gate manually overridden for "${blog.title}" and published without passing (score ${blog.qualityReport?.overallScore ?? "unknown"}).`,
-      blogId: blog.id,
-      meta: {
-        reason,
-        previousStatus: blog.status,
-        previousScore: blog.qualityReport?.overallScore ?? null,
-      },
-    },
-  });
-
-  return NextResponse.json({ ok: true, blogId: blog.id, status: "PUBLISHED" });
 }
