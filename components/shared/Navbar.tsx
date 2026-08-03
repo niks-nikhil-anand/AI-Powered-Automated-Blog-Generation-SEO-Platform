@@ -6,15 +6,13 @@ import { useTheme } from "./ThemeProvider";
 
 interface NavbarProps {
   onOpenCmdk?: () => void;
-  onRunNow?: () => void;
+  onOpenRunPipeline?: () => void;
 }
 
-export function Navbar({ onOpenCmdk, onRunNow }: NavbarProps) {
+export function Navbar({ onOpenCmdk, onOpenRunPipeline }: NavbarProps) {
   const pathname = usePathname();
   const { theme, toggleTheme } = useTheme();
   const [notifOpen, setNotifOpen] = useState(false);
-  const [runState, setRunState] = useState<"idle" | "running" | "queued" | "error">("idle");
-  const [runMessage, setRunMessage] = useState("");
   const [pipeline, setPipeline] = useState({
     active: 0,
     waiting: 0,
@@ -48,7 +46,7 @@ export function Navbar({ onOpenCmdk, onRunNow }: NavbarProps) {
       case "/dashboard/trends":
         return "Trend Research & Topic Selection";
       case "/dashboard/assets":
-        return "Asset Library & GCS Browser";
+        return "Asset Library";
       case "/dashboard/quality":
         return "SEO & Quality Audit Hub";
       case "/dashboard/workers":
@@ -69,36 +67,16 @@ export function Navbar({ onOpenCmdk, onRunNow }: NavbarProps) {
     color: string;
   }[] = [];
 
-  const handleRunNow = async () => {
-    if (runState === "running") return;
-    setRunState("running");
-    setRunMessage("Queueing research run...");
-
-    try {
-      const res = await fetch("/api/research/run", { method: "POST" });
-      const data = await res.json();
-      if (!res.ok || !data.ok) {
-        throw new Error(data.error || "Failed to queue research run");
-      }
-      setRunState("queued");
-      setRunMessage(`Research job queued${data.jobId ? ` · ${data.jobId}` : ""}`);
-      onRunNow?.();
-      window.setTimeout(() => {
-        setRunState("idle");
-        setRunMessage("");
-      }, 5000);
-    } catch (err) {
-      setRunState("error");
-      setRunMessage(err instanceof Error ? err.message : "Failed to queue research run");
-    }
+  const handleRunNow = () => {
+    onOpenRunPipeline?.();
   };
   const liveBacklog = pipeline.waiting + pipeline.delayed;
   const pillState =
-    runState === "running" || pipeline.active > 0
+    pipeline.active > 0
       ? "running"
-      : runState === "queued" || liveBacklog > 0
+      : liveBacklog > 0
         ? "queued"
-        : runState === "error" || pipeline.failed > 0
+        : pipeline.failed > 0
           ? "error"
           : "idle";
   const pillLabel =
@@ -174,12 +152,6 @@ export function Navbar({ onOpenCmdk, onRunNow }: NavbarProps) {
             {pillCount}
           </span>
         </div>
-        {runMessage && (
-          <span className="hidden xl:inline max-w-[260px] truncate text-[11px] text-[var(--mut)]">
-            {runMessage}
-          </span>
-        )}
-
         {/* Notifications Button & Dropdown */}
         <div className="relative">
           <button
@@ -264,13 +236,12 @@ export function Navbar({ onOpenCmdk, onRunNow }: NavbarProps) {
           id="btn-run-now"
           aria-label="Trigger generation run now"
           onClick={handleRunNow}
-          disabled={runState === "running"}
-          className="h-[32px] px-[13px] rounded-[9px] border border-transparent bg-[var(--indigo)] text-white text-[12px] font-semibold flex items-center gap-[6px] hover:bg-[#4f46e5] transition-colors shadow-sm disabled:opacity-60 disabled:cursor-not-allowed"
+          className="h-[32px] px-[13px] rounded-[9px] border border-transparent bg-[var(--indigo)] text-white text-[12px] font-semibold flex items-center gap-[6px] hover:bg-[#4f46e5] transition-colors shadow-sm"
         >
           <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
             <path d="M7 4l13 8-13 8z" />
           </svg>
-          {runState === "running" ? "Queueing" : "Run now"}
+          Run now
         </button>
       </div>
     </header>
