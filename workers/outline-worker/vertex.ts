@@ -1,5 +1,6 @@
 import { env, isVertexConfigured } from "../shared/env";
 import { generateVertexJson, slugify } from "../shared/vertex";
+import { getSetting, MODEL_SETTING_KEYS } from "../shared/settings";
 import { OutlineResult } from "./types";
 
 type PlanInput = {
@@ -94,10 +95,11 @@ export async function generateContentOutline(
     };
   }
 
-  const result = await generateVertexJson<OutlineResult>(env.VERTEX_FLASH, buildPrompt(topic, category, plan));
+  const model = await getSetting(MODEL_SETTING_KEYS.outline, env.VERTEX_FLASH);
+  const result = await generateVertexJson<OutlineResult>(model, buildPrompt(topic, category, plan));
   return {
     outline: { ...result.data, slug: result.data.slug || slugify(result.data.title) },
     usage: result.usage,
-    model: env.VERTEX_FLASH,
+    model,
   };
 }
