@@ -1,5 +1,5 @@
 import { ResearchCandidate } from "../types";
-import { SignalCluster } from "./dedupe";
+import { EnrichedCluster } from "./semantic";
 
 const SOURCE_REASON = {
   google_trends: "Trending in Google Search",
@@ -33,7 +33,21 @@ function freshnessScore(date?: Date): number {
   return 20;
 }
 
-export function scoreCluster(cluster: SignalCluster): ResearchCandidate {
+/**
+ * Weights for the final score. The three pre-existing source-derived
+ * dimensions (trendDemand/newsFreshness/githubMomentum via
+ * strongestSourceScore+average, plus multiSourceValidation) still cover
+ * 0.8 combined, so a semantic-scoring outage (semanticRelevance falls back
+ * to 0) demotes a candidate rather than zeroing it out. Tune these after
+ * comparing a few real runs with semantic scoring on vs off - they are not
+ * derived from anything, just a starting point.
+ */
+const STRONGEST_SOURCE_WEIGHT = 0.55;
+const AVERAGE_SOURCE_WEIGHT = 0.15;
+const MULTI_SOURCE_WEIGHT = 0.1;
+const SEMANTIC_WEIGHT = 0.2;
+
+export function scoreCluster(cluster: EnrichedCluster): ResearchCandidate {
   const evidence = cluster.signals;
   const sourceNames = new Set(evidence.map((signal) => signal.source));
   const bestTrendVolume = Math.max(0, ...evidence.map((signal) => signal.volume ?? 0));
@@ -54,13 +68,15 @@ export function scoreCluster(cluster: SignalCluster): ResearchCandidate {
   const newsFreshness = clampScore(bestNewsFreshness);
   const githubMomentum = clampScore(bestGitHubEngagement > 0 ? Math.log10(bestGitHubEngagement + 1) * 18 : 0);
   const multiSourceValidation = clampScore((sourceNames.size / 3) * 100);
+  const semanticRelevance = clampScore(cluster.semanticRelevance);
 
   const sourceScores = [trendDemand, newsFreshness, githubMomentum].filter((value) => value > 0);
   const strongestSourceScore = Math.max(0, ...sourceScores);
   const score = clampScore(
-    strongestSourceScore * 0.7 +
-      average(sourceScores) * 0.2 +
-      multiSourceValidation * 0.1
+    strongestSourceScore * STRONGEST_SOURCE_WEIGHT +
+      average(sourceScores) * AVERAGE_SOURCE_WEIGHT +
+      multiSourceValidation * MULTI_SOURCE_WEIGHT +
+      semanticRelevance * SEMANTIC_WEIGHT
   );
 
   const bestSignal = [...evidence].sort((a, b) => {
@@ -69,7 +85,8 @@ export function scoreCluster(cluster: SignalCluster): ResearchCandidate {
     return bWeight - aWeight;
   })[0];
   const keywords = Array.from(new Set(evidence.flatMap((signal) => signal.keywords))).slice(0, 12);
-  const reasons = Array.from(sourceNames).map((source) => SOURCE_REASON[source]);
+  const reasons: string[] = Array.from(sourceNames).map((source) => SOURCE_REASON[source]);
+  if (cluster.semanticReason) reasons.push(cluster.semanticReason);
 
   return {
     title: bestSignal.title,
@@ -85,10 +102,11 @@ export function scoreCluster(cluster: SignalCluster): ResearchCandidate {
       newsFreshness,
       githubMomentum,
       multiSourceValidation,
+      semanticRelevance,
     },
   };
 }
 
-export function scoreClusters(clusters: SignalCluster[]): ResearchCandidate[] {
+export function scoreClusters(clusters: EnrichedCluster[]): ResearchCandidate[] {
   return clusters.map(scoreCluster).sort((a, b) => b.score - a.score);
 }
