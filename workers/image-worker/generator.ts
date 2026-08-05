@@ -1,7 +1,7 @@
 import { ImageJobPayload } from "../shared/queues";
 import { GeneratedImage } from "./types";
 
-function escapeXml(value: string) {
+export function escapeXml(value: string) {
   return value
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
@@ -9,7 +9,7 @@ function escapeXml(value: string) {
     .replace(/"/g, "&quot;");
 }
 
-function wrapText(text: string, maxChars: number, maxLines: number) {
+export function wrapText(text: string, maxChars: number, maxLines: number) {
   const words = text.split(/\s+/).filter(Boolean);
   const lines: string[] = [];
   let current = "";
@@ -28,7 +28,7 @@ function wrapText(text: string, maxChars: number, maxLines: number) {
   return lines;
 }
 
-function hashString(value: string) {
+export function hashString(value: string) {
   let hash = 0;
   for (let index = 0; index < value.length; index += 1) {
     hash = (hash * 31 + value.charCodeAt(index)) >>> 0;
@@ -36,7 +36,7 @@ function hashString(value: string) {
   return hash;
 }
 
-function palette(seed: string) {
+export function palette(seed: string) {
   const hue = hashString(seed) % 360;
   return {
     primary: `hsl(${hue}, 74%, 46%)`,
@@ -47,10 +47,10 @@ function palette(seed: string) {
   };
 }
 
-export function generateEditorialHeroImage(payload: ImageJobPayload): GeneratedImage {
+export function generateEditorialHeroImage(payload: ImageJobPayload, seedOverride?: string): GeneratedImage {
   const width = 1600;
   const height = 900;
-  const colors = palette(`${payload.category}:${payload.title}`);
+  const colors = palette(seedOverride ?? `${payload.category}:${payload.title}`);
   const titleLines = wrapText(payload.title, 34, 3);
   const excerptLines = wrapText(payload.excerpt || "AI-generated technical analysis for developers.", 58, 2);
   const titleTspans = titleLines
