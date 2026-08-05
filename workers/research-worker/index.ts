@@ -78,7 +78,7 @@ export async function runResearch() {
     const sourceResults = await Promise.allSettled(
       sources.map(async (source) => ({
         source: source.name,
-        signals: await source.fetchSignals(),
+        signals: await (source.fetchSignals?.() ?? source.fetch?.() ?? []),
       }))
     );
 
