@@ -3,7 +3,7 @@ import { qualityQueue, QUEUE_NAMES, type ImageJobPayload } from "../shared/queue
 import { prisma } from "../shared/prisma";
 import { logger } from "../shared/logger";
 import { workerOptions } from "../shared/worker-options";
-import { generateEditorialHeroImage } from "./generator";
+import { recentImageHashes, selectHeroImage } from "./select";
 import { uploadToS3, deleteFromS3 } from "./storage";
 import {
   assertGate,
@@ -30,7 +30,10 @@ export async function generateImageForBlog(payload: ImageJobPayload) {
     blogId: payload.blogId,
     input: payload,
   });
-  const blog = await prisma.blog.findUnique({ where: { id: payload.blogId }, include: { featuredImage: true } });
+  const blog = await prisma.blog.findUnique({
+    where: { id: payload.blogId },
+    include: { featuredImage: true, trend: { include: { plan: true } } },
+  });
   if (!blog) throw new Error(`Blog ${payload.blogId} not found`);
   if (blog.featuredImageId) {
     await qualityQueue.add("quality_check_blog", { blogId: blog.id });
@@ -47,7 +50,11 @@ export async function generateImageForBlog(payload: ImageJobPayload) {
   let uploadedKey: string | null = null;
 
   try {
-    const image = generateEditorialHeroImage(payload);
+    // ContentPlan.primaryKeyword names the central visual subject; Trend.topic
+    // is the fallback for when planning-worker hasn't attached a plan yet.
+    const subject = blog.trend?.plan?.primaryKeyword || blog.trend?.topic || payload.title;
+    const recentHashes = await recentImageHashes();
+    const { image, styleDirection, imageHash } = await selectHeroImage(payload, subject, recentHashes);
     const key = objectKey(payload.slug, image.fileName);
     const uploaded = await uploadToS3(key, image.buffer, image.mimeType);
     uploadedKey = key; // Track for cleanup if gate fails
@@ -82,6 +89,8 @@ export async function generateImageForBlog(payload: ImageJobPayload) {
         width: image.width,
         height: image.height,
         size: uploaded.size,
+        imageHash,
+        styleDirection,
       },
     });
 
