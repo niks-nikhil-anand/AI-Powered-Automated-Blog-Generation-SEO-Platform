@@ -5,14 +5,17 @@ import { DAILY_TARGET_KEY, MODEL_SETTING_KEYS, getSetting, setSetting } from "@/
 export const dynamic = "force-dynamic";
 
 /**
- * Only planning/outline/writing actually call an LLM (see the comment in
- * workers/shared/settings.ts) - research/image/quality/publish have no
- * model to override, so there's nothing to expose or accept for them here.
+ * planning/outline/writing/semantic are the four stages that actually call
+ * an LLM (see the comment in workers/shared/settings.ts) - image/quality/
+ * publish have no model to override, so there's nothing to expose or
+ * accept for them here. "semantic" is research-worker's relevance/dedup
+ * pass, not a replacement for its heuristic scraping/scoring.
  */
 const MODEL_DEFAULTS: Record<keyof typeof MODEL_SETTING_KEYS, string> = {
   planning: env.VERTEX_FLASH,
   outline: env.VERTEX_FLASH,
   writing: env.VERTEX_MODEL,
+  semantic: env.VERTEX_FLASH,
 };
 
 const MODEL_STAGES = Object.keys(MODEL_SETTING_KEYS) as (keyof typeof MODEL_SETTING_KEYS)[];
