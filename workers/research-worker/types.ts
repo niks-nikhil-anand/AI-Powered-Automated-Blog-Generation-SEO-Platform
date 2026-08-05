@@ -47,6 +47,13 @@ export type ResearchCandidate = {
     newsFreshness: number;
     githubMomentum: number;
     multiSourceValidation: number;
+    /**
+     * LLM-derived "is this actually a good blog topic" score (see
+     * pipeline/semantic.ts). 0 when semantic scoring was skipped or failed,
+     * not when the model judged it irrelevant - check scoreBreakdown against
+     * RESEARCH_SEMANTIC_ENABLED / Vertex config if that distinction matters.
+     */
+    semanticRelevance: number;
   };
 };
 
