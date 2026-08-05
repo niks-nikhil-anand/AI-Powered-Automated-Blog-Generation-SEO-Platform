@@ -21,11 +21,11 @@ export async function runQualityCheck(payload: QualityJobPayload) {
   });
   const blog = await prisma.blog.findUnique({
     where: { id: payload.blogId },
-    include: { seo: true, featuredImage: true },
+    include: { seo: true, featuredImage: true, trend: true },
   });
   if (!blog) throw new Error(`Blog ${payload.blogId} not found`);
 
-  const report = scoreBlogQuality(blog);
+  const report = await scoreBlogQuality(blog);
 
   const saved = await prisma.qualityReport.upsert({
     where: { blogId: blog.id },
@@ -56,13 +56,13 @@ export async function runQualityCheck(payload: QualityJobPayload) {
   const gate: QualityGateReport = {
     stage: "quality-worker",
     score: report.overallScore,
-    passed: report.overallScore >= 90,
+    passed: report.passed,
     reasons: report.checks
       .filter((check) => check.score < 9)
       .map((check) => `${check.label}: ${check.score}/${check.maxScore}`),
   };
 
-  if (report.overallScore >= 90) {
+  if (report.passed) {
     await publishQueue.add("publish_blog", {
       blogId: blog.id,
       qualityReportId: saved.id,
