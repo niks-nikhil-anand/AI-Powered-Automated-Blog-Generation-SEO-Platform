@@ -20,6 +20,7 @@ export const researchConfig = {
   maxSignalsPerSource: env.RESEARCH_MAX_SIGNALS_PER_SOURCE,
   minScoreToPromote: env.RESEARCH_MIN_SCORE_TO_PROMOTE,
   recentDuplicateDays: env.RESEARCH_RECENT_DUPLICATE_DAYS,
+  semanticEnabled: env.RESEARCH_SEMANTIC_ENABLED,
   newsQuery: env.RESEARCH_GOOGLE_NEWS_QUERY,
   githubQueries: env.RESEARCH_GITHUB_QUERIES,
   categories: [
