@@ -22,9 +22,9 @@ const SLOT_COLORS: Record<string, string> = {
 
 /**
  * The six workers that run reactively rather than on a schedule (see
- * workers/shared/settings.ts for why only three stages call an LLM at all,
- * and RunPipelineModal/ScheduleTimeline for the one worker - research -
- * that does have real fixed times).
+ * workers/shared/settings.ts for why four stages call an LLM at all, and
+ * RunPipelineModal/ScheduleTimeline for the one worker - research - that
+ * does have real fixed times).
  */
 const REACTIVE_WORKERS: { key: string; label: string }[] = [
   { key: "planning-worker", label: "Planning" },
@@ -35,15 +35,16 @@ const REACTIVE_WORKERS: { key: string; label: string }[] = [
   { key: "publish-worker", label: "Publish" },
 ];
 
-/** Only these three pipeline stages actually call an LLM - see workers/shared/settings.ts. */
-const MODEL_STAGES: { key: "planning" | "outline" | "writing"; label: string }[] = [
+/** These four pipeline stages actually call an LLM - see workers/shared/settings.ts. */
+const MODEL_STAGES: { key: "planning" | "outline" | "writing" | "semantic"; label: string }[] = [
   { key: "planning", label: "Planning" },
   { key: "outline", label: "Outline" },
   { key: "writing", label: "Writing" },
+  { key: "semantic", label: "Research (Semantic)" },
 ];
 
 const NO_MODEL_STAGES: { label: string; note: string }[] = [
-  { label: "Research", note: "Scrapes and heuristically scores trends - no AI model call." },
+  { label: "Research (Heuristic)", note: "Scrapes and scores trends by rule; semantic relevance/dedup is a separate LLM pass above - no AI model call here." },
   { label: "Image", note: "Draws an SVG hero image locally - no AI model call." },
   { label: "Quality QA", note: "Deterministic regex/heuristic scorer - no AI model call." },
   { label: "Publish", note: "Status flip only - no AI model call." },
