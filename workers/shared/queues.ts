@@ -23,8 +23,8 @@ export const researchQueue = new Queue(QUEUE_NAMES.research, {
   defaultJobOptions: {
     attempts: 4,
     backoff: { type: "recovery" },
-    removeOnComplete: { count: 200 },
-    removeOnFail: { count: 500 },
+    removeOnComplete: { count: 5000 },
+    removeOnFail: { count: 10000 },
   },
 });
 
@@ -33,8 +33,8 @@ export const planningQueue = new Queue(QUEUE_NAMES.planning, {
   defaultJobOptions: {
     attempts: 4,
     backoff: { type: "recovery" },
-    removeOnComplete: { count: 200 },
-    removeOnFail: { count: 500 },
+    removeOnComplete: { count: 5000 },
+    removeOnFail: { count: 10000 },
   },
 });
 
@@ -43,8 +43,8 @@ export const outlineQueue = new Queue(QUEUE_NAMES.outline, {
   defaultJobOptions: {
     attempts: 4,
     backoff: { type: "recovery" },
-    removeOnComplete: { count: 200 },
-    removeOnFail: { count: 500 },
+    removeOnComplete: { count: 5000 },
+    removeOnFail: { count: 10000 },
   },
 });
 
@@ -53,8 +53,8 @@ export const writingQueue = new Queue(QUEUE_NAMES.writing, {
   defaultJobOptions: {
     attempts: 4,
     backoff: { type: "recovery" },
-    removeOnComplete: { count: 200 },
-    removeOnFail: { count: 500 },
+    removeOnComplete: { count: 5000 },
+    removeOnFail: { count: 10000 },
   },
 });
 
@@ -63,8 +63,8 @@ export const imageQueue = new Queue(QUEUE_NAMES.image, {
   defaultJobOptions: {
     attempts: 4,
     backoff: { type: "recovery" },
-    removeOnComplete: { count: 200 },
-    removeOnFail: { count: 500 },
+    removeOnComplete: { count: 5000 },
+    removeOnFail: { count: 10000 },
   },
 });
 
@@ -73,8 +73,8 @@ export const qualityQueue = new Queue(QUEUE_NAMES.quality, {
   defaultJobOptions: {
     attempts: 4,
     backoff: { type: "recovery" },
-    removeOnComplete: { count: 200 },
-    removeOnFail: { count: 500 },
+    removeOnComplete: { count: 5000 },
+    removeOnFail: { count: 10000 },
   },
 });
 
@@ -83,8 +83,8 @@ export const publishQueue = new Queue(QUEUE_NAMES.publish, {
   defaultJobOptions: {
     attempts: 4,
     backoff: { type: "recovery" },
-    removeOnComplete: { count: 200 },
-    removeOnFail: { count: 500 },
+    removeOnComplete: { count: 5000 },
+    removeOnFail: { count: 10000 },
   },
 });
 
