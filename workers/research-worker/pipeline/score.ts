@@ -5,6 +5,14 @@ const SOURCE_REASON = {
   google_trends: "Trending in Google Search",
   google_news: "Validated by recent Google News coverage",
   github_trending: "Showing GitHub repository momentum",
+  hackernews: "Discussion on Hacker News",
+  techcrunch: "Covered by TechCrunch",
+  the_verge: "Covered by The Verge",
+  google_ai_blog: "Featured on Google AI Blog",
+  openai_news: "Featured on OpenAI News",
+  anthropic_news: "Featured on Anthropic News",
+  microsoft_ai_blog: "Featured on Microsoft AI Blog",
+  nvidia_blog: "Featured on NVIDIA Developer Blog",
 } as const;
 
 function clampScore(value: number): number {
