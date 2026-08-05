@@ -7,6 +7,7 @@ import { logger } from "../shared/logger";
 import { env, isVertexConfigured } from "../shared/env";
 import { workerOptions } from "../shared/worker-options";
 import { attachUsageToBlog, recordAIUsage } from "../shared/pricing";
+import { AI_BYLINE } from "../shared/branding";
 import {
   assertGate,
   failWorkerAttempt,
@@ -27,11 +28,19 @@ async function getOrCreateCategory(name: string) {
   return prisma.category.create({ data: { name, slug } });
 }
 
-async function uniqueSlug(base: string, maxAttempts = 100): Promise<string> {
+/**
+ * excludeBlogId lets a retry for the same trend keep its own slug instead
+ * of colliding with itself - without it, upserting on trendId with an
+ * unchanged title would find the row's own existing slug via findUnique
+ * and bump it to "-1" for no reason.
+ */
+async function uniqueSlug(base: string, excludeBlogId?: string, maxAttempts = 100): Promise<string> {
   const safeBase = base || "untitled";
   let slug = safeBase;
   let suffix = 0;
-  while (await prisma.blog.findUnique({ where: { slug } })) {
+  while (true) {
+    const existing = await prisma.blog.findUnique({ where: { slug }, select: { id: true } });
+    if (!existing || existing.id === excludeBlogId) break;
     suffix += 1;
     if (suffix >= maxAttempts) {
       throw new Error(`Failed to generate unique slug after ${maxAttempts} attempts for base "${safeBase}"`);
@@ -52,7 +61,27 @@ function heuristicScore(markdown: string): number {
   return Math.min(100, score);
 }
 
-function writingGate(markdown: string): QualityGateReport {
+function extractEvidenceUrls(evidenceSummary?: string | null): string[] {
+  if (!evidenceSummary) return [];
+  const matches = evidenceSummary.match(/https?:\/\/[^\s)]+/g) ?? [];
+  return Array.from(new Set(matches.map((url) => url.replace(/[.,)]+$/, ""))));
+}
+
+/**
+ * At least N citations to the trend's actual evidence URLs, not just any
+ * external link (see IMPLEMENTATION_PLAN.md Phase 2.3). Skips the check
+ * entirely when the trend has no evidence to cite (e.g. it predates the
+ * Phase 2.1 migration) - that's not the draft's fault.
+ */
+function citationCheck(markdown: string, evidenceSummary?: string | null): { ok: boolean; found: number; required: number } {
+  const evidenceUrls = extractEvidenceUrls(evidenceSummary);
+  if (evidenceUrls.length === 0) return { ok: true, found: 0, required: 0 };
+  const required = Math.min(2, evidenceUrls.length);
+  const found = evidenceUrls.filter((url) => markdown.includes(url)).length;
+  return { ok: found >= required, found, required };
+}
+
+function writingGate(markdown: string, evidenceSummary?: string | null): QualityGateReport {
   const score = heuristicScore(markdown);
   const reasons: string[] = [];
   if (score < 90) reasons.push(`Heuristic writing score ${score} is below 90`);
@@ -60,6 +89,12 @@ function writingGate(markdown: string): QualityGateReport {
   if ((markdown.match(/^##\s+/gm) ?? []).length < 8) reasons.push("Missing required H2 sections");
   if (!/^##\s+FAQs?/im.test(markdown)) reasons.push("Missing FAQ section");
   if (!/call to action|cta/i.test(markdown)) reasons.push("Missing call to action");
+
+  const citations = citationCheck(markdown, evidenceSummary);
+  if (!citations.ok) {
+    reasons.push(`Cites ${citations.found}/${citations.required} required evidence source URL(s), not just any external link`);
+  }
+
   return {
     stage: "writing-worker",
     score: Math.min(score, reasons.length > 0 ? 89 : 100),
@@ -119,6 +154,7 @@ async function generateBlogForTrend(trendId: string, topic: string, description:
             faqs: outline.faqs,
           }
         : undefined,
+      evidenceSummary: trend.evidenceSummary ?? undefined,
     });
     const latencyMs = Date.now() - startedAt;
 
@@ -134,15 +170,39 @@ async function generateBlogForTrend(trendId: string, topic: string, description:
       trendId,
     });
 
-    const gate = writingGate(draft.markdown);
+    const gate = writingGate(draft.markdown, trend.evidenceSummary);
     assertGate(gate);
     const html = await marked.parse(draft.markdown);
-    const slug = await uniqueSlug(draft.slug);
+    // Upsert on trendId instead of always create - a retried write_blog job
+    // for a trend that already has a Blog row (e.g. quality-worker's
+    // recovery requeue) updates that row instead of creating a duplicate.
+    // See IMPLEMENTATION_PLAN.md Phase 1.4.
+    const existingBlogForTrend = await prisma.blog.findUnique({ where: { trendId }, select: { id: true } });
+    const slug = await uniqueSlug(draft.slug, existingBlogForTrend?.id);
     const category = await getOrCreateCategory(trend.category || "General");
     const score = heuristicScore(draft.markdown);
 
-    const blog = await prisma.blog.create({
-      data: {
+    const seoData = {
+      metaTitle: draft.metaTitle,
+      metaDescription: draft.metaDescription,
+      keywords: draft.keywords,
+      schema: {
+        "@context": "https://schema.org",
+        "@type": "TechArticle",
+        headline: draft.title,
+        keywords: draft.keywords.join(", "),
+        // Disclosed AI authorship (IMPLEMENTATION_PLAN.md Phase 2.7) - nothing
+        // renders this today since there's no frontend, but it's the kind of
+        // field that's annoying to backfill later if one ever does happen.
+        author: { "@type": "Organization", name: AI_BYLINE },
+      },
+      score,
+    };
+
+    const blog = await prisma.blog.upsert({
+      where: { trendId },
+      create: {
+        trendId,
         title: draft.title,
         slug,
         excerpt: draft.excerpt,
@@ -150,20 +210,18 @@ async function generateBlogForTrend(trendId: string, topic: string, description:
         html,
         categoryId: category.id,
         status: "DRAFT",
-        seo: {
-          create: {
-            metaTitle: draft.metaTitle,
-            metaDescription: draft.metaDescription,
-            keywords: draft.keywords,
-            schema: {
-              "@context": "https://schema.org",
-              "@type": "TechArticle",
-              headline: draft.title,
-              keywords: draft.keywords.join(", "),
-            },
-            score,
-          },
-        },
+        byline: AI_BYLINE,
+        seo: { create: seoData },
+      },
+      update: {
+        title: draft.title,
+        slug,
+        excerpt: draft.excerpt,
+        content: draft.markdown,
+        html,
+        categoryId: category.id,
+        status: "DRAFT",
+        seo: { upsert: { create: seoData, update: seoData } },
       },
     });
 
