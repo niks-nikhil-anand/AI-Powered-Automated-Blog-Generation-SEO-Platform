@@ -57,11 +57,15 @@ services:
       - GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS:-}
       - VERTEX_LOCATION=${VERTEX_LOCATION:-us-central1}
       - GOOGLE_TRENDS_GEO=${GOOGLE_TRENDS_GEO:-US}
-      - RESEARCH_CRON=${RESEARCH_CRON:-0 8 * * *}
+      - RESEARCH_CRON_OVERNIGHT=${RESEARCH_CRON_OVERNIGHT:-30 6 * * *}
+      - RESEARCH_CRON_MIDDAY=${RESEARCH_CRON_MIDDAY:-0 14 * * *}
+      - RESEARCH_CRON_US_DAYTIME=${RESEARCH_CRON_US_DAYTIME:-30 23 * * *}
       - TIMEZONE=${TIMEZONE:-Asia/Kolkata}
       - TRENDS_TO_WRITE_PER_RUN=${TRENDS_TO_WRITE_PER_RUN:-5}
       - RESEARCH_MAX_SIGNALS_PER_SOURCE=${RESEARCH_MAX_SIGNALS_PER_SOURCE:-25}
       - RESEARCH_MIN_SCORE_TO_PROMOTE=${RESEARCH_MIN_SCORE_TO_PROMOTE:-70}
+      - RESEARCH_MIN_SCORE_TO_WRITE=${RESEARCH_MIN_SCORE_TO_WRITE:-90}
+      - RESEARCH_SEMANTIC_ENABLED=${RESEARCH_SEMANTIC_ENABLED:-true}
       - RESEARCH_RECENT_DUPLICATE_DAYS=${RESEARCH_RECENT_DUPLICATE_DAYS:-30}
       - RESEARCH_GOOGLE_NEWS_QUERY=${RESEARCH_GOOGLE_NEWS_QUERY:-developer tools OR javascript OR typescript OR ai coding OR open source}
       - RESEARCH_GITHUB_QUERIES=${RESEARCH_GITHUB_QUERIES:-created:>2026-07-01 stars:>100 language:TypeScript,created:>2026-07-01 stars:>100 language:JavaScript,created:>2026-07-01 stars:>100 language:Python}
@@ -125,6 +129,78 @@ services:
       - VERTEX_FLASH=${VERTEX_FLASH:-gemini-2.5-flash}
       - BLOG_MIN_WORDS=${BLOG_MIN_WORDS:-1200}
       - BLOG_MAX_WORDS=${BLOG_MAX_WORDS:-2000}
+    depends_on:
+      - postgres
+      - redis
+    restart: always
+
+  # image-worker calls Imagen via Vertex for the AI hero art (see
+  # workers/image-worker/ai-generator.ts), falling back to the local SVG
+  # generator when IMAGE_AI_GENERATION_ENABLED is false or Vertex is
+  # unreachable, then uploads the result to S3 via the hand-rolled SigV4
+  # signer in workers/image-worker/storage.ts. AWS_ACCESS_KEY/AWS_SECRET_KEY/
+  # AWS_BUCKET_NAME/AWS_CLOUDFRONT_URL match the shorter names
+  # workers/shared/env.ts's optional() fallback chain already reads
+  # (AWS_ACCESS_KEY_ID falls back to AWS_ACCESS_KEY, etc.) - use whichever
+  # pair your .env actually has, this just has to match it.
+  image-worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.worker
+    container_name: blog-agent-image-worker
+    command: ["node_modules/.bin/tsx", "workers/image-worker/index.ts"]
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/blog_agent?schema=public
+      - REDIS_URL=redis://redis:6379
+      - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT:-}
+      - GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS:-}
+      - VERTEX_LOCATION=${VERTEX_LOCATION:-us-central1}
+      - VERTEX_IMAGE_MODEL=${VERTEX_IMAGE_MODEL:-imagen-4.0-generate-001}
+      - IMAGE_AI_GENERATION_ENABLED=${IMAGE_AI_GENERATION_ENABLED:-true}
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+      - AWS_ACCESS_KEY=${AWS_ACCESS_KEY:-}
+      - AWS_SECRET_KEY=${AWS_SECRET_KEY:-}
+      - AWS_BUCKET_NAME=${AWS_BUCKET_NAME:-}
+      - AWS_CLOUDFRONT_URL=${AWS_CLOUDFRONT_URL:-}
+    depends_on:
+      - postgres
+      - redis
+    restart: always
+
+  # quality-worker calls Vertex (Gemini vision) for the featured-image
+  # relevance/appeal check in workers/quality-worker/scorer.ts - it degrades
+  # to skipping just that check (not failing the job) if Vertex is
+  # unreachable. publish-worker still calls no external API.
+  quality-worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.worker
+    container_name: blog-agent-quality-worker
+    command: ["node_modules/.bin/tsx", "workers/quality-worker/index.ts"]
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/blog_agent?schema=public
+      - REDIS_URL=redis://redis:6379
+      - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT:-}
+      - GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS:-}
+      - VERTEX_LOCATION=${VERTEX_LOCATION:-us-central1}
+      - VERTEX_FLASH=${VERTEX_FLASH:-gemini-2.5-flash}
+    depends_on:
+      - postgres
+      - redis
+    restart: always
+
+  publish-worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.worker
+    container_name: blog-agent-publish-worker
+    command: ["node_modules/.bin/tsx", "workers/publish-worker/index.ts"]
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/blog_agent?schema=public
+      - REDIS_URL=redis://redis:6379
     depends_on:
       - postgres
       - redis
