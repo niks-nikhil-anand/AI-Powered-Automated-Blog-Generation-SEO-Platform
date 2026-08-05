@@ -45,7 +45,6 @@ model Job {
   updatedAt DateTime  @updatedAt
 }
 
-
 model Category {
   id        String   @id @default(cuid())
   name      String   @unique
@@ -56,43 +55,62 @@ model Category {
 }
 
 model Asset {
-  id        String   @id @default(cuid())
-  fileName  String
-  bucket    String
-  path      String
-  publicUrl String
-  mimeType  String
-  width     Int?
-  height    Int?
-  size      Int
-  blogs     Blog[]   @relation("FeaturedImage")
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id             String   @id @default(cuid())
+  fileName       String
+  bucket         String
+  path           String
+  publicUrl      String
+  mimeType       String
+  width          Int?
+  height         Int?
+  size           Int
+  /// Difference-hash of the image, for the uniqueness check in image-worker
+  /// (Hamming distance against recent assets - see workers/image-worker/quality.ts).
+  imageHash      String?
+  /// Which art-direction descriptor produced this image (see
+  /// workers/image-worker/ai-generator.ts's STYLE_DIRECTIONS), or null for
+  /// the procedural SVG fallback.
+  styleDirection String?
+  blogs          Blog[]   @relation("FeaturedImage")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([createdAt])
 }
 
 model Blog {
-  id              String     @id @default(cuid())
+  id              String         @id @default(cuid())
   title           String
-  slug            String     @unique
+  slug            String         @unique
   excerpt         String?
   content         String
   html            String
   categoryId      String?
-  category        Category?  @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  status          BlogStatus @default(DRAFT)
+  category        Category?      @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  status          BlogStatus     @default(DRAFT)
   featuredImageId String?
-  featuredImage   Asset?     @relation("FeaturedImage", fields: [featuredImageId], references: [id], onDelete: SetNull)
+  featuredImage   Asset?         @relation("FeaturedImage", fields: [featuredImageId], references: [id], onDelete: SetNull)
+  /// One blog per trend - lets writing-worker upsert on retry instead of
+  /// creating a duplicate row for the same trend. Nullable because a Blog
+  /// could theoretically be created outside the research->write pipeline.
+  trendId         String?        @unique
+  trend           Trend?         @relation(fields: [trendId], references: [id], onDelete: SetNull)
   seo             BlogSEO?
   qualityReport   QualityReport?
   aiUsage         AIUsage[]
-  createdAt       DateTime   @default(now())
-  updatedAt       DateTime   @updatedAt
+  /// Disclosed AI authorship credit, mirrored into BlogSEO.schema's "author"
+  /// field by writing-worker. Value must match workers/shared/branding.ts's
+  /// AI_BYLINE - Prisma can't reference a TS constant for a column default,
+  /// so the two are kept in sync by hand. See IMPLEMENTATION_PLAN.md Phase 2.7.
+  byline          String         @default("Drafted with AI assistance, DevKit Market Analysis")
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
 }
 
 model ContentPlan {
-  id                String         @id @default(cuid())
-  trendId           String         @unique
-  trend             Trend          @relation(fields: [trendId], references: [id], onDelete: Cascade)
+  id                String          @id @default(cuid())
+  trendId           String          @unique
+  trend             Trend           @relation(fields: [trendId], references: [id], onDelete: Cascade)
   searchIntent      String
   audience          String
   angle             String
@@ -101,8 +119,8 @@ model ContentPlan {
   competitorNotes   Json
   internalNotes     String?
   outline           ContentOutline?
-  createdAt         DateTime       @default(now())
-  updatedAt         DateTime       @updatedAt
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
 
   @@index([trendId])
 }
@@ -141,38 +159,52 @@ model BlogSEO {
 }
 
 model QualityReport {
-  id                    String   @id @default(cuid())
-  blogId                String   @unique
-  blog                  Blog     @relation(fields: [blogId], references: [id], onDelete: Cascade)
-  overallScore          Int
-  seoStructure          Int
-  contentCompleteness   Int
-  readability           Int
-  contentQuality        Int
-  keywordOptimization   Int
-  technicalSeo          Int
-  formattingUx          Int
-  mediaQuality          Int
-  aiFactQuality         Int
-  publishingReadiness   Int
-  passed                Boolean
-  recommendation        String
-  checks                Json
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  id                  String   @id @default(cuid())
+  blogId              String   @unique
+  blog                Blog     @relation(fields: [blogId], references: [id], onDelete: Cascade)
+  overallScore        Int
+  seoStructure        Int
+  contentCompleteness Int
+  readability         Int
+  contentQuality      Int
+  keywordOptimization Int
+  technicalSeo        Int
+  formattingUx        Int
+  mediaQuality        Int
+  aiFactQuality       Int
+  publishingReadiness Int
+  /// 11th check, added on top of the original ten (see IMPLEMENTATION_PLAN.md
+  /// Phase 2.5) - a real Vertex-verified claims check against
+  /// Trend.evidenceSummary, from workers/quality-worker/factcheck.ts. Distinct
+  /// from aiFactQuality above, which stays a cheap regex heuristic
+  /// (AI-disclaimer/placeholder-text patterns) - this is the "actually checks
+  /// facts" dimension the plan calls for.
+  factVerification    Int      @default(0)
+  passed              Boolean
+  recommendation      String
+  checks              Json
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 }
 
 model Trend {
-  id        String      @id @default(cuid())
-  topic     String
-  source    String
-  category  String
-  score     Float
-  status    TrendStatus @default(NEW)
-  plan      ContentPlan?
-  outline   ContentOutline?
-  createdAt DateTime    @default(now())
-  updatedAt DateTime    @updatedAt
+  id              String          @id @default(cuid())
+  topic           String
+  source          String
+  category        String
+  score           Float
+  status          TrendStatus     @default(NEW)
+  /// Research evidence (source titles/URLs from candidateDescription() in
+  /// research-worker/index.ts), persisted so later stages can cite/fact-check
+  /// against it - previously this only existed as a one-time planningQueue
+  /// job-payload argument and was gone by the time quality-worker ran. See
+  /// IMPLEMENTATION_PLAN.md Phase 2.1.
+  evidenceSummary String?         @db.Text
+  plan            ContentPlan?
+  outline         ContentOutline?
+  blog            Blog?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
 
   @@index([topic, createdAt])
   @@index([status])
@@ -198,29 +230,29 @@ model LogEntry {
 }
 
 model WorkflowRun {
-  id            String   @id @default(cuid())
+  id            String          @id @default(cuid())
   trendId       String?
   blogId        String?
-  status        String   @default("RUNNING")
+  status        String          @default("RUNNING")
   currentStage  String
   failureReason String?
   attempts      WorkerAttempt[]
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
 }
 
 model WorkerAttempt {
-  id            String    @id @default(cuid())
+  id            String      @id @default(cuid())
   workflowRunId String
   workflowRun   WorkflowRun @relation(fields: [workflowRunId], references: [id], onDelete: Cascade)
   worker        String
   attempt       Int
-  status        String    @default("RUNNING")
+  status        String      @default("RUNNING")
   input         Json
   output        Json?
   qualityReport Json?
   error         String?
-  startedAt     DateTime  @default(now())
+  startedAt     DateTime    @default(now())
   finishedAt    DateTime?
 
   @@index([workflowRunId, worker])
@@ -235,9 +267,13 @@ model AIUsage {
   trendId          String?
   promptTokens     Int
   completionTokens Int
-  /** USD, computed from MODEL_PRICING at write time. */
+  /**
+   * USD, computed from MODEL_PRICING at write time.
+   */
   cost             Float
-  /** Round-trip latency of the model call, in milliseconds. */
+  /**
+   * Round-trip latency of the model call, in milliseconds.
+   */
   latency          Int
   createdAt        DateTime @default(now())
 
