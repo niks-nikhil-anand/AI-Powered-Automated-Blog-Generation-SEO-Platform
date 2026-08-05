@@ -1,8 +1,20 @@
+import { env, isVertexConfigured } from "../shared/env";
+import { generateVertexVisionJson } from "../shared/vertex";
+import { logger } from "../shared/logger";
+import { recordAIUsage } from "../shared/pricing";
+import { runFactCheck } from "./factcheck";
+
+const log = logger.child({ worker: "quality-worker" });
+
 type BlogForQuality = {
+  id: string;
   title: string;
   slug: string;
   content: string;
   excerpt: string | null;
+  trendId: string | null;
+  /** Trend.evidenceSummary - see IMPLEMENTATION_PLAN.md Phase 2.1/2.4. */
+  trend?: { evidenceSummary: string | null } | null;
   featuredImage?: { width: number | null; height: number | null; size: number; publicUrl: string } | null;
   seo?: {
     metaTitle: string;
@@ -58,6 +70,75 @@ function hasDuplicateParagraphs(content: string) {
   return new Set(paragraphs).size < paragraphs.length;
 }
 
+type VisionAssessment = {
+  relevant: boolean;
+  appealScore: number;
+  reason: string;
+};
+
+/**
+ * A single Gemini vision call covers both issue 55 (does the image
+ * plausibly depict the article's subject) and the "visual appeal" part of
+ * issue 51 - appealScore is an explicit best-effort proxy for taste, not an
+ * objective measurement, and is presented that way wherever it surfaces.
+ * Returns null (rather than throwing) on any failure so a Vertex hiccup
+ * degrades this one dimension of the score instead of failing the whole
+ * quality check.
+ */
+async function assessFeaturedImage(blog: BlogForQuality): Promise<VisionAssessment | null> {
+  if (!blog.featuredImage?.publicUrl || !isVertexConfigured) return null;
+
+  try {
+    const response = await fetch(blog.featuredImage.publicUrl);
+    if (!response.ok) return null;
+    const data = Buffer.from(await response.arrayBuffer()).toString("base64");
+    const mimeType = response.headers.get("content-type") || "image/jpeg";
+
+    const startedAt = Date.now();
+    const result = await generateVertexVisionJson<VisionAssessment>(
+      env.VERTEX_FLASH,
+      `You are reviewing the hero image for a blog post titled "${blog.title}". Assess two things: (1) relevance - does the image plausibly depict this article's subject; (2) visual appeal - is it well-composed and polished (this is a best-effort proxy for taste, not an objective measurement). Return ONLY JSON: {"relevant": boolean, "appealScore": 0-100, "reason": "one sentence"}.`,
+      { data, mimeType }
+    );
+    await recordAIUsage({
+      worker: "quality-worker",
+      model: env.VERTEX_FLASH,
+      usage: result.usage,
+      latencyMs: Date.now() - startedAt,
+      blogId: blog.id,
+      trendId: blog.trendId,
+    });
+    return result.data;
+  } catch (error) {
+    log.warn("Featured image vision assessment failed", { error: error instanceof Error ? error.message : error });
+    return null;
+  }
+}
+
+/**
+ * Wraps factcheck.ts's runFactCheck with the same AIUsage cost-tracking
+ * every other Vertex call site in this pipeline does - see
+ * workers/shared/pricing.ts.
+ */
+async function factCheckContent(blog: BlogForQuality) {
+  const evidenceSummary = blog.trend?.evidenceSummary;
+  if (!evidenceSummary) return null;
+
+  const startedAt = Date.now();
+  const result = await runFactCheck(blog.content, evidenceSummary);
+  if (!result) return null;
+
+  await recordAIUsage({
+    worker: "quality-worker",
+    model: result.model,
+    usage: result.usage,
+    latencyMs: Date.now() - startedAt,
+    blogId: blog.id,
+    trendId: blog.trendId,
+  });
+  return result;
+}
+
 function recommendation(score: number) {
   if (score >= 95) return "Excellent - Auto Publish";
   if (score >= 90) return "Passed - Ready to Publish";
@@ -66,7 +147,7 @@ function recommendation(score: number) {
   return "Failed - Regenerate Article";
 }
 
-export function scoreBlogQuality(blog: BlogForQuality) {
+export async function scoreBlogQuality(blog: BlogForQuality) {
   const content = blog.content;
   const wordList = words(content);
   const wordCount = wordList.length;
@@ -84,6 +165,8 @@ export function scoreBlogQuality(blog: BlogForQuality) {
   const averageSentenceWords = sentences.length
     ? sentences.reduce((sum, sentence) => sum + sentence.split(/\s+/).filter(Boolean).length, 0) / sentences.length
     : 0;
+  const imageAssessment = await assessFeaturedImage(blog);
+  const factCheck = await factCheckContent(blog);
 
   const checks: Check[] = [
     {
@@ -138,9 +221,23 @@ export function scoreBlogQuality(blog: BlogForQuality) {
     },
     {
       label: "Media Quality",
-      score: clamp(blog.featuredImage ? (blog.featuredImage.width && blog.featuredImage.width >= 1200 ? 5 : 3) + (blog.featuredImage.publicUrl ? 3 : 0) + (blog.featuredImage.size < 500_000 ? 2 : 1) : 0),
+      score: clamp(
+        blog.featuredImage
+          ? (blog.featuredImage.width && blog.featuredImage.width >= 1200 ? 3 : 1) +
+              (blog.featuredImage.publicUrl ? 2 : 0) +
+              (blog.featuredImage.size < 500_000 ? 1 : 0) +
+              (imageAssessment ? (imageAssessment.relevant ? 2 : 0) + (imageAssessment.appealScore >= 50 ? 2 : 0) : 0)
+          : 0
+      ),
       maxScore: 10,
-      notes: blog.featuredImage ? [`Image: ${blog.featuredImage.width ?? "-"}x${blog.featuredImage.height ?? "-"}`] : ["Missing featured image"],
+      notes: blog.featuredImage
+        ? [
+            `Image: ${blog.featuredImage.width ?? "-"}x${blog.featuredImage.height ?? "-"}`,
+            imageAssessment
+              ? `AI relevance/appeal check (best-effort, not an exact measurement): relevant=${imageAssessment.relevant}, appeal=${imageAssessment.appealScore}/100 - ${imageAssessment.reason}`
+              : "AI relevance/appeal check unavailable",
+          ]
+        : ["Missing featured image"],
     },
     {
       label: "AI & Fact Quality",
@@ -154,9 +251,40 @@ export function scoreBlogQuality(blog: BlogForQuality) {
       maxScore: 10,
       notes: [`Word count: ${wordCount}`, missingSections.length ? "Required sections missing" : "Required sections ready"],
     },
+    {
+      // 11th check (IMPLEMENTATION_PLAN.md Phase 2.5) - a real Vertex-verified
+      // claims check against Trend.evidenceSummary. Distinct from "AI & Fact
+      // Quality" above, which stays a cheap regex heuristic; this is the
+      // "actually checks facts" dimension. Scores 0 (not a neutral/skipped
+      // value) when there's no evidence to check against or the call fails -
+      // an unverifiable claim isn't a verified one.
+      label: "Fact Verification",
+      score: clamp(factCheck ? factCheck.score / 10 : 0),
+      maxScore: 10,
+      notes: factCheck
+        ? [
+            `${factCheck.claims.filter((c) => c.verdict === "supported").length}/${factCheck.claims.length} claims supported by evidence`,
+            ...factCheck.claims
+              .filter((c) => c.verdict !== "supported")
+              .slice(0, 3)
+              .map((c) => `${c.verdict}: "${c.claim}" - ${c.note ?? "no note"}`),
+          ]
+        : [
+            blog.trend?.evidenceSummary
+              ? "Fact-check unavailable (Vertex call failed or returned no claims)"
+              : "Fact-check skipped (trend has no persisted evidence summary)",
+          ],
+    },
   ];
 
-  const overallScore = checks.reduce((sum, check) => sum + check.score, 0);
+  // Normalized to 0-100 regardless of check count, rather than a raw sum
+  // (which would drift past the historical 0-100 range now that there are
+  // 11 checks instead of 10) - the dashboard (app/dashboard/page.tsx,
+  // app/dashboard/quality/page.tsx) hardcodes "/100" and uses this value
+  // directly as a percentage-width, so overallScore has to stay a true
+  // percentage no matter how many checks contribute to it.
+  const rawSum = checks.reduce((sum, check) => sum + check.score, 0);
+  const overallScore = Math.round((rawSum / (checks.length * 10)) * 100);
 
   return {
     overallScore,
@@ -174,6 +302,7 @@ export function scoreBlogQuality(blog: BlogForQuality) {
       mediaQuality: checks[7].score,
       aiFactQuality: checks[8].score,
       publishingReadiness: checks[9].score,
+      factVerification: checks[10].score,
     },
   };
 }
