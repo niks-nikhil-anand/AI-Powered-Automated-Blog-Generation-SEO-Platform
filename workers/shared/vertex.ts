@@ -19,11 +19,19 @@ export function slugify(input: string): string {
     .slice(0, 80);
 }
 
-export function extractJson<T>(text: string): T {
-  const trimmed = text.trim();
-  const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
-  const candidate = fenced ? fenced[1] : trimmed;
-  return JSON.parse(candidate.trim()) as T;
+export function extractJson<T>(text: string, fallback?: T): T {
+  try {
+    const trimmed = text.trim();
+    const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+    const candidate = fenced ? fenced[1] : trimmed;
+    return JSON.parse(candidate.trim()) as T;
+  } catch (error) {
+    if (fallback !== undefined) {
+      console.warn(`Failed to parse JSON from Vertex response, using fallback: ${error}`);
+      return fallback;
+    }
+    throw new Error(`Failed to parse JSON from Vertex response: ${error}`);
+  }
 }
 
 export type VertexJsonOptions = {
@@ -31,6 +39,22 @@ export type VertexJsonOptions = {
   maxOutputTokens?: number;
   temperature?: number;
 };
+
+/**
+ * Wrap a Vertex API call with a 30-second timeout to prevent indefinite hangs.
+ * If API stalls, worker will fail fast and be retried instead of blocking forever.
+ */
+function withVertexTimeout<T>(promise: Promise<T>, timeoutMs: number = 30000): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(
+        () => reject(new Error(`Vertex API timeout after ${timeoutMs}ms`)),
+        timeoutMs
+      )
+    ),
+  ]);
+}
 
 export async function generateVertexJson<T>(
   modelName: string,
@@ -53,11 +77,13 @@ export async function generateVertexJson<T>(
     ...(options.schema ? { responseSchema: options.schema } : {}),
   };
 
-  const result = await ai.models.generateContent({
-    model: modelName,
-    contents: prompt,
-    config,
-  });
+  const result = await withVertexTimeout(
+    ai.models.generateContent({
+      model: modelName,
+      contents: prompt,
+      config,
+    })
+  );
 
   const text = result.text;
   if (!text) throw new Error("Gemini returned no text in response");
@@ -85,14 +111,16 @@ export async function generateVertexText(
     project: env.GOOGLE_CLOUD_PROJECT,
     location: env.VERTEX_LOCATION,
   });
-  const result = await ai.models.generateContent({
-    model: modelName,
-    contents: prompt,
-    config: {
-      temperature: options.temperature ?? 0.45,
-      ...(options.maxOutputTokens ? { maxOutputTokens: options.maxOutputTokens } : {}),
-    },
-  });
+  const result = await withVertexTimeout(
+    ai.models.generateContent({
+      model: modelName,
+      contents: prompt,
+      config: {
+        temperature: options.temperature ?? 0.45,
+        ...(options.maxOutputTokens ? { maxOutputTokens: options.maxOutputTokens } : {}),
+      },
+    })
+  );
 
   const text = result.text;
   if (!text) throw new Error("Gemini returned no text in response");

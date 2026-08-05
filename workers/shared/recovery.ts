@@ -39,33 +39,37 @@ async function getOrCreateWorkflow(input: AttemptInput) {
     });
   }
 
-  const existing = await prisma.workflowRun.findFirst({
-    where: {
-      status: { not: "PASSED" },
-      OR: [
-        ...(input.blogId ? [{ blogId: input.blogId }] : []),
-        ...(input.trendId ? [{ trendId: input.trendId }] : []),
-      ],
-    },
-    orderBy: { createdAt: "desc" },
-  });
-  if (existing) {
-    return prisma.workflowRun.update({
-      where: { id: existing.id },
+  // Use transaction to prevent race condition when checking and creating workflow
+  return prisma.$transaction(async (tx) => {
+    const existing = await tx.workflowRun.findFirst({
+      where: {
+        status: { not: "PASSED" },
+        OR: [
+          ...(input.blogId ? [{ blogId: input.blogId }] : []),
+          ...(input.trendId ? [{ trendId: input.trendId }] : []),
+        ],
+      },
+      orderBy: { createdAt: "desc" },
+    });
+
+    if (existing) {
+      return tx.workflowRun.update({
+        where: { id: existing.id },
+        data: {
+          currentStage: input.worker,
+          blogId: input.blogId ?? existing.blogId,
+          trendId: input.trendId ?? existing.trendId,
+        },
+      });
+    }
+
+    return tx.workflowRun.create({
       data: {
+        trendId: input.trendId,
+        blogId: input.blogId,
         currentStage: input.worker,
-        blogId: input.blogId ?? existing.blogId,
-        trendId: input.trendId ?? existing.trendId,
       },
     });
-  }
-
-  return prisma.workflowRun.create({
-    data: {
-      trendId: input.trendId,
-      blogId: input.blogId,
-      currentStage: input.worker,
-    },
   });
 }
 
