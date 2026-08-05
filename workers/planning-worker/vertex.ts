@@ -1,7 +1,10 @@
 import { env, isVertexConfigured } from "../shared/env";
 import { generateVertexJson } from "../shared/vertex";
 import { getSetting, MODEL_SETTING_KEYS } from "../shared/settings";
-import { PlanningResult } from "./types";
+import { logger } from "../shared/logger";
+import { PlanningResult, PlanningResultSchema } from "./types";
+
+const log = logger.child({ worker: "planning-worker" });
 
 function buildPrompt(topic: string, category: string, score: number, evidenceSummary: string): string {
   return `You are a senior SEO content strategist for a developer-focused technical blog.
@@ -58,9 +61,15 @@ export async function generateContentPlan(
   }
 
   const model = await getSetting(MODEL_SETTING_KEYS.planning, env.VERTEX_FLASH);
-  const result = await generateVertexJson<PlanningResult>(
-    model,
-    buildPrompt(topic, category, score, evidenceSummary)
-  );
-  return { plan: result.data, usage: result.usage, model };
+  const result = await generateVertexJson<unknown>(model, buildPrompt(topic, category, score, evidenceSummary));
+  const parsed = PlanningResultSchema.safeParse(result.data);
+  if (!parsed.success) {
+    log.warn(`Planning response failed schema validation, using fallback: ${parsed.error.message}`);
+    return {
+      plan: fallbackPlan(topic, category, evidenceSummary),
+      usage: result.usage,
+      model: "fallback",
+    };
+  }
+  return { plan: parsed.data, usage: result.usage, model };
 }
