@@ -108,3 +108,62 @@ export async function uploadToS3(key: string, body: Buffer, contentType: string)
     size: body.length,
   };
 }
+
+export async function deleteFromS3(key: string): Promise<void> {
+  if (!isS3Configured || !env.AWS_ACCESS_KEY_ID || !env.AWS_SECRET_ACCESS_KEY || !env.AWS_S3_BUCKET) {
+    return; // Silently skip if S3 not configured
+  }
+
+  const region = env.AWS_REGION;
+  const bucket = env.AWS_S3_BUCKET;
+  const host = `${bucket}.s3.${region}.amazonaws.com`;
+  const path = `/${encodeKey(key)}`;
+  const now = amzDate();
+  const stamp = dateStamp(now);
+  const payloadHash = sha256("");
+  const tokenHeader = env.AWS_SESSION_TOKEN ? `x-amz-security-token:${env.AWS_SESSION_TOKEN}\n` : "";
+  const signedHeaders = env.AWS_SESSION_TOKEN
+    ? "host;x-amz-content-sha256;x-amz-date;x-amz-security-token"
+    : "host;x-amz-content-sha256;x-amz-date";
+  const canonicalHeaders = [
+    `host:${host}`,
+    `x-amz-content-sha256:${payloadHash}`,
+    `x-amz-date:${now}`,
+    tokenHeader.trimEnd(),
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const canonicalRequest = ["DELETE", path, "", `${canonicalHeaders}\n`, signedHeaders, payloadHash].join("\n");
+  const scope = `${stamp}/${region}/s3/aws4_request`;
+  const stringToSign = ["AWS4-HMAC-SHA256", now, scope, sha256(canonicalRequest)].join("\n");
+  const signature = crypto
+    .createHmac("sha256", signingKey(env.AWS_SECRET_ACCESS_KEY, stamp, region, "s3"))
+    .update(stringToSign)
+    .digest("hex");
+  const authorization = `AWS4-HMAC-SHA256 Credential=${env.AWS_ACCESS_KEY_ID}/${scope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
+
+  await new Promise<void>((resolve, reject) => {
+    const req = https.request(
+      {
+        method: "DELETE",
+        host,
+        path,
+        headers: {
+          Authorization: authorization,
+          "x-amz-content-sha256": payloadHash,
+          "x-amz-date": now,
+          ...(env.AWS_SESSION_TOKEN && { "x-amz-security-token": env.AWS_SESSION_TOKEN }),
+        },
+      },
+      (res) => {
+        if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+          resolve();
+        } else {
+          reject(new Error(`S3 delete failed: ${res.statusCode}`));
+        }
+      }
+    );
+    req.on("error", reject);
+    req.end();
+  });
+}
