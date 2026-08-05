@@ -34,6 +34,8 @@ export type WritingContext = {
     sections: unknown;
     faqs: unknown;
   };
+  /** Trend.evidenceSummary - the research source material this article should cite. See IMPLEMENTATION_PLAN.md Phase 2.2. */
+  evidenceSummary?: string;
 };
 
 function buildPrompt(topic: string, description: string, context: WritingContext = {}): string {
@@ -49,6 +51,9 @@ ${context.plan ? JSON.stringify(context.plan, null, 2) : "No separate content pl
 Approved outline:
 ${context.outline ? JSON.stringify(context.outline, null, 2) : "No separate outline provided."}
 
+Evidence (the research source material this article is grounded in - cite specific facts/statistics/claims to these sources rather than treating the URLs as background color):
+${context.evidenceSummary || "No evidence summary provided."}
+
 Guidelines:
 1. Tone: technical, practical, zero fluff.
 2. Use the approved outline as factual/source context, but reshape the final article into the mandatory structure below.
@@ -57,6 +62,7 @@ Guidelines:
 5. Use proper GitHub Flavored Markdown.
 6. Do not invent unsupported facts. Use cautious wording when evidence is incomplete.
 7. The Call To Action should be short, practical, and related to DevKit Market.
+8. When you state a specific fact, statistic, or claim drawn from the Evidence above, cite it with an inline Markdown link to its exact source URL from that evidence (e.g. "according to [the source](https://...)"). Cite at least two distinct source URLs from the Evidence if two or more are available there - don't invent URLs that aren't in the Evidence.
 
 Mandatory Markdown structure:
 # [SEO-friendly title]
