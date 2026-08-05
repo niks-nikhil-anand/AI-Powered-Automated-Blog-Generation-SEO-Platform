@@ -1,7 +1,10 @@
 import { env, isVertexConfigured } from "../shared/env";
 import { generateVertexJson, slugify } from "../shared/vertex";
 import { getSetting, MODEL_SETTING_KEYS } from "../shared/settings";
-import { OutlineResult } from "./types";
+import { logger } from "../shared/logger";
+import { OutlineResult, OutlineResultSchema } from "./types";
+
+const log = logger.child({ worker: "outline-worker" });
 
 type PlanInput = {
   searchIntent: string;
@@ -96,9 +99,18 @@ export async function generateContentOutline(
   }
 
   const model = await getSetting(MODEL_SETTING_KEYS.outline, env.VERTEX_FLASH);
-  const result = await generateVertexJson<OutlineResult>(model, buildPrompt(topic, category, plan));
+  const result = await generateVertexJson<unknown>(model, buildPrompt(topic, category, plan));
+  const parsed = OutlineResultSchema.safeParse(result.data);
+  if (!parsed.success) {
+    log.warn(`Outline response failed schema validation, using fallback: ${parsed.error.message}`);
+    return {
+      outline: fallbackOutline(topic, plan),
+      usage: result.usage,
+      model: "fallback",
+    };
+  }
   return {
-    outline: { ...result.data, slug: result.data.slug || slugify(result.data.title) },
+    outline: { ...parsed.data, slug: parsed.data.slug || slugify(parsed.data.title) },
     usage: result.usage,
     model,
   };
