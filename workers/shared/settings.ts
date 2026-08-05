@@ -6,20 +6,25 @@ import { prisma } from "./prisma";
  * pattern already used for workers/shared/queues) so a key typo can't make
  * the two sides silently disagree.
  *
- * Only three pipeline stages actually call an LLM: planning-worker and
- * outline-worker both call env.VERTEX_FLASH, writing-worker calls
- * env.VERTEX_MODEL. research-worker, image-worker, quality-worker, and
- * publish-worker do not call any AI model - research is scraping/scoring,
- * image-worker draws an SVG locally, quality-worker is a deterministic
- * regex/heuristic scorer, and publish is a DB status flip. There is
- * deliberately no MODEL_SETTING_KEYS entry for those four - a dropdown
- * for a stage with nothing to configure would be misleading, not a
- * convenience.
+ * Four pipeline stages call an LLM through a dashboard-editable setting:
+ * planning-worker and outline-worker both call env.VERTEX_FLASH,
+ * writing-worker calls env.VERTEX_MODEL, and research-worker calls
+ * env.VERTEX_FLASH for the semantic relevance/dedup pass (see
+ * workers/research-worker/pipeline/semantic.ts - this is on top of, not
+ * instead of, its heuristic scraping/scoring). image-worker also calls
+ * Vertex (Imagen, via env.VERTEX_IMAGE_MODEL) and quality-worker calls
+ * Vertex (Gemini vision, via env.VERTEX_FLASH) for a featured-image
+ * relevance/appeal check, but neither is exposed as a MODEL_SETTING_KEYS
+ * entry - swapping the image model or the vision model isn't a like-for-like
+ * choice the way swapping a text model is, so it stays an env var rather
+ * than a dashboard dropdown. publish-worker still calls no AI model at all
+ * - it's a DB status flip.
  */
 export const MODEL_SETTING_KEYS = {
   planning: "model:planning",
   outline: "model:outline",
   writing: "model:writing",
+  semantic: "model:semantic",
 } as const;
 
 export type ModelStage = keyof typeof MODEL_SETTING_KEYS;
