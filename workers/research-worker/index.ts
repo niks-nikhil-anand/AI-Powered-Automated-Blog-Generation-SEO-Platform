@@ -7,6 +7,7 @@ import { workerOptions } from "../shared/worker-options";
 import { getEnabledSources } from "./sources";
 import { normalizeSignals } from "./pipeline/normalize";
 import { dedupeSignals } from "./pipeline/dedupe";
+import { semanticEnrich } from "./pipeline/semantic";
 import { scoreClusters } from "./pipeline/score";
 import { promotableCandidates } from "./pipeline/promote";
 import { RawSignal, ResearchCandidate } from "./types";
@@ -99,12 +100,14 @@ export async function runResearch() {
 
     const normalized = normalizeSignals(rawSignals);
     const clusters = dedupeSignals(normalized);
-    const scored = scoreClusters(clusters);
+    const enriched = await semanticEnrich(clusters);
+    const scored = scoreClusters(enriched);
     const promotable = promotableCandidates(scored);
     log.info("Research scoring complete", {
       rawSignals: rawSignals.length,
       normalized: normalized.length,
-      clusters: clusters.length,
+      clustersAfterHeuristicDedupe: clusters.length,
+      clustersAfterSemanticDedupe: enriched.length,
       promotable: promotable.length,
       failedSources,
     });
@@ -129,6 +132,7 @@ export async function runResearch() {
       });
       if (recentDuplicate) continue;
 
+      const description = candidateDescription(item);
       const trend = await prisma.trend.create({
         data: {
           topic: item.title,
@@ -136,13 +140,18 @@ export async function runResearch() {
           category: item.category,
           score: item.score,
           status: "NEW",
+          // Persisted so later stages (writing-worker's citations, quality-worker's
+          // fact-check) can still reach the original evidence - previously this
+          // only lived in the one-time planningQueue job payload below and was
+          // gone by the time quality-worker ran. See IMPLEMENTATION_PLAN.md Phase 2.1.
+          evidenceSummary: description,
         },
       });
       created.push({
         id: trend.id,
         topic: trend.topic,
         category: trend.category,
-        description: candidateDescription(item),
+        description,
         score: item.score,
       });
     }
