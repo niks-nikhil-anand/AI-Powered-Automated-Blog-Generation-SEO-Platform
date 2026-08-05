@@ -4,7 +4,7 @@ import { prisma } from "../shared/prisma";
 import { logger } from "../shared/logger";
 import { workerOptions } from "../shared/worker-options";
 import { generateEditorialHeroImage } from "./generator";
-import { uploadToS3 } from "./storage";
+import { uploadToS3, deleteFromS3 } from "./storage";
 import {
   assertGate,
   failWorkerAttempt,
@@ -44,10 +44,14 @@ export async function generateImageForBlog(payload: ImageJobPayload) {
     return output;
   }
 
+  let uploadedKey: string | null = null;
+
   try {
     const image = generateEditorialHeroImage(payload);
     const key = objectKey(payload.slug, image.fileName);
     const uploaded = await uploadToS3(key, image.buffer, image.mimeType);
+    uploadedKey = key; // Track for cleanup if gate fails
+
     const uploadGate = scoreRequiredFields("image-worker", [
       { label: "generated image buffer", ok: image.buffer.length > 0 },
       { label: "mime type", ok: Boolean(image.mimeType) },
@@ -55,7 +59,18 @@ export async function generateImageForBlog(payload: ImageJobPayload) {
       { label: "S3 key", ok: Boolean(uploaded.key) },
       { label: "CDN public URL", ok: Boolean(uploaded.publicUrl) },
     ]);
-    assertGate(uploadGate);
+
+    try {
+      assertGate(uploadGate);
+    } catch (error) {
+      // Delete S3 file if gate check fails to prevent orphaning
+      if (uploadedKey) {
+        await deleteFromS3(uploadedKey).catch((err) => {
+          log.error("Failed to cleanup S3 file after gate failure:", err);
+        });
+      }
+      throw error;
+    }
 
     const asset = await prisma.asset.create({
       data: {
