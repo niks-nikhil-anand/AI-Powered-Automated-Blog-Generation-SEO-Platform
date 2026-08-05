@@ -22,11 +22,20 @@ declare global {
 }
 
 function createClient() {
+  let password = "";
+  if (env.DATABASE_URL) {
+    try {
+      password = new URL(env.DATABASE_URL).password || "";
+    } catch (e) {
+      console.warn("Warning: Failed to parse DATABASE_URL as URL. Using empty password fallback.", e);
+    }
+  }
+
   const pool =
     globalThis.__workerPgPool ??
     new pg.Pool({
-      connectionString: env.DATABASE_URL,
-      password: new URL(env.DATABASE_URL).password || "",
+      connectionString: env.DATABASE_URL || undefined,
+      password,
     });
   const adapter = new PrismaPg(pool);
   globalThis.__workerPgPool = pool;
