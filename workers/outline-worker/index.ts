@@ -68,16 +68,16 @@ async function outlineTopic(payload: OutlineJobPayload) {
         slug: outline.slug,
         metaTitle: outline.metaTitle,
         metaDescription: outline.metaDescription,
-        sections: outline.sections,
-        faqs: outline.faqs,
+        sections: sections,
+        faqs: faqs,
       },
       update: {
         title: outline.title,
         slug: outline.slug,
         metaTitle: outline.metaTitle,
         metaDescription: outline.metaDescription,
-        sections: outline.sections,
-        faqs: outline.faqs,
+        sections: sections,
+        faqs: faqs,
       },
     });
 
