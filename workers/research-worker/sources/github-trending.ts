@@ -17,10 +17,13 @@ type GitHubSearchResponse = {
 };
 
 function githubHeaders(): HeadersInit {
+  // No User-Agent here - GitHub's API requires one, but fetchWithRetry
+  // already injects researchConfig.userAgent by default, so setting a
+  // different literal here would just override that and opt this source
+  // out of RESEARCH_USER_AGENT.
   const token = process.env.GITHUB_TOKEN || process.env.GITHUB_ACCESS_TOKEN;
   const headers: HeadersInit = {
     Accept: "application/vnd.github+json",
-    "User-Agent": "AutoBlogResearchBot/1.0",
   };
   if (token) {
     headers.Authorization = `Bearer ${token}`;

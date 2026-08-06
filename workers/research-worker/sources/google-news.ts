@@ -32,13 +32,11 @@ function sourceName(source: ParsedNewsItem["source"]): string | undefined {
 export async function fetchGoogleNewsSignals(): Promise<RawSignal[]> {
   const params = new URLSearchParams({
     q: researchConfig.newsQuery,
-    hl: "en-US",
-    gl: researchConfig.region,
-    ceid: `${researchConfig.region}:en`,
+    hl: `${researchConfig.newsLanguage}-${researchConfig.newsCountry}`,
+    gl: researchConfig.newsCountry,
+    ceid: `${researchConfig.newsCountry}:${researchConfig.newsLanguage}`,
   });
-  const res = await fetchWithRetry(`${NEWS_RSS_URL}?${params.toString()}`, {
-    headers: { "User-Agent": "Mozilla/5.0 (compatible; AutoBlogResearchBot/1.0)" },
-  });
+  const res = await fetchWithRetry(`${NEWS_RSS_URL}?${params.toString()}`);
 
   if (!res.ok) {
     throw new Error(`Google News fetch failed: ${res.status} ${res.statusText}`);
