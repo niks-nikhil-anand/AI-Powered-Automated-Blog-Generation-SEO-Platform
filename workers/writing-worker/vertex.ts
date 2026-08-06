@@ -183,6 +183,7 @@ async function generateWithVertex(topic: string, description: string, context: W
   const result = await generateVertexText(model, prompt, {
     maxOutputTokens: 8192,
     temperature: 0.35,
+    timeoutMs: env.WRITING_TIMEOUT_MS,
   });
 
   const title = context.outline?.title ?? topic;
