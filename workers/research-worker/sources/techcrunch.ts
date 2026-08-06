@@ -3,8 +3,6 @@ import { researchConfig } from "../config";
 import { RawSignal, ResearchSource } from "../types";
 import { fetchWithRetry } from "../utils/fetch-with-retry";
 
-const TECHCRUNCH_RSS = "https://feed.techcrunch.com/";
-
 type ParsedItem = {
   title?: string;
   link?: string;
@@ -24,40 +22,50 @@ function toArray<T>(value: T | T[] | undefined): T[] {
   return Array.isArray(value) ? value : [value];
 }
 
+/**
+ * ENABLE_TECHCRUNCH is one flag, but there are two configured feeds
+ * (TECHCRUNCH_AI_RSS, TECHCRUNCH_STARTUPS_RSS) - fetches both and merges
+ * rather than adding a second ResearchSourceName, since both feeds are
+ * still conceptually "techcrunch" for scoring/dedupe purposes downstream.
+ */
+async function fetchFeed(url: string): Promise<ParsedItem[]> {
+  const res = await fetchWithRetry(url);
+  if (!res.ok) throw new Error(`TechCrunch fetch failed (${url}): ${res.status}`);
+  const xml = await res.text();
+  const parsed = parser.parse(xml) as { rss?: { channel?: { item?: ParsedItem[] } } };
+  return toArray(parsed?.rss?.channel?.item);
+}
+
 export async function fetchTechCrunchSignals(): Promise<RawSignal[]> {
   const signals: RawSignal[] = [];
 
   try {
-    const res = await fetchWithRetry(TECHCRUNCH_RSS, {
-      headers: { "User-Agent": "Mozilla/5.0 (compatible; AutoBlogResearchBot/1.0)" },
-    });
+    const feeds = await Promise.allSettled([
+      fetchFeed(researchConfig.sourceUrls.techcrunchAi),
+      fetchFeed(researchConfig.sourceUrls.techcrunchStartups),
+    ]);
 
-    if (!res.ok) {
-      throw new Error(`TechCrunch fetch failed: ${res.status}`);
+    const byUrl = new Map<string, ParsedItem>();
+    for (const feed of feeds) {
+      if (feed.status !== "fulfilled") {
+        console.error("TechCrunch feed error:", feed.reason);
+        continue;
+      }
+      for (const item of feed.value) {
+        if (item.link && !byUrl.has(item.link)) byUrl.set(item.link, item);
+      }
     }
 
-    const xml = await res.text();
-    const parsed = parser.parse(xml) as { rss?: { channel?: { item?: ParsedItem[] } } };
-    const items = toArray(parsed?.rss?.channel?.item);
-
-    for (const item of items.slice(0, researchConfig.maxSignalsPerSource)) {
+    for (const item of Array.from(byUrl.values()).slice(0, researchConfig.maxSignalsPerSource)) {
       if (!item.title || !item.link) continue;
 
-      const keywords = ["AI", "startup", "funding", "tech", "developer", "API"];
-      const hasRelevant = keywords.some((kw) =>
-        item.title!.toLowerCase().includes(kw.toLowerCase()) ||
-        item.description?.toLowerCase().includes(kw.toLowerCase())
-      );
-
-      if (hasRelevant) {
-        signals.push({
-          title: item.title,
-          url: item.link,
-          source: "techcrunch",
-          snippet: item.description || "",
-          timestamp: new Date(item.pubDate || Date.now()).toISOString(),
-        });
-      }
+      signals.push({
+        title: item.title,
+        url: item.link,
+        source: "techcrunch",
+        snippet: item.description || "",
+        timestamp: new Date(item.pubDate || Date.now()).toISOString(),
+      });
     }
   } catch (error) {
     console.error("TechCrunch fetch error:", error);

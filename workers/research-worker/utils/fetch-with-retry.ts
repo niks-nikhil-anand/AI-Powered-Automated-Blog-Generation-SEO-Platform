@@ -1,11 +1,21 @@
+import { researchConfig } from "../config";
+
 type FetchWithRetryOptions = RequestInit & {
   attempts?: number;
   timeoutMs?: number;
 };
 
+/**
+ * Defaults (timeout/attempts/User-Agent) come from researchConfig - i.e.
+ * from RESEARCH_TIMEOUT_MS / RESEARCH_RETRY_COUNT / RESEARCH_USER_AGENT in
+ * workers/shared/env.ts - rather than being hardcoded here with no way to
+ * override. A caller's own `headers` still wins over the default User-Agent
+ * if it sets one (e.g. github-trending.ts's Accept/Authorization headers).
+ */
 export async function fetchWithRetry(url: string, options: FetchWithRetryOptions = {}): Promise<Response> {
-  const attempts = options.attempts ?? 2;
-  const timeoutMs = options.timeoutMs ?? 15000;
+  const attempts = options.attempts ?? researchConfig.fetchRetryAttempts;
+  const timeoutMs = options.timeoutMs ?? researchConfig.fetchTimeoutMs;
+  const headers = { "User-Agent": researchConfig.userAgent, ...options.headers };
   let lastError: unknown;
 
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
@@ -13,7 +23,7 @@ export async function fetchWithRetry(url: string, options: FetchWithRetryOptions
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
-      const res = await fetch(url, { ...options, signal: controller.signal });
+      const res = await fetch(url, { ...options, headers, signal: controller.signal });
       clearTimeout(timeout);
       if (res.ok || attempt === attempts) return res;
       lastError = new Error(`${res.status} ${res.statusText}`);
