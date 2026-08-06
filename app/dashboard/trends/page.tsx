@@ -22,6 +22,7 @@ import {
   PaginationPrevious,
 } from "@/components/ui/pagination";
 import { getPaginationRange } from "@/lib/utils";
+import { RESEARCH_SOURCE_ORDER, RESEARCH_SOURCE_META } from "@/lib/research-sources";
 
 const TRENDS_PAGE_SIZE = 9;
 
@@ -45,6 +46,9 @@ export default function TrendResearchPage({ onOpenManualTopic }: TrendsPageProps
   const [isApproving, setIsApproving] = useState(false);
   const [approveError, setApproveError] = useState("");
   const [approveResult, setApproveResult] = useState<{ jobId: string; queue: string } | null>(null);
+  // Required only when approveTarget scores below minWritingScore - see
+  // handleApproveTrend and the reason textarea in the approve modal below.
+  const [approveReason, setApproveReason] = useState("");
   const [isResearchRunning, setIsResearchRunning] = useState(false);
   const [researchMessage, setResearchMessage] = useState("");
   const [isLoadingTrends, setIsLoadingTrends] = useState(true);
@@ -131,6 +135,7 @@ export default function TrendResearchPage({ onOpenManualTopic }: TrendsPageProps
     setApproveTarget(trend);
     setApproveError("");
     setApproveResult(null);
+    setApproveReason("");
   };
 
   const closeApproveModal = () => {
@@ -138,16 +143,26 @@ export default function TrendResearchPage({ onOpenManualTopic }: TrendsPageProps
     setApproveTarget(null);
     setApproveError("");
     setApproveResult(null);
+    setApproveReason("");
   };
+
+  const approveRequiresReason = (trend: TrendRow) => Number(trend.score) < minWritingScore;
 
   const handleApproveTrend = async () => {
     if (!approveTarget) return;
+    const requiresReason = approveRequiresReason(approveTarget);
+    if (requiresReason && !approveReason.trim()) return;
+
     setIsApproving(true);
     setApproveError("");
     setApproveResult(null);
 
     try {
-      const res = await fetch(`/api/trends/${approveTarget.id}/approve`, { method: "POST" });
+      const res = await fetch(`/api/trends/${approveTarget.id}/approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(requiresReason ? { reason: approveReason.trim() } : {}),
+      });
       const data = await res.json();
       if (!res.ok || !data.ok) {
         throw new Error(data.error || "Failed to start pipeline");
@@ -167,11 +182,18 @@ export default function TrendResearchPage({ onOpenManualTopic }: TrendsPageProps
     }
   };
 
+  // One chip per research platform research-worker actually runs (see
+  // workers/research-worker/config.ts) - previously only 3 of the 11
+  // configured sources had a filter chip at all; the other 8 (TechCrunch,
+  // The Verge, Google AI Blog, OpenAI News, Anthropic News, Microsoft AI
+  // Blog, NVIDIA Blog, Hacker News) were unfilterable here even though
+  // they'd been producing real trends.
   const trendFilters = [
     { label: "All sources", count: trends.length },
-    { label: "Google Trends", count: trends.filter((t) => t.source === "Google Trends").length },
-    { label: "Google News", count: trends.filter((t) => t.source === "Google News").length },
-    { label: "GitHub Trending", count: trends.filter((t) => t.source === "GitHub Trending").length },
+    ...RESEARCH_SOURCE_ORDER.map((name) => {
+      const label = RESEARCH_SOURCE_META[name].label;
+      return { label, count: trends.filter((t) => t.source === label).length };
+    }),
   ];
 
   const categories = Array.from(new Set(trends.map((t) => t.cat).filter(Boolean))).sort();
@@ -441,22 +463,15 @@ export default function TrendResearchPage({ onOpenManualTopic }: TrendsPageProps
             header: "Actions",
             align: "right" as const,
             render: (row: TrendRow) => {
-              const canApprove = Number(row.score) >= minWritingScore;
               return (
                 <div className="flex gap-[6px] justify-end items-center">
-                  {canApprove ? (
-                    <button
-                      aria-label="Approve topic and send to pipeline"
-                      onClick={() => openApproveModal(row)}
-                      className="h-[26px] px-[8px] rounded-[6px] border border-transparent bg-[var(--emerald)] text-white text-[10px] font-semibold hover:bg-[#059669] transition-colors whitespace-nowrap"
-                    >
-                      Approve
-                    </button>
-                  ) : (
-                    <span className="h-[26px] px-[8px] rounded-[6px] border border-[rgba(244,63,94,0.25)] bg-[rgba(244,63,94,0.08)] text-[var(--rose)] text-[10px] font-semibold inline-flex items-center justify-center select-none whitespace-nowrap">
-                      Low Score
-                    </span>
-                  )}
+                  <button
+                    aria-label="Approve topic and send to pipeline"
+                    onClick={() => openApproveModal(row)}
+                    className="h-[26px] px-[8px] rounded-[6px] border border-transparent bg-[var(--emerald)] text-white text-[10px] font-semibold hover:bg-[#059669] transition-colors whitespace-nowrap"
+                  >
+                    Approve
+                  </button>
                   <button
                     aria-label="View trend details"
                     onClick={(e) => {
@@ -564,7 +579,6 @@ export default function TrendResearchPage({ onOpenManualTopic }: TrendsPageProps
                   {viewMode === "card" ? (
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-[12px]">
                       {group.items.map((t, idx) => {
-                        const canApprove = Number(t.score) >= minWritingScore;
                         return (
                           <div
                             key={idx}
@@ -647,19 +661,13 @@ export default function TrendResearchPage({ onOpenManualTopic }: TrendsPageProps
 
                             {/* Actions */}
                             <div className="flex gap-[7px] mt-auto pt-[3px]">
-                              {canApprove ? (
-                                <button
-                                  aria-label="Approve topic and send to pipeline"
-                                  onClick={() => openApproveModal(t)}
-                                  className="flex-1 h-[28px] rounded-[8px] border border-transparent bg-[var(--emerald)] text-white text-[11px] font-semibold hover:bg-[#059669] transition-colors"
-                                >
-                                  Approve → Pipeline
-                                </button>
-                              ) : (
-                                <span className="flex-1 h-[28px] rounded-[8px] border border-[rgba(244,63,94,0.25)] bg-[rgba(244,63,94,0.08)] text-[var(--rose)] text-[11px] font-semibold inline-flex items-center justify-center select-none text-center">
-                                  Score too low
-                                </span>
-                              )}
+                              <button
+                                aria-label="Approve topic and send to pipeline"
+                                onClick={() => openApproveModal(t)}
+                                className="flex-1 h-[28px] rounded-[8px] border border-transparent bg-[var(--emerald)] text-white text-[11px] font-semibold hover:bg-[#059669] transition-colors"
+                              >
+                                Approve → Pipeline
+                              </button>
                               <button
                                 aria-label="Dismiss topic"
                                 onClick={() => alert(`Skipped topic "${t.title}"`)}
@@ -861,6 +869,23 @@ export default function TrendResearchPage({ onOpenManualTopic }: TrendsPageProps
                 ))}
               </div>
 
+              {!approveResult && approveRequiresReason(approveTarget) && (
+                <div className="rounded-[9px] border border-[rgba(245,158,11,0.3)] bg-[rgba(245,158,11,0.08)] p-[11px] flex flex-col gap-[7px]">
+                  <div className="text-[11px] text-[var(--amber)] font-semibold">
+                    This topic scored {approveTarget.score}%, below the {minWritingScore}% write threshold. Provide a reason to send it to planning anyway.
+                  </div>
+                  <textarea
+                    aria-label="Reason for approving a below-threshold topic"
+                    value={approveReason}
+                    onChange={(e) => setApproveReason(e.target.value)}
+                    disabled={isApproving}
+                    placeholder="Why does this topic deserve to skip the score gate?"
+                    rows={2}
+                    className="w-full rounded-[7px] border border-[var(--bd)] bg-[var(--card)] text-[var(--fg)] text-[11.5px] p-[8px] outline-none focus:border-[var(--amber)] disabled:opacity-60 resize-none"
+                  />
+                </div>
+              )}
+
               {approveError && (
                 <div className="text-[11px] text-[var(--rose)] bg-[rgba(244,63,94,0.10)] border border-[rgba(244,63,94,0.25)] rounded-[9px] p-[9px_10px]">
                   {approveError}
@@ -890,7 +915,7 @@ export default function TrendResearchPage({ onOpenManualTopic }: TrendsPageProps
                 {!approveResult && (
                   <button
                     type="button"
-                    disabled={isApproving}
+                    disabled={isApproving || (approveRequiresReason(approveTarget) && !approveReason.trim())}
                     onClick={handleApproveTrend}
                     className="h-[31px] px-[13px] rounded-[8px] border border-transparent bg-[var(--indigo)] text-white text-[11.5px] font-bold hover:bg-[#4f46e5] disabled:opacity-60"
                   >
