@@ -10,6 +10,11 @@ import {
   writingQueue,
 } from "@/workers/shared/queues";
 import { queueCounts } from "@/lib/queues";
+import {
+  trendSourceLabel,
+  trendSourceInitial,
+  trendSourceColor,
+} from "@/lib/research-sources";
 
 export const dynamic = "force-dynamic";
 
@@ -131,27 +136,6 @@ function blogStatusLabel(status: string) {
   if (status === "PENDING_REVIEW") return "Review";
   if (status === "ARCHIVED") return "Archived";
   return "Draft";
-}
-
-function trendSourceLabel(source: string) {
-  if (source.includes("google_trends")) return "Google Trends";
-  if (source.includes("google_news")) return "Google News";
-  if (source.includes("github_trending")) return "GitHub Trending";
-  return source;
-}
-
-function sourceInitial(source: string) {
-  if (source.includes("google_trends")) return "GT";
-  if (source.includes("google_news")) return "GN";
-  if (source.includes("github_trending")) return "GH";
-  return source.slice(0, 2).toUpperCase();
-}
-
-function sourceColor(source: string) {
-  if (source.includes("google_trends")) return "var(--indigo)";
-  if (source.includes("google_news")) return "var(--emerald)";
-  if (source.includes("github_trending")) return "#171717";
-  return "var(--mut)";
 }
 
 function recommendation(score: number) {
@@ -443,9 +427,9 @@ export async function GET() {
     const rec = recommendation(score);
     return {
       id: trend.id,
-      srcInitial: sourceInitial(trend.source),
+      srcInitial: trendSourceInitial(trend.source),
       source: trendSourceLabel(trend.source),
-      srcColor: sourceColor(trend.source),
+      srcColor: trendSourceColor(trend.source),
       score: String(score),
       scoreBg: score >= 70 ? "rgba(16,185,129,0.14)" : "var(--card2)",
       scoreFg: score >= 70 ? "var(--emerald)" : "var(--fg2)",
