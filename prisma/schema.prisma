@@ -188,23 +188,29 @@ model QualityReport {
 }
 
 model Trend {
-  id              String          @id @default(cuid())
-  topic           String
-  source          String
-  category        String
-  score           Float
-  status          TrendStatus     @default(NEW)
+  id               String          @id @default(cuid())
+  topic            String
+  source           String
+  category         String
+  score            Float
+  status           TrendStatus     @default(NEW)
   /// Research evidence (source titles/URLs from candidateDescription() in
   /// research-worker/index.ts), persisted so later stages can cite/fact-check
   /// against it - previously this only existed as a one-time planningQueue
   /// job-payload argument and was gone by the time quality-worker ran. See
   /// IMPLEMENTATION_PLAN.md Phase 2.1.
-  evidenceSummary String?         @db.Text
-  plan            ContentPlan?
-  outline         ContentOutline?
-  blog            Blog?
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
+  evidenceSummary  String?         @db.Text
+  /// Set by app/api/trends/[id]/approve when a human approves a trend below
+  /// RESEARCH_MIN_SCORE_TO_WRITE. planning-worker/outline-worker/writing-worker
+  /// each independently gate on score >= threshold; this lets a manual
+  /// override actually survive past all three, instead of being silently
+  /// re-rejected one stage after "queued successfully" said it worked.
+  manuallyApproved Boolean         @default(false)
+  plan             ContentPlan?
+  outline          ContentOutline?
+  blog             Blog?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
 
   @@index([topic, createdAt])
   @@index([status])

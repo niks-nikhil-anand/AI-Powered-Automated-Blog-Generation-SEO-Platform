@@ -4,6 +4,8 @@ export type GeneratedImage = {
   mimeType: string;
   width: number;
   height: number;
+  /** Which procedural layout rendered this - only set by the SVG fallback generator, see generator.ts. */
+  layout?: string;
 };
 
 export type UploadedImage = {
