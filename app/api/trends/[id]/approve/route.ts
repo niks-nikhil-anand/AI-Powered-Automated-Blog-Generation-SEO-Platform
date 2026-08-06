@@ -9,31 +9,51 @@ type RouteContext = {
   params: Promise<{ id: string }>;
 };
 
-function evidenceSummary(trend: { topic: string; source: string; category: string; score: number }) {
-  return [
+function evidenceSummary(
+  trend: { topic: string; source: string; category: string; score: number },
+  overrideReason: string | null
+) {
+  const lines = [
     "Manually approved from the Trend Research dashboard.",
     "",
     `Topic: ${trend.topic}`,
     `Source: ${trend.source}`,
     `Category: ${trend.category}`,
     `Score: ${Math.round(trend.score)}`,
-  ].join("\n");
+  ];
+  if (overrideReason) {
+    lines.push(
+      "",
+      `NOTE: this score is below the ${env.RESEARCH_MIN_SCORE_TO_WRITE} write threshold - a human approved it anyway.`,
+      `Override reason: ${overrideReason}`
+    );
+  }
+  return lines.join("\n");
 }
 
-export async function POST(_request: Request, context: RouteContext) {
+export async function POST(request: Request, context: RouteContext) {
   try {
     const { id } = await context.params;
+    let body: Record<string, unknown> = {};
+    try {
+      body = await request.json();
+    } catch {
+      // No body is fine - reason is only required for the below-threshold path.
+    }
+    const reason = typeof body.reason === "string" ? body.reason.trim() : "";
+
     const trend = await prisma.trend.findUnique({ where: { id } });
 
     if (!trend) {
       return NextResponse.json({ ok: false, error: "Trend not found" }, { status: 404 });
     }
 
-    if (trend.score < env.RESEARCH_MIN_SCORE_TO_WRITE) {
+    const belowThreshold = trend.score < env.RESEARCH_MIN_SCORE_TO_WRITE;
+    if (belowThreshold && !reason) {
       return NextResponse.json(
         {
           ok: false,
-          error: `Only topics with score >= ${env.RESEARCH_MIN_SCORE_TO_WRITE} can enter writing. This topic score is ${Math.round(trend.score)}.`,
+          error: `This topic scored ${Math.round(trend.score)}, below the ${env.RESEARCH_MIN_SCORE_TO_WRITE} write threshold. A reason is required to approve it anyway.`,
         },
         { status: 422 }
       );
@@ -51,7 +71,13 @@ export async function POST(_request: Request, context: RouteContext) {
           throw new Error("ALREADY_PLANNED");
         }
 
-        await tx.trend.update({ where: { id }, data: { status: "PLANNED" } });
+        await tx.trend.update({
+          where: { id },
+          data: {
+            status: "PLANNED",
+            ...(belowThreshold ? { manuallyApproved: true } : {}),
+          },
+        });
       });
     } catch (txError) {
       if (txError instanceof Error && txError.message === "ALREADY_PLANNED") {
@@ -63,13 +89,29 @@ export async function POST(_request: Request, context: RouteContext) {
       throw txError;
     }
 
+    // Audit trail for the override - same worker tag
+    // app/api/blogs/[id]/override-publish/route.ts already uses, so both
+    // kinds of manual override group together under one filter on
+    // /dashboard/logs.
+    if (belowThreshold) {
+      await prisma.logEntry.create({
+        data: {
+          level: "WARN",
+          worker: "manual-override",
+          trendId: trend.id,
+          message: `Trend "${trend.topic}" manually approved into the pipeline below the ${env.RESEARCH_MIN_SCORE_TO_WRITE} write threshold (score ${Math.round(trend.score)}).`,
+          meta: { reason, score: trend.score, threshold: env.RESEARCH_MIN_SCORE_TO_WRITE },
+        },
+      });
+    }
+
     // Queue the job after the transaction succeeds
     const job = await planningQueue.add("plan_blog", {
       trendId: trend.id,
       topic: trend.topic,
       category: trend.category,
       score: trend.score,
-      evidenceSummary: evidenceSummary(trend),
+      evidenceSummary: evidenceSummary(trend, belowThreshold ? reason : null),
     });
 
     return NextResponse.json({
