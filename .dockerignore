@@ -5,6 +5,14 @@ node_modules
 .git
 .env
 .env.*
+# GCP service-account keys - these get bind-mounted at runtime (see
+# docker-compose.yml's GOOGLE_APPLICATION_CREDENTIALS volume) rather than
+# baked into an image layer. Matches this project's actual key filename
+# pattern (<gcp-project-id>-client-<hash>.json) plus common conventions.
+*-client-*.json
+gcp-key*.json
+gcp-credentials*.json
+service-account*.json
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
