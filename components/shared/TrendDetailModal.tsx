@@ -41,8 +41,6 @@ export function TrendDetailModal({
 }: TrendDetailModalProps) {
   if (!isOpen || !trend) return null;
 
-  const canApprove = Number(trend.score) >= minWritingScore;
-
   return (
     <div
       className="fixed inset-0 z-50 bg-[rgba(2,6,23,0.6)] backdrop-blur-sm flex items-center justify-center p-[16px] animate-dkfade"
@@ -113,6 +111,11 @@ export function TrendDetailModal({
               >
                 {trend.score}%
               </span>
+              {Number(trend.score) < minWritingScore && (
+                <div className="text-[10px] text-[var(--amber)] mt-[4px]">
+                  Below the {minWritingScore}% write threshold - approving will ask for a reason.
+                </div>
+              )}
             </div>
 
             <div>
@@ -168,23 +171,17 @@ export function TrendDetailModal({
               Skip Topic
             </button>
 
-            {canApprove ? (
-              <button
-                type="button"
-                onClick={() => {
-                  onClose();
-                  onApprove(trend);
-                }}
-                className="h-[32px] px-[14px] rounded-[8px] border border-transparent bg-[var(--emerald)] text-white text-[12px] font-bold hover:bg-[#059669] shadow-sm flex items-center gap-[5px] transition-colors"
-              >
-                <CheckCircle size={13} />
-                Approve Pipeline
-              </button>
-            ) : (
-              <span className="h-[32px] px-[14px] rounded-[8px] border border-[rgba(244,63,94,0.25)] bg-[rgba(244,63,94,0.08)] text-[var(--rose)] text-[12px] font-bold inline-flex items-center justify-center select-none whitespace-nowrap">
-                Score too low to approve
-              </span>
-            )}
+            <button
+              type="button"
+              onClick={() => {
+                onClose();
+                onApprove(trend);
+              }}
+              className="h-[32px] px-[14px] rounded-[8px] border border-transparent bg-[var(--emerald)] text-white text-[12px] font-bold hover:bg-[#059669] shadow-sm flex items-center gap-[5px] transition-colors"
+            >
+              <CheckCircle size={13} />
+              Approve Pipeline
+            </button>
           </div>
         </div>
       </div>
