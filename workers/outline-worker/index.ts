@@ -28,7 +28,10 @@ async function outlineTopic(payload: OutlineJobPayload) {
     include: { trend: true },
   });
   if (!plan) throw new Error(`ContentPlan ${payload.planId} not found`);
-  if (plan.trend.score < env.RESEARCH_MIN_SCORE_TO_WRITE) {
+  // manuallyApproved lets a human-approved below-threshold trend (see
+  // app/api/trends/[id]/approve) survive this gate the same way
+  // planning-worker's identical check does.
+  if (plan.trend.score < env.RESEARCH_MIN_SCORE_TO_WRITE && !plan.trend.manuallyApproved) {
     log.info(`Skipping writing for "${plan.trend.topic}" because score ${Math.round(plan.trend.score)} is below ${env.RESEARCH_MIN_SCORE_TO_WRITE}`, {
       trendId: plan.trend.id,
       score: plan.trend.score,
