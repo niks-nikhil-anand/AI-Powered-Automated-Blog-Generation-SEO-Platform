@@ -26,7 +26,10 @@ async function planTopic(payload: PlanningJobPayload) {
 
   const trend = await prisma.trend.findUnique({ where: { id: payload.trendId } });
   if (!trend) throw new Error(`Trend ${payload.trendId} not found`);
-  if (trend.score < env.RESEARCH_MIN_SCORE_TO_WRITE) {
+  // manuallyApproved lets a human-approved below-threshold trend (see
+  // app/api/trends/[id]/approve) survive this gate instead of being
+  // silently re-rejected right after the dashboard said "queued successfully."
+  if (trend.score < env.RESEARCH_MIN_SCORE_TO_WRITE && !trend.manuallyApproved) {
     log.info(`Skipping "${trend.topic}" because score ${Math.round(trend.score)} is below ${env.RESEARCH_MIN_SCORE_TO_WRITE}`, {
       trendId: trend.id,
       score: trend.score,
