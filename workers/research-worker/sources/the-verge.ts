@@ -3,8 +3,6 @@ import { researchConfig } from "../config";
 import { RawSignal, ResearchSource } from "../types";
 import { fetchWithRetry } from "../utils/fetch-with-retry";
 
-const VERGE_RSS = "https://www.theverge.com/rss/index.xml";
-
 type ParsedItem = {
   title?: string;
   link?: string;
@@ -28,9 +26,7 @@ export async function fetchVergeSignals(): Promise<RawSignal[]> {
   const signals: RawSignal[] = [];
 
   try {
-    const res = await fetchWithRetry(VERGE_RSS, {
-      headers: { "User-Agent": "Mozilla/5.0 (compatible; AutoBlogResearchBot/1.0)" },
-    });
+    const res = await fetchWithRetry(researchConfig.sourceUrls.theVergeAi);
 
     if (!res.ok) {
       throw new Error(`The Verge fetch failed: ${res.status}`);
