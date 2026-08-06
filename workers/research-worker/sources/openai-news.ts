@@ -3,8 +3,6 @@ import { researchConfig } from "../config";
 import { RawSignal, ResearchSource } from "../types";
 import { fetchWithRetry } from "../utils/fetch-with-retry";
 
-const OPENAI_BLOG_RSS = "https://openai.com/feed.xml";
-
 type ParsedItem = {
   title?: string;
   link?: string;
@@ -28,9 +26,7 @@ export async function fetchOpenAINewsSignals(): Promise<RawSignal[]> {
   const signals: RawSignal[] = [];
 
   try {
-    const res = await fetchWithRetry(OPENAI_BLOG_RSS, {
-      headers: { "User-Agent": "Mozilla/5.0 (compatible; AutoBlogResearchBot/1.0)" },
-    });
+    const res = await fetchWithRetry(researchConfig.sourceUrls.openaiNews);
 
     if (!res.ok) {
       throw new Error(`OpenAI News fetch failed: ${res.status}`);

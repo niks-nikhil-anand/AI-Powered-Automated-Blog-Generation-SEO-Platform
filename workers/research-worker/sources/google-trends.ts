@@ -45,9 +45,7 @@ export async function fetchGoogleTrendSignals(): Promise<RawSignal[]> {
 
   for (const baseUrl of TRENDS_RSS_URLS) {
     const url = `${baseUrl}?geo=${encodeURIComponent(researchConfig.region)}`;
-    const res = await fetchWithRetry(url, {
-      headers: { "User-Agent": "Mozilla/5.0 (compatible; AutoBlogResearchBot/1.0)" },
-    });
+    const res = await fetchWithRetry(url);
 
     if (res.ok) {
       xml = await res.text();
