@@ -3,9 +3,6 @@ import { researchConfig } from "../config";
 import { RawSignal, ResearchSource } from "../types";
 import { fetchWithRetry } from "../utils/fetch-with-retry";
 
-// Anthropic research blog RSS feed
-const ANTHROPIC_RSS = "https://www.anthropic.com/research/rss.xml";
-
 type ParsedItem = {
   title?: string;
   link?: string;
@@ -25,13 +22,18 @@ function toArray<T>(value: T | T[] | undefined): T[] {
   return Array.isArray(value) ? value : [value];
 }
 
+/**
+ * Currently 404s (anthropic.com/research/rss.xml, and every other RSS path
+ * tried) with no working replacement feed found - see the note on
+ * ANTHROPIC_NEWS_RSS in workers/shared/env.ts. Set that env var if a real
+ * feed URL turns up; until then this source degrades to 0 signals like any
+ * other failed source, via the same try/catch every other source here uses.
+ */
 export async function fetchAnthropicNewsSignals(): Promise<RawSignal[]> {
   const signals: RawSignal[] = [];
 
   try {
-    const res = await fetchWithRetry(ANTHROPIC_RSS, {
-      headers: { "User-Agent": "Mozilla/5.0 (compatible; AutoBlogResearchBot/1.0)" },
-    });
+    const res = await fetchWithRetry(researchConfig.sourceUrls.anthropicNews);
 
     if (!res.ok) {
       throw new Error(`Anthropic News fetch failed: ${res.status}`);

@@ -3,8 +3,6 @@ import { researchConfig } from "../config";
 import { RawSignal, ResearchSource } from "../types";
 import { fetchWithRetry } from "../utils/fetch-with-retry";
 
-const MICROSOFT_AI_RSS = "https://www.microsoft.com/en-us/research/feed/";
-
 type ParsedItem = {
   title?: string;
   link?: string;
@@ -29,9 +27,7 @@ export async function fetchMicrosoftAIBlogSignals(): Promise<RawSignal[]> {
   const signals: RawSignal[] = [];
 
   try {
-    const res = await fetchWithRetry(MICROSOFT_AI_RSS, {
-      headers: { "User-Agent": "Mozilla/5.0 (compatible; AutoBlogResearchBot/1.0)" },
-    });
+    const res = await fetchWithRetry(researchConfig.sourceUrls.microsoftAiBlog);
 
     if (!res.ok) {
       throw new Error(`Microsoft AI Blog fetch failed: ${res.status}`);
