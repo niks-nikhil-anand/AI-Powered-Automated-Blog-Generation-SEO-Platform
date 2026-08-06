@@ -92,5 +92,9 @@ export async function selectHeroImage(
     fallbackHash = await computeImageHash(fallbackImage.buffer);
   }
 
-  return { image: fallbackImage, styleDirection: null, imageHash: fallbackHash };
+  return {
+    image: fallbackImage,
+    styleDirection: fallbackImage.layout ? `layout:${fallbackImage.layout}` : null,
+    imageHash: fallbackHash,
+  };
 }

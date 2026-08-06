@@ -132,13 +132,26 @@ function mergeAndScore(clusters: SignalCluster[], scored: SemanticClusterOutput[
   return merged;
 }
 
+function chunk<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) chunks.push(items.slice(i, i + size));
+  return chunks;
+}
+
 /**
- * One batched Vertex call per research run - not one call per cluster.
- * Typical run has 40-100 clusters after dedupeSignals; all of them ride in
- * a single prompt. Any failure (Vertex not configured, timeout, malformed
- * JSON, flag off) degrades to the pre-existing heuristic-only score rather
- * than failing the research run - matches the tolerance pattern already
- * used for per-source fetch failures in index.ts.
+ * Runs one Vertex call per batch of researchConfig.semanticBatchSize
+ * clusters, in parallel, instead of one call holding every cluster from
+ * the run. A run with 100+ clusters in a single prompt was routinely
+ * hitting Vertex's timeout, and on timeout the old code discarded semantic
+ * scores for every cluster in the run, not just the slow ones. Batching
+ * means a failed batch only costs its own clusters (they fall back to
+ * heuristic-only via mergeAndScore's existing "no score found" path -
+ * nothing special-cased here), while every other batch's real scores still
+ * land. Cost: duplicate detection only ever worked within one prompt, so it
+ * now only catches duplicates that land in the same batch - a real
+ * trade-off, not a free lunch, but dedupeSignals() already ran a heuristic
+ * pass before this one, so this is a secondary refinement losing some
+ * cross-batch coverage, not the only dedup pass in the pipeline.
  */
 export async function semanticEnrich(clusters: SignalCluster[]): Promise<EnrichedCluster[]> {
   if (clusters.length === 0) return [];
@@ -159,20 +172,48 @@ export async function semanticEnrich(clusters: SignalCluster[]): Promise<Enriche
     sourceCount: new Set(cluster.signals.map((s) => s.source)).size,
   }));
 
-  try {
-    const model = await getSetting(MODEL_SETTING_KEYS.semantic, env.VERTEX_FLASH);
-    const result = await generateVertexJson<unknown>(model, buildPrompt(inputs));
-    const parsed = SemanticResultSchema.safeParse(result.data);
-    if (!parsed.success) {
-      throw new Error(`Semantic response failed schema validation: ${parsed.error.message}`);
+  const batches = chunk(inputs, researchConfig.semanticBatchSize);
+  const model = await getSetting(MODEL_SETTING_KEYS.semantic, env.VERTEX_FLASH);
+
+  log.info(
+    `Semantic scoring ${clusters.length} cluster(s) in ${batches.length} batch(es) of up to ${researchConfig.semanticBatchSize}`
+  );
+
+  const results = await Promise.allSettled(
+    batches.map((batch) =>
+      generateVertexJson<unknown>(model, buildPrompt(batch), { timeoutMs: researchConfig.semanticTimeoutMs })
+    )
+  );
+
+  const scored: SemanticClusterOutput[] = [];
+  let failedBatches = 0;
+
+  results.forEach((result, index) => {
+    if (result.status === "rejected") {
+      failedBatches += 1;
+      log.warn(
+        `Semantic scoring batch ${index + 1}/${batches.length} failed, its clusters fall back to heuristic score only: ${
+          result.reason instanceof Error ? result.reason.message : String(result.reason)
+        }`
+      );
+      return;
     }
-    return mergeAndScore(clusters, parsed.data.clusters);
-  } catch (error) {
-    log.warn(
-      `Semantic scoring failed, falling back to heuristic score only: ${
-        error instanceof Error ? error.message : String(error)
-      }`
-    );
-    return toFallback(clusters);
+
+    const parsed = SemanticResultSchema.safeParse(result.value.data);
+    if (!parsed.success) {
+      failedBatches += 1;
+      log.warn(
+        `Semantic scoring batch ${index + 1}/${batches.length} returned an invalid response, its clusters fall back to heuristic score only: ${parsed.error.message}`
+      );
+      return;
+    }
+
+    scored.push(...parsed.data.clusters);
+  });
+
+  if (failedBatches > 0) {
+    log.warn(`${failedBatches}/${batches.length} semantic scoring batch(es) failed this run`);
   }
+
+  return mergeAndScore(clusters, scored);
 }
