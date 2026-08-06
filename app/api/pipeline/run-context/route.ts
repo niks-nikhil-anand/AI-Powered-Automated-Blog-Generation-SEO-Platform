@@ -109,7 +109,15 @@ export async function GET() {
     lastRun,
     queues,
     stageOrder: STAGE_ORDER,
-    runInFlight: research.active > 0 || research.waiting > 0 || research.delayed > 0,
+    // `delayed` deliberately excluded: BullMQ's job scheduler always keeps one
+    // delayed placeholder job per registered cron schedule (one per entry in
+    // `schedules` above) representing its next future fire time - that's not
+    // a run "in progress", it's just sitting there waiting for its turn,
+    // sometimes many hours out. With 3 schedules registered, `delayed` is
+    // never 0, which made this permanently true and the manual trigger
+    // button permanently disabled. `active`/`waiting` are the real signal:
+    // a job is actually running, or queued to run immediately.
+    runInFlight: research.active > 0 || research.waiting > 0,
     workersConnected,
     estimate: {
       costUsd,
