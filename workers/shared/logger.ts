@@ -1,5 +1,6 @@
 import winston from "winston";
 import { env } from "./env";
+import { PrismaTransport } from "./log-transport";
 
 /**
  * Shared Winston logger for all workers. Each worker should call
@@ -26,5 +27,8 @@ export const logger = winston.createLogger({
         })
       ),
     }),
+    // Persists to LogEntry so app/dashboard/logs has real data to query -
+    // see workers/shared/log-transport.ts.
+    new PrismaTransport(),
   ],
 });
