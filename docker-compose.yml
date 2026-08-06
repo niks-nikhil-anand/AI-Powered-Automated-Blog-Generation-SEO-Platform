@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   next-app:
     build:
@@ -38,23 +36,33 @@ services:
       - redis_data:/data
     restart: always
 
-  # NOTE: if GOOGLE_APPLICATION_CREDENTIALS points to a service-account JSON
-  # file, mount it into the container (e.g. add a `volumes:` entry like
-  # `./gcp-key.json:/app/gcp-key.json:ro` and set the env var to
-  # /app/gcp-key.json) - an env var alone won't make a host file visible
-  # inside the container.
+  # GOOGLE_APPLICATION_CREDENTIALS below is a *host* path from .env - it has
+  # to be bind-mounted into each container at a fixed path, and the env var
+  # here points at that container path instead, not templated from the host
+  # value. An env var alone doesn't make a host file visible inside the
+  # container: every Vertex-calling worker was pointing at
+  # /Users/.../<file>.json, which doesn't exist in any container, and
+  # writing-worker's first real blog-generation call surfaced it as a 30s
+  # timeout (google-auth-library's ADC chain hanging on the missing file)
+  # followed by three fast "credential file not found" retries. Fixed here
+  # rather than relying on the Dockerfile's `COPY . .` accidentally baking
+  # the credentials file into the image at a different path - that also
+  # means a live service-account key doesn't end up sitting in an image
+  # layer, once it's added to .dockerignore.
   research-worker:
     build:
       context: .
       dockerfile: docker/Dockerfile.worker
     container_name: blog-agent-research-worker
     command: ["node_modules/.bin/tsx", "workers/research-worker/index.ts"]
+    volumes:
+      - ${GOOGLE_APPLICATION_CREDENTIALS}:/app/gcp-credentials.json:ro
     environment:
       - NODE_ENV=production
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/blog_agent?schema=public
       - REDIS_URL=redis://redis:6379
       - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT:-}
-      - GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS:-}
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/gcp-credentials.json
       - VERTEX_LOCATION=${VERTEX_LOCATION:-us-central1}
       - GOOGLE_TRENDS_GEO=${GOOGLE_TRENDS_GEO:-US}
       - RESEARCH_CRON_OVERNIGHT=${RESEARCH_CRON_OVERNIGHT:-30 6 * * *}
@@ -69,6 +77,31 @@ services:
       - RESEARCH_RECENT_DUPLICATE_DAYS=${RESEARCH_RECENT_DUPLICATE_DAYS:-30}
       - RESEARCH_GOOGLE_NEWS_QUERY=${RESEARCH_GOOGLE_NEWS_QUERY:-developer tools OR javascript OR typescript OR ai coding OR open source}
       - RESEARCH_GITHUB_QUERIES=${RESEARCH_GITHUB_QUERIES:-created:>2026-07-01 stars:>100 language:TypeScript,created:>2026-07-01 stars:>100 language:JavaScript,created:>2026-07-01 stars:>100 language:Python}
+      - GOOGLE_NEWS_LANGUAGE=${GOOGLE_NEWS_LANGUAGE:-en}
+      - GOOGLE_NEWS_COUNTRY=${GOOGLE_NEWS_COUNTRY:-US}
+      - RESEARCH_TIMEOUT_MS=${RESEARCH_TIMEOUT_MS:-15000}
+      - RESEARCH_RETRY_COUNT=${RESEARCH_RETRY_COUNT:-2}
+      - RESEARCH_USER_AGENT=${RESEARCH_USER_AGENT:-Mozilla/5.0 (compatible; AutoBlogResearchBot/1.0)}
+      - GOOGLE_AI_BLOG_RSS=${GOOGLE_AI_BLOG_RSS:-}
+      - MICROSOFT_AI_BLOG_RSS=${MICROSOFT_AI_BLOG_RSS:-}
+      - OPENAI_NEWS_RSS=${OPENAI_NEWS_RSS:-}
+      - ANTHROPIC_NEWS_RSS=${ANTHROPIC_NEWS_RSS:-}
+      - TECHCRUNCH_AI_RSS=${TECHCRUNCH_AI_RSS:-}
+      - TECHCRUNCH_STARTUPS_RSS=${TECHCRUNCH_STARTUPS_RSS:-}
+      - THE_VERGE_AI_RSS=${THE_VERGE_AI_RSS:-}
+      - NVIDIA_BLOG_RSS=${NVIDIA_BLOG_RSS:-}
+      - HACKERNEWS_RSS=${HACKERNEWS_RSS:-}
+      - ENABLE_GOOGLE_TRENDS=${ENABLE_GOOGLE_TRENDS:-true}
+      - ENABLE_GOOGLE_NEWS=${ENABLE_GOOGLE_NEWS:-true}
+      - ENABLE_GITHUB_TRENDING=${ENABLE_GITHUB_TRENDING:-true}
+      - ENABLE_TECHCRUNCH=${ENABLE_TECHCRUNCH:-true}
+      - ENABLE_THE_VERGE=${ENABLE_THE_VERGE:-true}
+      - ENABLE_GOOGLE_AI_BLOG=${ENABLE_GOOGLE_AI_BLOG:-true}
+      - ENABLE_OPENAI_NEWS=${ENABLE_OPENAI_NEWS:-true}
+      - ENABLE_ANTHROPIC_NEWS=${ENABLE_ANTHROPIC_NEWS:-true}
+      - ENABLE_MICROSOFT_AI_BLOG=${ENABLE_MICROSOFT_AI_BLOG:-true}
+      - ENABLE_NVIDIA_BLOG=${ENABLE_NVIDIA_BLOG:-true}
+      - ENABLE_HACKERNEWS=${ENABLE_HACKERNEWS:-true}
     depends_on:
       - postgres
       - redis
@@ -80,12 +113,14 @@ services:
       dockerfile: docker/Dockerfile.worker
     container_name: blog-agent-planning-worker
     command: ["node_modules/.bin/tsx", "workers/planning-worker/index.ts"]
+    volumes:
+      - ${GOOGLE_APPLICATION_CREDENTIALS}:/app/gcp-credentials.json:ro
     environment:
       - NODE_ENV=production
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/blog_agent?schema=public
       - REDIS_URL=redis://redis:6379
       - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT:-}
-      - GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS:-}
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/gcp-credentials.json
       - VERTEX_LOCATION=${VERTEX_LOCATION:-us-central1}
       - VERTEX_FLASH=${VERTEX_FLASH:-gemini-2.5-flash}
     depends_on:
@@ -99,12 +134,14 @@ services:
       dockerfile: docker/Dockerfile.worker
     container_name: blog-agent-outline-worker
     command: ["node_modules/.bin/tsx", "workers/outline-worker/index.ts"]
+    volumes:
+      - ${GOOGLE_APPLICATION_CREDENTIALS}:/app/gcp-credentials.json:ro
     environment:
       - NODE_ENV=production
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/blog_agent?schema=public
       - REDIS_URL=redis://redis:6379
       - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT:-}
-      - GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS:-}
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/gcp-credentials.json
       - VERTEX_LOCATION=${VERTEX_LOCATION:-us-central1}
       - VERTEX_FLASH=${VERTEX_FLASH:-gemini-2.5-flash}
     depends_on:
@@ -118,17 +155,20 @@ services:
       dockerfile: docker/Dockerfile.worker
     container_name: blog-agent-writing-worker
     command: ["node_modules/.bin/tsx", "workers/writing-worker/index.ts"]
+    volumes:
+      - ${GOOGLE_APPLICATION_CREDENTIALS}:/app/gcp-credentials.json:ro
     environment:
       - NODE_ENV=production
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/blog_agent?schema=public
       - REDIS_URL=redis://redis:6379
       - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT:-}
-      - GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS:-}
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/gcp-credentials.json
       - VERTEX_LOCATION=${VERTEX_LOCATION:-us-central1}
       - VERTEX_MODEL=${VERTEX_MODEL:-gemini-2.5-pro}
       - VERTEX_FLASH=${VERTEX_FLASH:-gemini-2.5-flash}
       - BLOG_MIN_WORDS=${BLOG_MIN_WORDS:-1200}
       - BLOG_MAX_WORDS=${BLOG_MAX_WORDS:-2000}
+      - WRITING_TIMEOUT_MS=${WRITING_TIMEOUT_MS:-120000}
     depends_on:
       - postgres
       - redis
@@ -149,14 +189,16 @@ services:
       dockerfile: docker/Dockerfile.worker
     container_name: blog-agent-image-worker
     command: ["node_modules/.bin/tsx", "workers/image-worker/index.ts"]
+    volumes:
+      - ${GOOGLE_APPLICATION_CREDENTIALS}:/app/gcp-credentials.json:ro
     environment:
       - NODE_ENV=production
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/blog_agent?schema=public
       - REDIS_URL=redis://redis:6379
       - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT:-}
-      - GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS:-}
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/gcp-credentials.json
       - VERTEX_LOCATION=${VERTEX_LOCATION:-us-central1}
-      - VERTEX_IMAGE_MODEL=${VERTEX_IMAGE_MODEL:-imagen-4.0-generate-001}
+      - VERTEX_IMAGE_MODEL=${VERTEX_IMAGE_MODEL:-gemini-2.5-flash-image}
       - IMAGE_AI_GENERATION_ENABLED=${IMAGE_AI_GENERATION_ENABLED:-true}
       - AWS_REGION=${AWS_REGION:-us-east-1}
       - AWS_ACCESS_KEY=${AWS_ACCESS_KEY:-}
@@ -178,12 +220,14 @@ services:
       dockerfile: docker/Dockerfile.worker
     container_name: blog-agent-quality-worker
     command: ["node_modules/.bin/tsx", "workers/quality-worker/index.ts"]
+    volumes:
+      - ${GOOGLE_APPLICATION_CREDENTIALS}:/app/gcp-credentials.json:ro
     environment:
       - NODE_ENV=production
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/blog_agent?schema=public
       - REDIS_URL=redis://redis:6379
       - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT:-}
-      - GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS:-}
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/gcp-credentials.json
       - VERTEX_LOCATION=${VERTEX_LOCATION:-us-central1}
       - VERTEX_FLASH=${VERTEX_FLASH:-gemini-2.5-flash}
     depends_on:
