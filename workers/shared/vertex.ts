@@ -1,4 +1,4 @@
-import { GoogleGenAI, type GenerateContentConfig, type GenerateImagesConfig, type SchemaUnion } from "@google/genai";
+import { GoogleGenAI, type GenerateContentConfig, type SchemaUnion } from "@google/genai";
 import { env, isVertexConfigured } from "./env";
 
 export type VertexJsonResult<T> = {
@@ -38,6 +38,8 @@ export type VertexJsonOptions = {
   schema?: SchemaUnion;
   maxOutputTokens?: number;
   temperature?: number;
+  /** Overrides withVertexTimeout's 30s default - e.g. research-worker's semantic pass uses a longer one for large batches. */
+  timeoutMs?: number;
 };
 
 /**
@@ -82,7 +84,8 @@ export async function generateVertexJson<T>(
       model: modelName,
       contents: prompt,
       config,
-    })
+    }),
+    options.timeoutMs
   );
 
   const text = result.text;
@@ -120,8 +123,12 @@ export type VertexImageOptions = {
 };
 
 /**
- * Imagen calls run noticeably slower than a text/JSON completion, so this
- * gets its own default timeout instead of reusing withVertexTimeout's 30s.
+ * Uses Gemini's generateContent (responseModalities: ["IMAGE"]) rather than
+ * the Imagen predict API - keeps hero-image generation on the same endpoint
+ * as the rest of the Gemini calls in this file instead of the separately
+ * Model-Garden-gated Imagen publisher models. Runs noticeably slower than a
+ * text/JSON completion, so this gets its own default timeout instead of
+ * reusing withVertexTimeout's 30s.
  */
 export async function generateVertexImage(
   modelName: string,
@@ -129,27 +136,33 @@ export async function generateVertexImage(
   options: VertexImageOptions = {}
 ): Promise<VertexImageResult> {
   const ai = vertexClient();
-  const config: GenerateImagesConfig = {
-    numberOfImages: 1,
-    aspectRatio: options.aspectRatio ?? "16:9",
-    outputMimeType: "image/jpeg",
-    ...(options.negativePrompt ? { negativePrompt: options.negativePrompt } : {}),
-  };
+  const fullPrompt = options.negativePrompt ? `${prompt}\n\nAvoid: ${options.negativePrompt}.` : prompt;
 
   const result = await withVertexTimeout(
-    ai.models.generateImages({ model: modelName, prompt, config }),
+    ai.models.generateContent({
+      model: modelName,
+      contents: fullPrompt,
+      config: {
+        responseModalities: ["IMAGE"],
+        imageConfig: {
+          aspectRatio: options.aspectRatio ?? "16:9",
+          outputMimeType: "image/jpeg",
+        },
+      },
+    }),
     options.timeoutMs ?? 90000
   );
 
-  const image = result.generatedImages?.[0]?.image;
-  if (!image?.imageBytes) {
-    const filtered = result.generatedImages?.[0]?.raiFilteredReason;
-    throw new Error(filtered ? `Vertex image filtered: ${filtered}` : "Vertex returned no image bytes");
+  const parts = result.candidates?.[0]?.content?.parts ?? [];
+  const imagePart = parts.find((part) => part.inlineData?.data);
+  if (!imagePart?.inlineData?.data) {
+    const blockReason = result.candidates?.[0]?.finishReason;
+    throw new Error(blockReason ? `Vertex image blocked: ${blockReason}` : "Vertex returned no image bytes");
   }
 
   return {
-    buffer: Buffer.from(image.imageBytes, "base64"),
-    mimeType: image.mimeType ?? "image/jpeg",
+    buffer: Buffer.from(imagePart.inlineData.data, "base64"),
+    mimeType: imagePart.inlineData.mimeType ?? "image/jpeg",
   };
 }
 
@@ -157,6 +170,7 @@ export type VertexVisionOptions = {
   temperature?: number;
   maxOutputTokens?: number;
   schema?: SchemaUnion;
+  timeoutMs?: number;
 };
 
 /**
@@ -188,7 +202,8 @@ export async function generateVertexVisionJson<T>(
         },
       ],
       config,
-    })
+    }),
+    options.timeoutMs
   );
 
   const text = result.text;
@@ -225,7 +240,8 @@ export async function generateVertexText(
         temperature: options.temperature ?? 0.45,
         ...(options.maxOutputTokens ? { maxOutputTokens: options.maxOutputTokens } : {}),
       },
-    })
+    }),
+    options.timeoutMs
   );
 
   const text = result.text;
