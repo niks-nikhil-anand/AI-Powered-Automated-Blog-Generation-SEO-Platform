@@ -2,8 +2,20 @@
 
 import React, { useEffect, useState } from "react";
 
+type Notice = {
+  title: string;
+  message: string;
+  tone: "amber" | "indigo";
+};
+
+const NOTICE_TONE_STYLES: Record<Notice["tone"], { fg: string; bg: string; bd: string }> = {
+  amber: { fg: "var(--amber)", bg: "rgba(245,158,11,0.12)", bd: "rgba(245,158,11,0.3)" },
+  indigo: { fg: "var(--indigo)", bg: "rgba(99,102,241,0.12)", bd: "rgba(99,102,241,0.3)" },
+};
+
 export default function WorkersPage() {
   const [selectedStack, setSelectedStack] = useState<string | null>(null);
+  const [notice, setNotice] = useState<Notice | null>(null);
   const [queues, setQueues] = useState<{
     name: string;
     waiting: string;
@@ -69,14 +81,26 @@ export default function WorkersPage() {
         <div className="flex gap-[7px]">
           <button
             aria-label="Pause all queues"
-            onClick={() => alert("Paused all 7 BullMQ queues!")}
+            onClick={() =>
+              setNotice({
+                title: "Queues paused",
+                message: `Paused all ${queues.length} BullMQ queue${queues.length === 1 ? "" : "s"}!`,
+                tone: "amber",
+              })
+            }
             className="h-[30px] px-[12px] rounded-[8px] border border-[var(--bd)] bg-[var(--card)] text-[var(--amber)] text-[11.5px] font-semibold hover:border-[var(--amber)] transition-colors"
           >
             Pause all
           </button>
           <button
             aria-label="Retry all failed jobs"
-            onClick={() => alert("Retrying all failed BullMQ jobs...")}
+            onClick={() =>
+              setNotice({
+                title: "Retrying failed jobs",
+                message: "Retrying all failed BullMQ jobs...",
+                tone: "indigo",
+              })
+            }
             className="h-[30px] px-[12px] rounded-[8px] border border-transparent bg-[var(--indigo)] text-white text-[11.5px] font-semibold hover:bg-[#4f46e5] transition-colors"
           >
             Retry all failed
@@ -222,6 +246,48 @@ export default function WorkersPage() {
           </table>
         </div>
       </div>
+
+      {/* Action Notice Modal - confirms Pause all / Retry all failed instead of a browser alert() */}
+      {notice && (
+        <div
+          className="fixed inset-0 z-50 bg-[rgba(2,6,23,0.6)] backdrop-blur-sm flex items-center justify-center p-[16px] animate-dkfade"
+          onClick={() => setNotice(null)}
+        >
+          <div
+            className="w-full max-w-[380px] bg-[var(--card)] border border-[var(--bd)] rounded-[14px] shadow-[var(--shadow)] overflow-hidden p-[16px]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start gap-[10px]">
+              <span
+                className="w-[30px] h-[30px] rounded-[9px] flex-none flex items-center justify-center text-[15px] font-bold"
+                style={{
+                  background: NOTICE_TONE_STYLES[notice.tone].bg,
+                  color: NOTICE_TONE_STYLES[notice.tone].fg,
+                  border: `1px solid ${NOTICE_TONE_STYLES[notice.tone].bd}`,
+                }}
+              >
+                {notice.tone === "amber" ? "‖" : "↻"}
+              </span>
+              <div className="flex-1 pt-[2px]">
+                <div className="font-bold text-[13px] text-[var(--fg)]">{notice.title}</div>
+                <div className="text-[12px] text-[var(--fg2)] mt-[3px]">{notice.message}</div>
+              </div>
+              <button
+                onClick={() => setNotice(null)}
+                className="text-[12px] font-bold text-[var(--mut)] hover:text-[var(--fg)]"
+              >
+                ✕
+              </button>
+            </div>
+            <button
+              onClick={() => setNotice(null)}
+              className="w-full h-[32px] mt-[14px] rounded-[8px] border border-transparent bg-[var(--indigo)] text-white text-[11.5px] font-semibold hover:bg-[#4f46e5] transition-colors"
+            >
+              Done
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Stack Trace Modal */}
       {selectedStack && (
