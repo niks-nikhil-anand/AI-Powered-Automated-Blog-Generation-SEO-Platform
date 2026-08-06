@@ -111,7 +111,10 @@ async function generateBlogForTrend(trendId: string, topic: string, description:
   });
   const trend = await prisma.trend.findUnique({ where: { id: trendId } });
   if (!trend) throw new Error(`Trend ${trendId} not found`);
-  if (trend.score < env.RESEARCH_MIN_SCORE_TO_WRITE) {
+  // manuallyApproved lets a human-approved below-threshold trend (see
+  // app/api/trends/[id]/approve) survive this gate the same way
+  // planning-worker's and outline-worker's identical checks do.
+  if (trend.score < env.RESEARCH_MIN_SCORE_TO_WRITE && !trend.manuallyApproved) {
     log.info(`Skipping blog generation for "${trend.topic}" because score ${Math.round(trend.score)} is below ${env.RESEARCH_MIN_SCORE_TO_WRITE}`, {
       trendId,
       score: trend.score,
