@@ -33,14 +33,13 @@ export const env = {
   VERTEX_IMAGE_MODEL: optional("VERTEX_IMAGE_MODEL", "gemini-2.5-flash-image"),
 
   /**
-   * Kill switch for real Imagen generation in image-worker (see
+   * Kill switch for real AI hero-image generation in image-worker (see
    * IMPLEMENTATION_PLAN.md's hero-image-quality addendum). Off falls back
    * to the pre-existing procedural SVG generator, same pattern as
    * RESEARCH_SEMANTIC_ENABLED below. Default on: at TRENDS_TO_WRITE_PER_RUN=5
    * x 3 runs/day, the worst case (every image collides on the uniqueness
-   * check and retries 3x) is ~45 Imagen calls/day; imagen-4.0-generate-001
-   * is billed per image (~$0.04 at standard tier as of Aug 2026), so that
-   * ceiling is roughly $1.80/day even before any collisions are avoided.
+   * check and retries 3x) is ~45 image-generation calls/day against
+   * VERTEX_IMAGE_MODEL (gemini-2.5-flash-image), billed per generated image.
    */
   IMAGE_AI_GENERATION_ENABLED: optional("IMAGE_AI_GENERATION_ENABLED", "true") !== "false",
 
