@@ -115,13 +115,17 @@ export async function runResearch() {
     const since = startOfToday();
     const duplicateCutoff = recentDuplicateCutoff();
     const created: { id: string; topic: string; category: string; description: string; score: number }[] = [];
+    let duplicateSkippedCount = 0;
 
     for (const item of promotable) {
       const alreadySavedToday = await prisma.trend.findFirst({
         where: { topic: item.title, createdAt: { gte: since } },
         select: { id: true },
       });
-      if (alreadySavedToday) continue;
+      if (alreadySavedToday) {
+        duplicateSkippedCount += 1;
+        continue;
+      }
 
       const recentDuplicate = await prisma.trend.findFirst({
         where: {
@@ -130,7 +134,10 @@ export async function runResearch() {
         },
         select: { id: true },
       });
-      if (recentDuplicate) continue;
+      if (recentDuplicate) {
+        duplicateSkippedCount += 1;
+        continue;
+      }
 
       const description = candidateDescription(item);
       const trend = await prisma.trend.create({
@@ -168,7 +175,14 @@ export async function runResearch() {
       .filter((trend) => trend.score >= env.RESEARCH_MIN_SCORE_TO_WRITE)
       .sort((a, b) => b.score - a.score)
       .slice(0, Math.max(1, env.TRENDS_TO_WRITE_PER_RUN));
-    const bestScore = Math.max(0, ...created.map((trend) => trend.score));
+    // Best score among everything this run *found* (promotable), not just
+    // what got newly saved (created). `created` is empty whenever every
+    // promotable candidate turned out to be a duplicate of something already
+    // saved minutes or days earlier - that used to report "best: 0" and read
+    // as "nothing scored well this run" when the real story was "nothing NEW
+    // was found." duplicateSkippedCount below makes that distinction explicit
+    // instead of silently folding it into the same number.
+    const bestScore = Math.max(0, ...promotable.map((item) => item.score));
 
     if (topN.length === 0) {
       const output = {
@@ -176,12 +190,15 @@ export async function runResearch() {
         clusterCount: clusters.length,
         promotableCount: promotable.length,
         savedCount: created.length,
+        duplicateSkippedCount,
         dispatchedCount: 0,
         failedSources,
         reason: "no_new_topic_above_write_threshold",
       };
       log.info(
-        `No new topic reached score ${env.RESEARCH_MIN_SCORE_TO_WRITE} (best: ${Math.round(bestScore)}, ${created.length} saved) - nothing dispatched`,
+        duplicateSkippedCount > 0
+          ? `No new topic dispatched (best candidate scored ${Math.round(bestScore)}; ${created.length} newly saved, ${duplicateSkippedCount}/${promotable.length} already saved today or recently)`
+          : `No new topic reached score ${env.RESEARCH_MIN_SCORE_TO_WRITE} (best: ${Math.round(bestScore)}, ${created.length} saved) - nothing dispatched`,
         output
       );
       await passWorkerAttempt({
@@ -192,7 +209,11 @@ export async function runResearch() {
           stage: "research-worker",
           score: bestScore,
           passed: true,
-          reasons: [`No newly-created topic reached score ${env.RESEARCH_MIN_SCORE_TO_WRITE}`],
+          reasons: [
+            duplicateSkippedCount > 0
+              ? `${duplicateSkippedCount}/${promotable.length} candidate(s) were already saved today or recently; best candidate scored ${Math.round(bestScore)}`
+              : `No newly-created topic reached score ${env.RESEARCH_MIN_SCORE_TO_WRITE}`,
+          ],
         },
         nextStage: "stopped",
       });
