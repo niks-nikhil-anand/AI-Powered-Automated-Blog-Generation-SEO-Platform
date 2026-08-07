@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Eye } from "lucide-react";
 import { BlogDetailModal, BlogItem } from "@/components/shared/BlogDetailModal";
+import { OverridePublishModal } from "@/components/shared/OverridePublishModal";
 import { QualityFlowDiagram, type QualityFlowData } from "@/components/shared/QualityFlowDiagram";
 import { DataTable } from "@/components/ui/DataTable";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -78,6 +79,7 @@ export default function QualityAuditPage() {
   const [detailTab, setDetailTab] = useState<"seo" | "quality">("quality");
   const [rowPending, setRowPending] = useState<string | null>(null);
   const [rowMessages, setRowMessages] = useState<Record<string, { text: string; tone: "ok" | "error" }>>({});
+  const [overrideTarget, setOverrideTarget] = useState<BlogItem | null>(null);
 
   const refresh = () => {
     fetch("/api/dashboard", { cache: "no-store" })
@@ -143,25 +145,26 @@ export default function QualityAuditPage() {
     }
   };
 
-  const handleOverride = async (row: BlogItem) => {
+  const handleOverride = (row: BlogItem) => {
     if (!row.id || rowPending) return;
-    const input = window.prompt(
-      `Override the quality gate and publish "${row.title}" (score ${row.quality ?? 0}/100)? Enter a reason:`
-    );
-    if (!input || !input.trim()) return;
+    setOverrideTarget(row);
+  };
+
+  const handleOverrideConfirm = async (reason: string) => {
+    const row = overrideTarget;
+    if (!row?.id) return;
     setRowPending(row.id);
     try {
       const res = await fetch(`/api/blogs/${row.id}/override-publish`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reason: input.trim() }),
+        body: JSON.stringify({ reason }),
       });
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || "Failed to publish");
       setRowMessage(row.id, "Published.", "ok");
+      setOverrideTarget(null);
       refresh();
-    } catch (err) {
-      setRowMessage(row.id, err instanceof Error ? err.message : "Failed to publish", "error");
     } finally {
       setRowPending(null);
     }
@@ -770,6 +773,21 @@ export default function QualityAuditPage() {
         onClose={() => setDetailOpen(false)}
         initialTab={detailTab}
         onActionComplete={refresh}
+      />
+
+      <OverridePublishModal
+        isOpen={overrideTarget !== null}
+        title={overrideTarget?.title ?? ""}
+        report={
+          overrideTarget?.qualityReport
+            ? {
+                overallScore: overrideTarget.qualityReport.overallScore,
+                recommendation: overrideTarget.qualityReport.recommendation,
+              }
+            : null
+        }
+        onClose={() => setOverrideTarget(null)}
+        onConfirm={handleOverrideConfirm}
       />
     </div>
   );

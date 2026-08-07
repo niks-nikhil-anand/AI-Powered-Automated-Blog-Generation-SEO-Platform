@@ -11,6 +11,7 @@ import {
   startWorkerAttempt,
   QualityGateError,
 } from "../shared/recovery";
+import { reconcileDailyTarget } from "../shared/daily-target";
 
 const log = logger.child({ worker: "publish-worker" });
 
@@ -39,10 +40,24 @@ export async function publishBlog(payload: PublishJobPayload) {
     ]);
     assertGate(gate);
 
-    const published = await prisma.blog.update({
-      where: { id: blog.id },
+    // Guards against double-processing a redelivered job (e.g. after a
+    // crash between the DB write and the BullMQ ack) re-running side
+    // effects a second time - `count` is 0 when another run already won.
+    const { count } = await prisma.blog.updateMany({
+      where: { id: blog.id, status: { not: "PUBLISHED" } },
       data: { status: "PUBLISHED" },
     });
+    if (count === 0) {
+      log.info(`Blog ${blog.id} already published, skipping`);
+      await passWorkerAttempt({
+        workflowRunId: attempt.workflow.id,
+        attemptId: attempt.attempt.id,
+        output: { blogId: blog.id, status: "PUBLISHED", score: blog.qualityReport.overallScore, published: true, alreadyPublished: true },
+        qualityReport: gate,
+      });
+      return { blogId: blog.id, status: "PUBLISHED", score: blog.qualityReport.overallScore, published: true };
+    }
+    const published = { ...blog, status: "PUBLISHED" as const };
     await passWorkerAttempt({
       workflowRunId: attempt.workflow.id,
       attemptId: attempt.attempt.id,
@@ -74,6 +89,12 @@ export async function publishBlog(payload: PublishJobPayload) {
       error: err,
       qualityReport: err instanceof QualityGateError ? err.report : undefined,
     });
+    // A publish failure takes this blog out of today's count just like a
+    // permanent QA failure would - top up from backlog immediately rather
+    // than waiting for the next scheduled reconcile tick.
+    await reconcileDailyTarget().catch((reconcileErr) =>
+      log.error(`Daily target reconcile failed after publish failure: ${reconcileErr.message}`)
+    );
     throw err;
   }
 }
