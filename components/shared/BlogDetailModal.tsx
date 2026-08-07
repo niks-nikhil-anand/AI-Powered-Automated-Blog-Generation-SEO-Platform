@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import { SeoSnippetPreview } from "./SeoSnippetPreview";
+import { OverridePublishModal } from "./OverridePublishModal";
 import {
   META_DESCRIPTION_BUDGET,
   META_TITLE_BUDGET,
@@ -110,6 +111,7 @@ export function BlogDetailModal({ blog, isOpen, onClose, initialTab, onActionCom
   const [activeTab, setActiveTab] = useState<DetailTab>(initialTab ?? "overview");
   const [actionPending, setActionPending] = useState<"requeue-quality" | "publish" | null>(null);
   const [actionMessage, setActionMessage] = useState<{ text: string; tone: "ok" | "error" } | null>(null);
+  const [overrideModalOpen, setOverrideModalOpen] = useState(false);
   const tabs: { key: typeof activeTab; label: string }[] = [
     { key: "overview", label: "Overview" },
     { key: "seo", label: "SEO & Meta" },
@@ -138,6 +140,7 @@ export function BlogDetailModal({ blog, isOpen, onClose, initialTab, onActionCom
   if (!isOpen || !blog) return null;
 
   const writingAttempts = blog.workflow?.attempts.filter((attempt) => attempt.worker === "writing-worker").length ?? 0;
+  const hasQualityReport = Boolean(blog.qualityReport);
   const qualityPassed = blog.qualityReport?.passed ?? false;
   const retryLimit = 4;
 
@@ -159,17 +162,33 @@ export function BlogDetailModal({ blog, isOpen, onClose, initialTab, onActionCom
   };
 
   const handlePublish = async () => {
-    if (!blog.id || actionPending) return;
-    let reason = "Published from dashboard (quality gate passed).";
+    if (!blog.id || actionPending || !hasQualityReport) return;
     if (!qualityPassed) {
-      const input = window.prompt(
-        `This article scored ${blog.quality ?? 0}/100 and hasn't passed the quality gate (>= 90). Enter a reason to override the gate and publish anyway:`
-      );
-      if (!input || !input.trim()) return;
-      reason = input.trim();
+      setOverrideModalOpen(true);
+      return;
     }
     setActionPending("publish");
     setActionMessage(null);
+    try {
+      const res = await fetch(`/api/blogs/${blog.id}/override-publish`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: "Published from dashboard (quality gate passed)." }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || "Failed to publish");
+      setActionMessage({ text: "Published.", tone: "ok" });
+      onActionComplete?.();
+    } catch (err) {
+      setActionMessage({ text: err instanceof Error ? err.message : "Failed to publish", tone: "error" });
+    } finally {
+      setActionPending(null);
+    }
+  };
+
+  const handleOverrideConfirm = async (reason: string) => {
+    if (!blog.id) return;
+    setActionPending("publish");
     try {
       const res = await fetch(`/api/blogs/${blog.id}/override-publish`, {
         method: "POST",
@@ -179,9 +198,8 @@ export function BlogDetailModal({ blog, isOpen, onClose, initialTab, onActionCom
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || "Failed to publish");
       setActionMessage({ text: "Published.", tone: "ok" });
+      setOverrideModalOpen(false);
       onActionComplete?.();
-    } catch (err) {
-      setActionMessage({ text: err instanceof Error ? err.message : "Failed to publish", tone: "error" });
     } finally {
       setActionPending(null);
     }
@@ -302,12 +320,26 @@ export function BlogDetailModal({ blog, isOpen, onClose, initialTab, onActionCom
             </button>
             <button
               aria-label="Publish article"
-              disabled={actionPending !== null || blog.status === "Published"}
+              disabled={actionPending !== null || blog.status === "Published" || !hasQualityReport}
               onClick={handlePublish}
-              title={qualityPassed ? "Publish now" : "Score is below the quality gate - publishing requires an override reason"}
+              title={
+                !hasQualityReport
+                  ? "Quality check hasn't run yet - this will auto-publish once it passes"
+                  : qualityPassed
+                    ? "Publish now"
+                    : "Score is below the quality gate - publishing requires an override reason"
+              }
               className="h-[28px] px-[12px] rounded-[8px] border border-transparent bg-[var(--emerald)] text-white text-[11.5px] font-bold hover:bg-emerald-600 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              {actionPending === "publish" ? "Publishing…" : blog.status === "Published" ? "Published" : qualityPassed ? "Publish" : "Override & publish"}
+              {actionPending === "publish"
+                ? "Publishing…"
+                : blog.status === "Published"
+                  ? "Published"
+                  : !hasQualityReport
+                    ? "Awaiting QA"
+                    : qualityPassed
+                      ? "Publish"
+                      : "Override & publish"}
             </button>
             <button
               aria-label="Close detail"
@@ -679,6 +711,17 @@ export function BlogDetailModal({ blog, isOpen, onClose, initialTab, onActionCom
           </div>
         </div>
       </div>
+      <OverridePublishModal
+        isOpen={overrideModalOpen}
+        title={blog.title}
+        report={
+          blog.qualityReport
+            ? { overallScore: blog.qualityReport.overallScore, recommendation: blog.qualityReport.recommendation }
+            : null
+        }
+        onClose={() => setOverrideModalOpen(false)}
+        onConfirm={handleOverrideConfirm}
+      />
     </div>
   );
 }

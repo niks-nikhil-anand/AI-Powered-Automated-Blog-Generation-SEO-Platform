@@ -15,8 +15,23 @@ import {
   trendSourceInitial,
   trendSourceColor,
 } from "@/lib/research-sources";
+import { getDailyTargetStatus } from "@/workers/shared/daily-target";
+import { env } from "@/workers/shared/env";
 
 export const dynamic = "force-dynamic";
+
+function currentHourInTimezone(timezone: string): number {
+  const formatter = new Intl.DateTimeFormat("en-US", { timeZone: timezone, hour: "numeric", hourCycle: "h23" });
+  return Number(formatter.format(new Date()));
+}
+
+/** Checkpoints at 10am/4pm/9pm expect roughly 1/3, 2/3, and all of the daily target published by then. */
+function expectedByNow(target: number, hour: number): number {
+  if (hour < 10) return 0;
+  if (hour < 16) return Math.ceil(target / 3);
+  if (hour < 21) return Math.ceil((target * 2) / 3);
+  return target;
+}
 
 function startOfToday() {
   const date = new Date();
@@ -307,7 +322,13 @@ export async function GET() {
 
   const blogRows = blogs.map((blog) => {
     const status = blogStatusLabel(blog.status);
-    const quality = blog.qualityReport?.overallScore ?? blog.seo?.score ?? 0;
+    // blog.seo.score starts out as writing-worker's own rough placeholder
+    // heuristic (see writing-worker/index.ts) before quality-worker ever
+    // runs - falling back to it here made a not-yet-scored blog display an
+    // unrelated number that could look like a passing quality score while
+    // the real gate (qualityReport.passed) correctly still said "not
+    // passed", which is exactly backwards. Only the real report counts.
+    const quality = blog.qualityReport?.overallScore ?? null;
     const spend = usageByBlog.get(blog.id);
     return {
       id: blog.id,
@@ -316,7 +337,7 @@ export async function GET() {
       cat: blog.category?.name ?? "General",
       words: wordCount(blog.content).toLocaleString(),
       trend: "-",
-      quality: String(quality),
+      quality: quality !== null ? String(quality) : "Pending",
       cost: formatUsd(spend?.cost ?? 0),
       costValue: spend?.cost ?? 0,
       tokens: spend ? compactNumber(spend.tokens) : "-",
@@ -329,8 +350,8 @@ export async function GET() {
       updatedAt: blog.updatedAt.toISOString(),
       createdAtLabel: blog.createdAt.toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
       updatedAtLabel: blog.updatedAt.toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
-      qBg: quality >= 90 ? "rgba(16,185,129,0.14)" : quality > 0 ? "rgba(245,158,11,0.14)" : "var(--card2)",
-      qFg: quality >= 90 ? "var(--emerald)" : quality > 0 ? "var(--amber)" : "var(--fg2)",
+      qBg: quality === null ? "var(--card2)" : quality >= 90 ? "rgba(16,185,129,0.14)" : quality > 0 ? "rgba(245,158,11,0.14)" : "var(--card2)",
+      qFg: quality === null ? "var(--mut)" : quality >= 90 ? "var(--emerald)" : quality > 0 ? "var(--amber)" : "var(--fg2)",
       ...statusStyle(status),
       content: blog.content,
       metaTitle: blog.seo?.metaTitle,
@@ -593,8 +614,8 @@ export async function GET() {
     : 0;
   const qualityReportCount = blogs.filter((blog) => blog.qualityReport).length;
   const qualityScores = blogs
-    .map((blog) => blog.qualityReport?.overallScore ?? blog.seo?.score ?? 0)
-    .filter((score) => score > 0);
+    .map((blog) => blog.qualityReport?.overallScore ?? null)
+    .filter((score): score is number => score !== null);
   const avgQuality =
     qualityScores.length > 0
       ? Math.round(qualityScores.reduce((sum, score) => sum + score, 0) / qualityScores.length)
@@ -690,6 +711,10 @@ export async function GET() {
     { active: 0, waiting: 0, delayed: 0, failed: 0, completed: 0 }
   );
 
+  const dailyTargetStatus = await getDailyTargetStatus();
+  const expectedPublishedByNow = expectedByNow(dailyTargetStatus.target, currentHourInTimezone(env.TIMEZONE));
+  const behindPace = dailyTargetStatus.publishedToday < expectedPublishedByNow;
+
   return NextResponse.json({
     metrics: {
       blogCount,
@@ -708,7 +733,12 @@ export async function GET() {
       totalTokensToday,
       aiCallsToday: usageToday.length,
       avgLatencyToday,
-      dailyTarget: Number(process.env.DAILY_BLOG_TARGET ?? 3),
+      dailyTarget: dailyTargetStatus.target,
+      dailyTargetRemaining: dailyTargetStatus.remaining,
+      dailyTargetInFlight: dailyTargetStatus.inFlight,
+      dailyTargetBacklogAvailable: dailyTargetStatus.backlogAvailable,
+      behindPace,
+      expectedPublishedByNow,
     },
     analytics: {
       cost: {
