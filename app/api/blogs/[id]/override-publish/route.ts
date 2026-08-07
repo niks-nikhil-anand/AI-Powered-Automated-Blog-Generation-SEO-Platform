@@ -43,6 +43,34 @@ export async function POST(request: Request, context: RouteContext) {
       return NextResponse.json({ ok: false, error: "This article is already published." }, { status: 409 });
     }
 
+    const report = blog.qualityReport;
+    if (!report) {
+      return NextResponse.json(
+        { ok: false, error: "This article hasn't been quality-scored yet - it will auto-publish if it passes, once quality-worker runs." },
+        { status: 422 }
+      );
+    }
+
+    // Override is a manual pass for borderline articles only - never a
+    // backdoor to hit a publishing target. Below 85, or blocked by the
+    // fact-check hard gate (see quality-worker/scorer.ts), needs a real
+    // rewrite instead. A report with `passed: true` skips these checks -
+    // that's the normal "publish now" path, not an override.
+    if (!report.passed) {
+      if (report.recommendation === "Blocked - unverified facts") {
+        return NextResponse.json(
+          { ok: false, error: "Override isn't available - the fact-check found unsupported claims. This needs a rewrite, not a manual pass." },
+          { status: 422 }
+        );
+      }
+      if (report.overallScore < 85) {
+        return NextResponse.json(
+          { ok: false, error: `Override isn't available below a score of 85 (this article scored ${report.overallScore}) - it needs a rewrite, not a manual pass.` },
+          { status: 422 }
+        );
+      }
+    }
+
     if (!reason) {
       return NextResponse.json(
         { ok: false, error: "A reason is required to override the quality gate." },

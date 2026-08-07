@@ -146,6 +146,8 @@ export default function ExecutiveDashboard({ onOpenBlogModal, onOpenRunPipeline 
     aiCallsToday: 0,
     avgLatencyToday: 0,
     dailyTarget: 3,
+    behindPace: false,
+    expectedPublishedByNow: 0,
   });
   const [stageCounts, setStageCounts] = useState({
     research: 0,
@@ -368,6 +370,20 @@ export default function ExecutiveDashboard({ onOpenBlogModal, onOpenRunPipeline 
           <div>
             <span className="font-semibold">Dashboard Error:</span> {loadError}
             <div className="text-[11px] text-[var(--faint)] mt-[4px]">Data will refresh automatically when connection is restored.</div>
+          </div>
+        </div>
+      )}
+
+      {/* Pacing Banner */}
+      {dashboardMetrics.behindPace && (
+        <div className="rounded-[8px] border border-[var(--amber)] bg-[rgba(245,158,11,0.08)] p-[10px_14px] text-[12px] text-[var(--amber)] flex items-start gap-[10px]">
+          <span className="text-[14px] leading-none flex-shrink-0">⚠️</span>
+          <div>
+            <span className="font-semibold">Behind pace:</span> {dashboardMetrics.todayPublishedCount}/{dailyTarget}{" "}
+            published, expected {dashboardMetrics.expectedPublishedByNow} by now.
+            <div className="text-[11px] text-[var(--faint)] mt-[4px]">
+              The reconciler tops up from the backlog automatically - this just flags it so you know before the day is over.
+            </div>
           </div>
         </div>
       )}
