@@ -103,7 +103,13 @@ function writingGate(markdown: string, evidenceSummary?: string | null): Quality
   };
 }
 
-async function generateBlogForTrend(trendId: string, topic: string, description: string, outlineId?: string) {
+async function generateBlogForTrend(
+  trendId: string,
+  topic: string,
+  description: string,
+  outlineId?: string,
+  recoveryContext?: WritingJobPayload["recoveryContext"]
+) {
   const attempt = await startWorkerAttempt({
     worker: "writing-worker",
     trendId,
@@ -144,6 +150,8 @@ async function generateBlogForTrend(trendId: string, topic: string, description:
     mode: isVertexConfigured ? "vertex" : "fallback",
   });
 
+  const priorReport = recoveryContext?.qualityReport as QualityGateReport | undefined;
+
   try {
     const startedAt = Date.now();
     const draft = await generateBlogDraft(topic, description, {
@@ -158,6 +166,7 @@ async function generateBlogForTrend(trendId: string, topic: string, description:
           }
         : undefined,
       evidenceSummary: trend.evidenceSummary ?? undefined,
+      priorAttempt: priorReport ? { score: priorReport.score, reasons: priorReport.reasons } : undefined,
     });
     const latencyMs = Date.now() - startedAt;
 
@@ -265,8 +274,8 @@ export function startWritingWorker() {
   const worker = new Worker(
     QUEUE_NAMES.writing,
     async (job) => {
-      const { trendId, topic, description, outlineId } = job.data as WritingJobPayload;
-      return generateBlogForTrend(trendId, topic, description, outlineId);
+      const { trendId, topic, description, outlineId, recoveryContext } = job.data as WritingJobPayload;
+      return generateBlogForTrend(trendId, topic, description, outlineId, recoveryContext);
     },
     workerOptions(1)
   );
