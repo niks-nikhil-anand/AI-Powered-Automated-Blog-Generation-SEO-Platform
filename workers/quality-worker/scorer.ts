@@ -286,10 +286,22 @@ export async function scoreBlogQuality(blog: BlogForQuality) {
   const rawSum = checks.reduce((sum, check) => sum + check.score, 0);
   const overallScore = Math.round((rawSum / (checks.length * 10)) * 100);
 
+  // A hard gate independent of the averaged score - 10 good checks
+  // shouldn't be able to outvote a fact-check that actually ran and found
+  // problems. Fails open (factCheckOk = true) when there was nothing to
+  // check against or the Vertex call itself failed, same "not the draft's
+  // fault" philosophy as citationCheck in writing-worker/index.ts - this
+  // gate is about claims found to be wrong, not about missing evidence.
+  // 70 (not 100) tolerates the occasional "uncertain" verdict rather than
+  // demanding every single claim read as fully "supported".
+  const CRITICAL_FACT_CHECK_THRESHOLD = 70;
+  const factCheckOk = !factCheck || factCheck.score >= CRITICAL_FACT_CHECK_THRESHOLD;
+  const passed = overallScore >= 90 && factCheckOk;
+
   return {
     overallScore,
-    passed: overallScore >= 90,
-    recommendation: recommendation(overallScore),
+    passed,
+    recommendation: !factCheckOk ? "Blocked - unverified facts" : recommendation(overallScore),
     checks,
     scores: {
       seoStructure: checks[0].score,
