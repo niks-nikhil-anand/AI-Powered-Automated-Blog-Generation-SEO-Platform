@@ -10,6 +10,7 @@ import {
   startWorkerAttempt,
   type QualityGateReport,
 } from "../shared/recovery";
+import { reconcileDailyTarget } from "../shared/daily-target";
 
 const log = logger.child({ worker: "quality-worker" });
 
@@ -63,10 +64,14 @@ export async function runQualityCheck(payload: QualityJobPayload) {
   };
 
   if (report.passed) {
-    await publishQueue.add("publish_blog", {
-      blogId: blog.id,
-      qualityReportId: saved.id,
-    });
+    // Deterministic jobId - BullMQ refuses a second enqueue for the same
+    // id outright, the idiomatic equivalent of a `publish:{blogId}:{date}`
+    // idempotency key without hand-rolling a Redis check.
+    await publishQueue.add(
+      "publish_blog",
+      { blogId: blog.id, qualityReportId: saved.id },
+      { jobId: `publish-${blog.id}` }
+    );
     await passWorkerAttempt({
       workflowRunId: attempt.workflow.id,
       attemptId: attempt.attempt.id,
@@ -112,10 +117,19 @@ export async function runQualityCheck(payload: QualityJobPayload) {
         qualityReport: gate,
       });
     }
+    const permanentlyFailed = !(lastWritingInput && writingAttemptCount < 4);
     await prisma.blog.update({
       where: { id: blog.id },
-      data: { status: lastWritingInput && writingAttemptCount < 4 ? "PENDING_REVIEW" : "FAILED" },
+      data: { status: permanentlyFailed ? "FAILED" : "PENDING_REVIEW" },
     });
+    if (permanentlyFailed) {
+      // A dead article must not shrink today's target - immediately try to
+      // backfill from the backlog instead of waiting for the next scheduled
+      // reconcile tick. See workers/shared/daily-target.ts.
+      await reconcileDailyTarget().catch((err) =>
+        log.error(`Daily target reconcile failed after permanent QA failure: ${err.message}`)
+      );
+    }
   }
 
   log.info(`Quality report saved for "${blog.title}"`, {
