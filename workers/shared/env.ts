@@ -60,6 +60,8 @@ export const env = {
   RESEARCH_CRON_OVERNIGHT: optional("RESEARCH_CRON_OVERNIGHT", "30 6 * * *"),
   RESEARCH_CRON_MIDDAY: optional("RESEARCH_CRON_MIDDAY", "0 14 * * *"),
   RESEARCH_CRON_US_DAYTIME: optional("RESEARCH_CRON_US_DAYTIME", "30 23 * * *"),
+  /** Daily Target Controller safety-net tick - see workers/shared/daily-target.ts. */
+  RECONCILE_CRON: optional("RECONCILE_CRON", "*/30 * * * *"),
   /** @deprecated Superseded by the three RESEARCH_CRON_* slots. */
   RESEARCH_CRON: required("RESEARCH_CRON"),
   /** Only the process with this set registers job schedulers. */

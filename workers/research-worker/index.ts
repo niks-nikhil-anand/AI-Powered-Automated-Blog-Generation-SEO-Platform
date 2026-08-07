@@ -1,9 +1,10 @@
-import { Worker } from "bullmq";
+import { Worker, Job } from "bullmq";
 import { planningQueue, researchQueue, QUEUE_NAMES } from "../shared/queues";
 import { prisma } from "../shared/prisma";
 import { logger } from "../shared/logger";
 import { env } from "../shared/env";
 import { workerOptions } from "../shared/worker-options";
+import { reconcileDailyTarget } from "../shared/daily-target";
 import { getEnabledSources } from "./sources";
 import { normalizeSignals } from "./pipeline/normalize";
 import { dedupeSignals } from "./pipeline/dedupe";
@@ -279,6 +280,8 @@ const RESEARCH_SLOTS = [
   { id: "research-us-daytime", pattern: env.RESEARCH_CRON_US_DAYTIME, label: "US daytime" },
 ] as const;
 
+const RECONCILE_SLOT_ID = "daily-target-reconcile";
+
 async function registerSchedules() {
   if (!env.SCHEDULER_ENABLED) {
     log.info("SCHEDULER_ENABLED=false - skipping schedule registration");
@@ -303,10 +306,20 @@ async function registerSchedules() {
     log.info(`Registered "${slot.label}" schedule "${slot.pattern}" (${env.TIMEZONE})`);
   }
 
+  // Daily Target Controller safety net - reuses this queue rather than
+  // standing up a new one, distinguished from the research slots above by
+  // job name (see startResearchWorker's job router below).
+  await researchQueue.upsertJobScheduler(
+    RECONCILE_SLOT_ID,
+    { pattern: env.RECONCILE_CRON, tz: env.TIMEZONE },
+    { name: "reconcile-daily-target", data: {} }
+  );
+  log.info(`Registered daily-target reconcile schedule "${env.RECONCILE_CRON}" (${env.TIMEZONE})`);
+
   // Schedulers live in Redis independently of this code, so a renamed or
   // removed slot would otherwise keep firing forever. Reconcile against the
   // desired set - this is what retires the old "daily-research-schedule".
-  const wanted = new Set<string>(RESEARCH_SLOTS.map((slot) => slot.id));
+  const wanted = new Set<string>([...RESEARCH_SLOTS.map((slot) => slot.id), RECONCILE_SLOT_ID]);
   const existing = await researchQueue.getJobSchedulers();
   for (const scheduler of existing) {
     if (scheduler.key && !wanted.has(scheduler.key)) {
@@ -317,9 +330,11 @@ async function registerSchedules() {
 }
 
 export function startResearchWorker() {
-  const worker = new Worker(QUEUE_NAMES.research, () => runResearch(), {
-    ...workerOptions(1),
-  });
+  const worker = new Worker(
+    QUEUE_NAMES.research,
+    (job: Job) => (job.name === "reconcile-daily-target" ? reconcileDailyTarget() : runResearch()),
+    { ...workerOptions(1) }
+  );
 
   worker.on("completed", (job, result) => log.info(`Job ${job.id} completed`, result));
   worker.on("failed", (job, err) => log.error(`Job ${job?.id ?? "?"} failed: ${err.message}`));
