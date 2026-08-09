@@ -8,6 +8,21 @@ import { env, isVertexConfigured } from "../shared/env";
 import { workerOptions } from "../shared/worker-options";
 import { attachUsageToBlog, recordAIUsage } from "../shared/pricing";
 import { AI_BYLINE } from "../shared/branding";
+import { parseEvidenceArticles } from "../shared/evidence";
+import {
+  groundedCitationCheck,
+  materializeCitations,
+  toGroundedSources,
+  type GroundedSource,
+} from "./citations";
+import {
+  findSection,
+  generateSection,
+  joinSections,
+  splitIntoSections,
+  type SectionArticleContext,
+  type SectionSpec,
+} from "./sections";
 import {
   assertGate,
   failWorkerAttempt,
@@ -81,7 +96,11 @@ function citationCheck(markdown: string, evidenceSummary?: string | null): { ok:
   return { ok: found >= required, found, required };
 }
 
-function writingGate(markdown: string, evidenceSummary?: string | null): QualityGateReport {
+function writingGate(
+  markdown: string,
+  evidenceSummary?: string | null,
+  grounded?: { citedMarkers: string[]; sources: GroundedSource[] }
+): QualityGateReport {
   const score = heuristicScore(markdown);
   const reasons: string[] = [];
   if (score < 90) reasons.push(`Heuristic writing score ${score} is below 90`);
@@ -90,9 +109,19 @@ function writingGate(markdown: string, evidenceSummary?: string | null): Quality
   if (!/^##\s+FAQs?/im.test(markdown)) reasons.push("Missing FAQ section");
   if (!/call to action|cta/i.test(markdown)) reasons.push("Missing call to action");
 
-  const citations = citationCheck(markdown, evidenceSummary);
-  if (!citations.ok) {
-    reasons.push(`Cites ${citations.found}/${citations.required} required evidence source URL(s), not just any external link`);
+  if (grounded) {
+    // Task 2 path: markers were materialized into links by code, so this
+    // checks marker coverage - robust to URL formatting differences the
+    // legacy substring check below used to fail valid drafts over.
+    const citations = groundedCitationCheck(grounded.citedMarkers, grounded.sources);
+    if (!citations.ok) {
+      reasons.push(`Cites ${citations.found}/${citations.required} required evidence source(s) via [S]-markers`);
+    }
+  } else {
+    const citations = citationCheck(markdown, evidenceSummary);
+    if (!citations.ok) {
+      reasons.push(`Cites ${citations.found}/${citations.required} required evidence source URL(s), not just any external link`);
+    }
   }
 
   return {
@@ -101,6 +130,138 @@ function writingGate(markdown: string, evidenceSummary?: string | null): Quality
     passed: reasons.length === 0 && score >= 90,
     reasons: reasons.length > 0 ? reasons : ["Writing format and quality passed"],
   };
+}
+
+/**
+ * Task 5: targeted repair. When quality-worker requeues a blog with
+ * actionable judgeFixes, regenerate ONLY the named sections and splice
+ * them into the existing article - a 200-word problem no longer costs an
+ * 8k-token full rewrite. Returns null when repair isn't applicable (no
+ * blog row, too many fixes, or a fix that can't be mapped to a concrete
+ * section = whole-article concern), and the caller falls through to the
+ * normal full-draft path.
+ */
+async function attemptTargetedRepair(args: {
+  trend: { id: string; evidenceSummary: string | null };
+  topic: string;
+  description: string;
+  outline: { title: string; plan?: SectionArticleContext["plan"] } | null;
+  groundedSources: GroundedSource[];
+  judgeFixes: { section: string; issue: string; fix: string; priority: "high" | "medium" | "low" }[];
+  attempt: { workflow: { id: string }; attempt: { id: string } };
+}): Promise<{ blogId: string; slug: string; score: number } | null> {
+  const { trend, topic, description, outline, groundedSources, judgeFixes, attempt } = args;
+  if (judgeFixes.length === 0 || judgeFixes.length > 3) return null;
+
+  const blog = await prisma.blog.findUnique({ where: { trendId: trend.id } });
+  if (!blog) {
+    log.info("Targeted repair skipped - no existing blog row, falling back to full rewrite", { trendId: trend.id });
+    return null;
+  }
+
+  const sections = splitIntoSections(blog.content);
+  const priorityOrder = { high: 0, medium: 1, low: 2 } as const;
+  const orderedFixes = [...judgeFixes].sort((a, b) => priorityOrder[a.priority] - priorityOrder[b.priority]);
+
+  // Every fix must map to a concrete section - one unmatchable fix means
+  // the judge is asking for whole-article work, which stays a full rewrite.
+  const matched: { fix: (typeof judgeFixes)[number]; sectionIndex: number }[] = [];
+  for (const fix of orderedFixes) {
+    const sectionIndex = sections.findIndex((section) => section === findSection(sections, fix.section));
+    if (sectionIndex === -1) {
+      log.info("Judge fix targets an unmatched section, falling back to full rewrite", { trendId: trend.id, section: fix.section });
+      return null;
+    }
+    matched.push({ fix, sectionIndex });
+  }
+
+  const startedAt = Date.now();
+  const usageRecords: { model: string; usage: { promptTokens: number; completionTokens: number } }[] = [];
+  const context: SectionArticleContext = {
+    title: blog.title,
+    topic,
+    description,
+    plan: outline?.plan,
+    sources: groundedSources,
+    keywords: [],
+  };
+
+  for (const { fix, sectionIndex } of matched) {
+    const section = sections[sectionIndex];
+    const existingWords = section.body.split(/\s+/).filter(Boolean).length;
+    const spec: SectionSpec = {
+      heading: section.heading,
+      kind: "generic",
+      intent: `Repair this section of a larger article. ${fix.fix}`,
+      bullets: [],
+      wordTarget: Math.max(80, existingWords),
+    };
+    const draft = await generateSection(spec, context, {
+      repairNote: `The previous version of this section failed editorial review. Issue: ${fix.issue}. Required fix: ${fix.fix}.`,
+    });
+    usageRecords.push({ model: draft.model, usage: draft.usage });
+
+    // Keep the ORIGINAL heading text no matter what the model emitted -
+    // the quality scorer's requiredSections matching depends on it.
+    let newBody = draft.markdown.trim();
+    if (!newBody.startsWith("## ")) {
+      newBody = `## ${section.heading}\n\n${newBody}`;
+    } else {
+      newBody = newBody.replace(/^##\s+.*$/m, `## ${section.heading}`);
+    }
+    section.body = `${newBody}\n`;
+  }
+
+  const joined = joinSections(sections);
+  // Newly repaired sections may carry [S]-markers; previously written
+  // sections already hold real links (idempotent - materialize only
+  // touches marker tokens).
+  const materialized = groundedSources.length > 0 ? materializeCitations(joined, groundedSources) : null;
+  const markdown = materialized?.markdown ?? joined;
+
+  let usageRecordId: string | null = null;
+  const latencyShare = Math.round((Date.now() - startedAt) / Math.max(1, usageRecords.length));
+  for (const record of usageRecords) {
+    const saved = await recordAIUsage({ worker: "writing-worker", model: record.model, usage: record.usage, latencyMs: latencyShare, trendId: trend.id });
+    if (!usageRecordId) usageRecordId = saved.id;
+  }
+
+  // Legacy URL citation check (not the marker check): repaired articles
+  // carry already-materialized links, so verbatim-URL matching is the
+  // correct verification here.
+  const gate = writingGate(markdown, trend.evidenceSummary);
+  assertGate(gate);
+
+  const html = await marked.parse(markdown);
+  await prisma.blog.update({
+    where: { id: blog.id },
+    data: { content: markdown, html, status: "DRAFT" },
+  });
+  if (usageRecordId) await attachUsageToBlog(usageRecordId, blog.id);
+
+  // Image worker's featuredImageId skip makes this a pass-through to QA.
+  await imageQueue.add("generate_blog_image", {
+    blogId: blog.id,
+    trendId: trend.id,
+    title: blog.title,
+    slug: blog.slug,
+    category: "",
+    excerpt: blog.excerpt ?? undefined,
+  });
+  await passWorkerAttempt({
+    workflowRunId: attempt.workflow.id,
+    attemptId: attempt.attempt.id,
+    output: { blogId: blog.id, slug: blog.slug, score: gate.score, repairMode: "targeted", repairedSections: matched.map((m) => m.fix.section) },
+    qualityReport: gate,
+    nextStage: "image-worker",
+    blogId: blog.id,
+  });
+
+  log.info(`Blog repaired via targeted section splice: ${blog.slug}`, {
+    blogId: blog.id,
+    sections: matched.map((m) => m.fix.section),
+  });
+  return { blogId: blog.id, slug: blog.slug, score: gate.score };
 }
 
 async function generateBlogForTrend(
@@ -152,7 +313,32 @@ async function generateBlogForTrend(
 
   const priorReport = recoveryContext?.qualityReport as QualityGateReport | undefined;
 
+  // Task 2: when the trend carries full-text evidence (Task 1) and the flag
+  // is on, the draft grounds on [S1]-marked sources and citations are
+  // materialized by code below. Trends without evidenceArticles keep the
+  // legacy evidenceSummary path untouched.
+  const evidenceArticles = parseEvidenceArticles(trend.evidenceArticles);
+  const groundedSources: GroundedSource[] =
+    env.GROUNDED_WRITING_ENABLED && evidenceArticles.length > 0 ? toGroundedSources(evidenceArticles) : [];
+
   try {
+    // Task 5: targeted repair - when QA requeued this blog with actionable
+    // judge fixes, splice-fix just those sections instead of paying for a
+    // full rewrite. Returns null (falls through to full generation) when
+    // repair isn't applicable - see attemptTargetedRepair's contract.
+    if (env.TARGETED_REPAIR_ENABLED && (recoveryContext?.judgeFixes?.length ?? 0) > 0) {
+      const repaired = await attemptTargetedRepair({
+        trend,
+        topic,
+        description,
+        outline,
+        groundedSources,
+        judgeFixes: recoveryContext?.judgeFixes ?? [],
+        attempt,
+      });
+      if (repaired) return repaired;
+    }
+
     const startedAt = Date.now();
     const draft = await generateBlogDraft(topic, description, {
       plan: outline?.plan,
@@ -166,23 +352,69 @@ async function generateBlogForTrend(
           }
         : undefined,
       evidenceSummary: trend.evidenceSummary ?? undefined,
+      evidenceSources: groundedSources.length > 0 ? groundedSources : undefined,
       priorAttempt: priorReport ? { score: priorReport.score, reasons: priorReport.reasons } : undefined,
+      trendId,
     });
     const latencyMs = Date.now() - startedAt;
 
-    // Record spend before the gate: a rejected draft still burned tokens.
-    // draft.model is whatever vertex.ts actually called - which can now be a
-    // dashboard override rather than env.VERTEX_MODEL, so it must come from
-    // the draft, not be re-derived here.
-    const usageRecord = await recordAIUsage({
-      worker: "writing-worker",
-      model: draft.model,
-      usage: draft.usage,
-      latencyMs,
-      trendId,
-    });
+    // Task 2: convert [S1]-markers into real Markdown links BEFORE the gate
+    // and before HTML rendering, so the stored content is the linked version
+    // and the gate checks the marker coverage.
+    let citationMeta: { citedMarkers: string[]; droppedMarkers: string[]; foreignLinks: string[] } | null = null;
+    if (groundedSources.length > 0) {
+      const materialized = materializeCitations(draft.markdown, groundedSources);
+      draft.markdown = materialized.markdown;
+      citationMeta = {
+        citedMarkers: materialized.citedMarkers,
+        droppedMarkers: materialized.droppedMarkers,
+        foreignLinks: materialized.foreignLinks,
+      };
+      if (materialized.droppedMarkers.length > 0) {
+        log.warn("Draft invented citation markers (stripped)", { trendId, droppedMarkers: materialized.droppedMarkers });
+      }
+      if (materialized.foreignLinks.length > 0) {
+        // Soft signal only - logged for calibration, not a gate failure.
+        log.warn("Draft links to non-evidence domains", { trendId, foreignLinks: materialized.foreignLinks });
+      }
+    }
 
-    const gate = writingGate(draft.markdown, trend.evidenceSummary);
+    // Record spend before the gate: a rejected draft still burned tokens.
+    // Task 5: sectioned drafts carry per-call usage rows - record each so
+    // per-model rollups stay accurate (wall-clock latency is split evenly;
+    // individual section latencies aren't separately measured). The legacy
+    // monolithic path keeps its single aggregate row.
+    let usageRecordId: string | null = null;
+    if (draft.usageRecords && draft.usageRecords.length > 0) {
+      const latencyShare = Math.round(latencyMs / draft.usageRecords.length);
+      for (const record of draft.usageRecords) {
+        const saved = await recordAIUsage({
+          worker: "writing-worker",
+          model: record.model,
+          usage: record.usage,
+          latencyMs: latencyShare,
+          trendId,
+        });
+        if (!usageRecordId) usageRecordId = saved.id;
+      }
+    } else {
+      const saved = await recordAIUsage({
+        worker: "writing-worker",
+        model: draft.model,
+        usage: draft.usage,
+        latencyMs,
+        trendId,
+      });
+      usageRecordId = saved.id;
+    }
+
+    const gate = writingGate(
+      draft.markdown,
+      trend.evidenceSummary,
+      groundedSources.length > 0 && citationMeta
+        ? { citedMarkers: citationMeta.citedMarkers, sources: groundedSources }
+        : undefined
+    );
     assertGate(gate);
     const html = await marked.parse(draft.markdown);
     // Upsert on trendId instead of always create - a retried write_blog job
@@ -237,7 +469,7 @@ async function generateBlogForTrend(
       },
     });
 
-    await attachUsageToBlog(usageRecord.id, blog.id);
+    await attachUsageToBlog(usageRecordId, blog.id);
 
     await prisma.trend.update({ where: { id: trendId }, data: { status: "PROCESSED" } });
     await imageQueue.add("generate_blog_image", {
@@ -251,13 +483,19 @@ async function generateBlogForTrend(
     await passWorkerAttempt({
       workflowRunId: attempt.workflow.id,
       attemptId: attempt.attempt.id,
-      output: { blogId: blog.id, slug: blog.slug, score },
+      output: {
+        blogId: blog.id,
+        slug: blog.slug,
+        score,
+        grounded: groundedSources.length > 0,
+        citations: citationMeta ?? undefined,
+      },
       qualityReport: gate,
       nextStage: "image-worker",
       blogId: blog.id,
     });
 
-    log.info(`Blog created: ${blog.slug}`, { blogId: blog.id, score });
+    log.info(`Blog created: ${blog.slug}`, { blogId: blog.id, score, grounded: groundedSources.length > 0 });
     return { blogId: blog.id, slug: blog.slug, score };
   } catch (err) {
     await failWorkerAttempt({
