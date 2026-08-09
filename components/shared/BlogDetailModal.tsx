@@ -62,6 +62,25 @@ export interface BlogItem {
       maxScore: number;
       notes: string[];
     }[];
+    /** Task 3: claim-level fact-check detail (null/absent for legacy sampled checks). */
+    factCheckDetail?: {
+      mode: string;
+      totalClaims: number;
+      supported: number;
+      uncertain: number;
+      unsupported: number;
+      unverifiable: number;
+      coveragePct: number;
+      claims: { claim: string; verdict: string; confidence: number; note?: string; sourceUrl?: string }[];
+    } | null;
+    /** Task 4: LLM editorial judge breakdown (null/absent when disabled or failed). */
+    judgeDetail?: {
+      scores: { depth: number; accuracyOfTone: number; originality: number; usefulness: number };
+      overall: number;
+      critique: string;
+      fixes: { section: string; issue: string; fix: string; priority: string }[];
+      shadowMode?: boolean;
+    } | null;
     createdAt: string;
   };
   workflow?: {
@@ -632,6 +651,103 @@ export function BlogDetailModal({ blog, isOpen, onClose, initialTab, onActionCom
                   )) : (
                     <div className="p-[24px_12px] text-center text-[12px] text-[var(--mut)]">
                       No quality checks yet.
+                    </div>
+                  )}
+
+                  {/* Task 4: LLM editorial judge breakdown */}
+                  {blog.qualityReport?.judgeDetail && (
+                    <div className="border border-[var(--bd)] rounded-[10px] p-[10px_11px] bg-[var(--card2)]">
+                      <div className="flex items-center justify-between mb-[6px]">
+                        <span className="text-[10.5px] font-bold tracking-wider uppercase text-[var(--mut)]">
+                          Editorial Judge{blog.qualityReport.judgeDetail.shadowMode ? " (shadow)" : ""}
+                        </span>
+                        <span className="font-mono text-[11px] font-semibold text-[var(--indigo)]">
+                          {blog.qualityReport.judgeDetail.overall}/100
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-[var(--fg2)] leading-snug mb-[7px]">
+                        {blog.qualityReport.judgeDetail.critique}
+                      </div>
+                      <div className="grid grid-cols-4 gap-[6px] mb-[7px]">
+                        {([
+                          ["Depth", blog.qualityReport.judgeDetail.scores.depth],
+                          ["Tone", blog.qualityReport.judgeDetail.scores.accuracyOfTone],
+                          ["Originality", blog.qualityReport.judgeDetail.scores.originality],
+                          ["Usefulness", blog.qualityReport.judgeDetail.scores.usefulness],
+                        ] as const).map(([label, value]) => (
+                          <div key={label} className="text-center border border-[var(--bd)] rounded-[7px] p-[4px]">
+                            <div className="text-[9px] font-semibold text-[var(--mut)]">{label}</div>
+                            <div className="font-mono text-[11px] font-bold text-[var(--fg)]">{value}/10</div>
+                          </div>
+                        ))}
+                      </div>
+                      {blog.qualityReport.judgeDetail.fixes.length > 0 && (
+                        <ul className="flex flex-col gap-[4px]">
+                          {blog.qualityReport.judgeDetail.fixes.map((fix, i) => (
+                            <li key={i} className="text-[10.5px] text-[var(--fg2)] leading-snug">
+                              <span
+                                className="font-semibold"
+                                style={{
+                                  color:
+                                    fix.priority === "high"
+                                      ? "var(--rose)"
+                                      : fix.priority === "medium"
+                                        ? "var(--amber)"
+                                        : "var(--mut)",
+                                }}
+                              >
+                                [{fix.priority}] {fix.section}:
+                              </span>{" "}
+                              {fix.fix}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Task 3: claim-level fact-check detail */}
+                  {blog.qualityReport?.factCheckDetail && (
+                    <div className="border border-[var(--bd)] rounded-[10px] p-[10px_11px] bg-[var(--card2)]">
+                      <div className="flex items-center justify-between mb-[6px]">
+                        <span className="text-[10.5px] font-bold tracking-wider uppercase text-[var(--mut)]">
+                          Claim-level Fact Check
+                        </span>
+                        <span className="font-mono text-[10px] font-semibold text-[var(--fg2)]">
+                          {blog.qualityReport.factCheckDetail.supported}/{blog.qualityReport.factCheckDetail.totalClaims} supported ·{" "}
+                          {blog.qualityReport.factCheckDetail.coveragePct}% coverage
+                        </span>
+                      </div>
+                      {blog.qualityReport.factCheckDetail.claims.filter((claim) => claim.verdict !== "supported").length > 0 ? (
+                        <ul className="flex flex-col gap-[4px]">
+                          {blog.qualityReport.factCheckDetail.claims
+                            .filter((claim) => claim.verdict !== "supported")
+                            .slice(0, 5)
+                            .map((claim, i) => (
+                              <li key={i} className="text-[10.5px] leading-snug text-[var(--fg2)]">
+                                <span
+                                  className="font-semibold"
+                                  style={{
+                                    color:
+                                      claim.verdict === "unsupported"
+                                        ? "var(--rose)"
+                                        : claim.verdict === "unverifiable"
+                                          ? "var(--amber)"
+                                          : "var(--mut)",
+                                  }}
+                                >
+                                  {claim.verdict}:
+                                </span>{" "}
+                                {claim.claim.length > 140 ? `${claim.claim.slice(0, 140)}…` : claim.claim}
+                                {claim.note ? ` — ${claim.note}` : ""}
+                              </li>
+                            ))}
+                        </ul>
+                      ) : (
+                        <div className="text-[10.5px] text-[var(--emerald)]">
+                          All extracted claims verified against evidence.
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
