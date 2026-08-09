@@ -364,6 +364,11 @@ export async function GET() {
             passed: blog.qualityReport.passed,
             recommendation: blog.qualityReport.recommendation,
             checks: blog.qualityReport.checks,
+            // Task 3/4 detail payloads - serialized through so
+            // BlogDetailModal can render the claim-level fact check and the
+            // editorial judge breakdown. Absent on legacy reports.
+            factCheckDetail: blog.qualityReport.factCheckDetail,
+            judgeDetail: blog.qualityReport.judgeDetail,
             createdAt: blog.qualityReport.createdAt.toISOString(),
           }
         : undefined,
