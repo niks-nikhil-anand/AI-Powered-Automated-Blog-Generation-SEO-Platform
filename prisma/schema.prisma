@@ -221,6 +221,13 @@ model Trend {
   /// Null for trends created before this feature or when the fetch failed -
   /// downstream stages fall back to evidenceSummary in that case.
   evidenceArticles Json?
+  /// Per-dimension research score breakdown from scoreClusters()
+  /// (workers/research-worker/pipeline/score.ts). JSON:
+  /// { trendDemand, newsFreshness, githubMomentum, multiSourceValidation,
+  ///   semanticRelevance } - persisted so the dashboard trend-detail modal can
+  /// show the signal-breakdown bars. Null for trends created before this
+  /// column existed.
+  scoreBreakdown   Json?
   plan             ContentPlan?
   outline          ContentOutline?
   blog             Blog?
