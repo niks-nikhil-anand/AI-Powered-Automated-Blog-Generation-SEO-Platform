@@ -109,6 +109,13 @@ export type WritingJobPayload = {
   recoveryContext?: {
     reason: string;
     qualityReport?: unknown;
+    /**
+     * Actionable fixes from quality-worker's LLM judge (Task 4), shape
+     * mirrored from workers/quality-worker/judge.ts's JudgeFix (declared
+     * inline to keep this file dependency-free). Consumed by the writing
+     * worker's targeted-repair path (Task 5).
+     */
+    judgeFixes?: { section: string; issue: string; fix: string; priority: "high" | "medium" | "low" }[];
   };
 };
 

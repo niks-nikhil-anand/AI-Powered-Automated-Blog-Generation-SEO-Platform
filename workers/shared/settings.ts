@@ -25,6 +25,10 @@ export const MODEL_SETTING_KEYS = {
   outline: "model:outline",
   writing: "model:writing",
   semantic: "model:semantic",
+  /** Quality-worker's LLM editorial judge (Task 4). */
+  judge: "model:judge",
+  /** Per-section draft generation when sectioned writing is on (Task 5). */
+  writingSections: "model:writingSections",
 } as const;
 
 export type ModelStage = keyof typeof MODEL_SETTING_KEYS;
