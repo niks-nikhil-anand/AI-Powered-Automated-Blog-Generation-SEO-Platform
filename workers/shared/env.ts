@@ -133,6 +133,17 @@ export const env = {
   RESEARCH_USER_AGENT: optional("RESEARCH_USER_AGENT", "Mozilla/5.0 (compatible; AutoBlogResearchBot/1.0)"),
 
   /**
+   * Full-text evidence ingestion (ENHANCEMENT_IMPLEMENTATION_PLAN.md Task 1).
+   * Off = trends carry only the titles/URLs evidenceSummary, exactly as
+   * before. On = promoted candidates also get up to EVIDENCE_MAX_ARTICLES
+   * fetched article bodies (EVIDENCE_MAX_CHARS each) stored as
+   * Trend.evidenceArticles for grounded writing/fact-checking downstream.
+   */
+  EVIDENCE_FETCH_ENABLED: optional("EVIDENCE_FETCH_ENABLED", "false") !== "false",
+  EVIDENCE_MAX_ARTICLES: Number(optional("EVIDENCE_MAX_ARTICLES", "3")),
+  EVIDENCE_MAX_CHARS: Number(optional("EVIDENCE_MAX_CHARS", "4000")),
+
+  /**
    * Per-source on/off switches. All default "true" since every source ran
    * unconditionally before these existed - workers/research-worker/config.ts
    * computes `enabledSources` from these instead of a hardcoded array.
@@ -162,6 +173,49 @@ export const env = {
    * Own timeout, same pattern as RESEARCH_SEMANTIC_TIMEOUT_MS.
    */
   WRITING_TIMEOUT_MS: Number(optional("WRITING_TIMEOUT_MS", "120000")),
+
+  /**
+   * Evidence-grounded writing (ENHANCEMENT_IMPLEMENTATION_PLAN.md Task 2).
+   * On = the writing prompt receives full-text evidence sources keyed by
+   * [S1]-style markers and citations are materialized deterministically in
+   * code (workers/writing-worker/citations.ts). Off = legacy
+   * titles-only evidenceSummary prompt + verbatim-URL citation check.
+   * Requires the trend to actually have evidenceArticles (Task 1) - trends
+   * without them always use the legacy path regardless of this flag.
+   */
+  GROUNDED_WRITING_ENABLED: optional("GROUNDED_WRITING_ENABLED", "false") !== "false",
+
+  /**
+   * Section-by-section writing + targeted repair (Task 5). Off = one
+   * monolithic Pro draft per article, full rewrite on QA failure. On =
+   * parallel Flash-class section generation assembled into the draft, and
+   * QA failures carrying judgeFixes get a section-level splice repair
+   * instead of a full rewrite. EDITOR_PASS_ENABLED adds a final Pro-class
+   * cohesion pass over the assembled draft (measure value before enabling).
+   */
+  SECTIONED_WRITING_ENABLED: optional("SECTIONED_WRITING_ENABLED", "false") !== "false",
+  TARGETED_REPAIR_ENABLED: optional("TARGETED_REPAIR_ENABLED", "false") !== "false",
+  EDITOR_PASS_ENABLED: optional("EDITOR_PASS_ENABLED", "false") !== "false",
+  WRITING_SECTION_CONCURRENCY: Number(optional("WRITING_SECTION_CONCURRENCY", "4")),
+
+  /**
+   * Quality worker upgrades (Tasks 3 & 4).
+   * FULL_FACTCHECK_ENABLED: claim-level verification of every extracted
+   *   claim against full-text evidence (falls back to the legacy sampled
+   *   check when the trend has no evidenceArticles).
+   * JUDGE_ENABLED: holistic LLM editorial judge as a weighted 12th check.
+   * JUDGE_SHADOW_MODE: compute + persist the judge result but DON'T let it
+   *   affect pass/fail - mandatory calibration mode before going live.
+   * JUDGE_WEIGHT: weight of the judge score in overallScore (rest is the
+   *   existing heuristic checks' average).
+   * DIMENSION_FLOOR: minimum per-check score (of 10) - one collapsed
+   *   dimension can no longer be averaged into a pass.
+   */
+  FULL_FACTCHECK_ENABLED: optional("FULL_FACTCHECK_ENABLED", "false") !== "false",
+  JUDGE_ENABLED: optional("JUDGE_ENABLED", "false") !== "false",
+  JUDGE_SHADOW_MODE: optional("JUDGE_SHADOW_MODE", "true") !== "false",
+  JUDGE_WEIGHT: Number(optional("JUDGE_WEIGHT", "0.25")),
+  DIMENSION_FLOOR: Number(optional("DIMENSION_FLOOR", "6")),
 
   // Image worker / AWS S3
   AWS_REGION: optional("AWS_REGION", "us-east-1"),
