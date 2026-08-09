@@ -2,7 +2,9 @@ import { env, isVertexConfigured } from "../shared/env";
 import { generateVertexVisionJson } from "../shared/vertex";
 import { logger } from "../shared/logger";
 import { recordAIUsage } from "../shared/pricing";
-import { runFactCheck } from "./factcheck";
+import { parseEvidenceArticles } from "../shared/evidence";
+import { runFactCheck, runFullFactCheck, type FactCheckResult, type FullFactCheckDetail, type FullFactCheckResult } from "./factcheck";
+import { judgeBlog, type JudgeResult } from "./judge";
 
 const log = logger.child({ worker: "quality-worker" });
 
@@ -14,7 +16,9 @@ type BlogForQuality = {
   excerpt: string | null;
   trendId: string | null;
   /** Trend.evidenceSummary - see IMPLEMENTATION_PLAN.md Phase 2.1/2.4. */
-  trend?: { evidenceSummary: string | null } | null;
+  trend?: { evidenceSummary: string | null; evidenceArticles?: unknown } | null;
+  /** ContentPlan fields the LLM judge scores usefulness against (Task 4). */
+  plan?: { searchIntent: string; audience: string; angle: string } | null;
   featuredImage?: { width: number | null; height: number | null; size: number; publicUrl: string } | null;
   seo?: {
     metaTitle: string;
@@ -116,27 +120,46 @@ async function assessFeaturedImage(blog: BlogForQuality): Promise<VisionAssessme
 }
 
 /**
- * Wraps factcheck.ts's runFactCheck with the same AIUsage cost-tracking
- * every other Vertex call site in this pipeline does - see
- * workers/shared/pricing.ts.
+ * Fact-check with cost tracking (same pattern as every other Vertex call
+ * site - workers/shared/pricing.ts). Task 3: when FULL_FACTCHECK_ENABLED
+ * and the trend carries full-text evidence articles, runs the claim-level
+ * full-coverage check; otherwise the legacy sampled check against
+ * evidenceSummary. Either way both the score-compatible result and the
+ * rich detail (null for legacy) come back.
  */
-async function factCheckContent(blog: BlogForQuality) {
+async function factCheckContent(
+  blog: BlogForQuality
+): Promise<{ result: FactCheckResult | FullFactCheckResult; detail: FullFactCheckDetail | null } | null> {
+  const startedAt = Date.now();
+  const articles = parseEvidenceArticles(blog.trend?.evidenceArticles);
+
+  if (env.FULL_FACTCHECK_ENABLED && articles.length > 0) {
+    const full = await runFullFactCheck(blog.content, articles);
+    if (!full) return null;
+    await recordAIUsage({
+      worker: "quality-worker",
+      model: full.model,
+      usage: full.usage,
+      latencyMs: Date.now() - startedAt,
+      blogId: blog.id,
+      trendId: blog.trendId,
+    });
+    return { result: full, detail: full.detail };
+  }
+
   const evidenceSummary = blog.trend?.evidenceSummary;
   if (!evidenceSummary) return null;
-
-  const startedAt = Date.now();
-  const result = await runFactCheck(blog.content, evidenceSummary);
-  if (!result) return null;
-
+  const legacy = await runFactCheck(blog.content, evidenceSummary);
+  if (!legacy) return null;
   await recordAIUsage({
     worker: "quality-worker",
-    model: result.model,
-    usage: result.usage,
+    model: legacy.model,
+    usage: legacy.usage,
     latencyMs: Date.now() - startedAt,
     blogId: blog.id,
     trendId: blog.trendId,
   });
-  return result;
+  return { result: legacy, detail: null };
 }
 
 function recommendation(score: number) {
@@ -166,7 +189,29 @@ export async function scoreBlogQuality(blog: BlogForQuality) {
     ? sentences.reduce((sum, sentence) => sum + sentence.split(/\s+/).filter(Boolean).length, 0) / sentences.length
     : 0;
   const imageAssessment = await assessFeaturedImage(blog);
-  const factCheck = await factCheckContent(blog);
+  const factCheckOutcome = await factCheckContent(blog);
+  const factCheck = factCheckOutcome?.result ?? null;
+
+  // Task 4: holistic LLM editorial judgment. Runs alongside the heuristics;
+  // in JUDGE_SHADOW_MODE (the default) it is computed and persisted but does
+  // NOT affect overallScore/passed - the mandatory calibration window before
+  // the judge is allowed to gate.
+  let judge: JudgeResult | null = null;
+  if (env.JUDGE_ENABLED) {
+    const judgeStartedAt = Date.now();
+    judge = await judgeBlog({ title: blog.title, content: blog.content, plan: blog.plan });
+    if (judge) {
+      await recordAIUsage({
+        worker: "quality-worker",
+        model: judge.model,
+        usage: judge.usage,
+        latencyMs: Date.now() - judgeStartedAt,
+        blogId: blog.id,
+        trendId: blog.trendId,
+      });
+    }
+  }
+  const judgeLive = Boolean(judge && !env.JUDGE_SHADOW_MODE);
 
   const checks: Check[] = [
     {
@@ -277,14 +322,36 @@ export async function scoreBlogQuality(blog: BlogForQuality) {
     },
   ];
 
+  // Task 4: the judge appears in the persisted checks for dashboard
+  // display, but it does NOT join the flat average - it enters overallScore
+  // through the weight below, and only when live (not shadow mode).
+  if (judge) {
+    checks.push({
+      label: "Editorial Judgment",
+      score: clamp(judge.overall / 10),
+      maxScore: 10,
+      notes: [
+        `${judge.critique}${env.JUDGE_SHADOW_MODE ? " (shadow mode - not gated)" : ""}`,
+        `depth ${judge.scores.depth}/10 · tone ${judge.scores.accuracyOfTone}/10 · originality ${judge.scores.originality}/10 · usefulness ${judge.scores.usefulness}/10`,
+      ],
+    });
+  }
+
   // Normalized to 0-100 regardless of check count, rather than a raw sum
   // (which would drift past the historical 0-100 range now that there are
   // 11 checks instead of 10) - the dashboard (app/dashboard/page.tsx,
   // app/dashboard/quality/page.tsx) hardcodes "/100" and uses this value
   // directly as a percentage-width, so overallScore has to stay a true
-  // percentage no matter how many checks contribute to it.
-  const rawSum = checks.reduce((sum, check) => sum + check.score, 0);
-  const overallScore = Math.round((rawSum / (checks.length * 10)) * 100);
+  // percentage no matter how many checks contribute to it. When the judge
+  // is live, it carries JUDGE_WEIGHT of the overall and the heuristics the
+  // rest (judge check excluded from the heuristic average to avoid
+  // double-counting it).
+  const heuristicChecks = judge ? checks.slice(0, -1) : checks;
+  const rawSum = heuristicChecks.reduce((sum, check) => sum + check.score, 0);
+  const heuristicScore = (rawSum / (heuristicChecks.length * 10)) * 100;
+  const overallScore = judgeLive
+    ? Math.round((1 - env.JUDGE_WEIGHT) * heuristicScore + env.JUDGE_WEIGHT * (judge?.overall ?? 0))
+    : Math.round(heuristicScore);
 
   // A hard gate independent of the averaged score - 10 good checks
   // shouldn't be able to outvote a fact-check that actually ran and found
@@ -296,13 +363,27 @@ export async function scoreBlogQuality(blog: BlogForQuality) {
   // demanding every single claim read as fully "supported".
   const CRITICAL_FACT_CHECK_THRESHOLD = 70;
   const factCheckOk = !factCheck || factCheck.score >= CRITICAL_FACT_CHECK_THRESHOLD;
-  const passed = overallScore >= 90 && factCheckOk;
+
+  // Task 4 (live mode only): per-dimension floor - one collapsed dimension
+  // (e.g. Readability 4/10) can no longer be averaged into a pass. Fact
+  // Verification is exempt: it has its own hard gate above.
+  const floorsOk =
+    !judgeLive ||
+    heuristicChecks.every((check) => check.score >= env.DIMENSION_FLOOR || check.label === "Fact Verification");
+
+  const passed = overallScore >= 90 && factCheckOk && floorsOk;
 
   return {
     overallScore,
     passed,
     recommendation: !factCheckOk ? "Blocked - unverified facts" : recommendation(overallScore),
     checks,
+    factCheckDetail: factCheckOutcome?.detail ?? null,
+    judgeDetail: judge
+      ? { scores: judge.scores, overall: judge.overall, critique: judge.critique, fixes: judge.fixes, shadowMode: env.JUDGE_SHADOW_MODE }
+      : null,
+    /** Task 5 consumes these for targeted repair on QA failure. */
+    judgeFixes: judge?.fixes ?? [],
     scores: {
       seoStructure: checks[0].score,
       contentCompleteness: checks[1].score,
