@@ -1,3 +1,4 @@
+
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import {
@@ -466,6 +467,16 @@ export async function GET() {
       recFg: score >= 70 ? "var(--emerald)" : "var(--fg2)",
       volume: `${trend.status} · ${formatAgo(trend.createdAt)}`,
       scorePct: `${Math.min(100, Math.max(0, score))}%`,
+      // Detail-modal payloads (TrendDetailModal): raw status + timestamps for
+      // the overview grid, evidenceSummary for the research summary/evidence
+      // fallback, scoreBreakdown for the signal bars, and evidenceArticles
+      // (Task 1) for the rich [S1]-style source cards. All optional/nullable -
+      // legacy rows just render fewer sections.
+      status: trend.status,
+      createdAt: trend.createdAt.toISOString(),
+      evidenceSummary: trend.evidenceSummary ?? null,
+      scoreBreakdown: trend.scoreBreakdown ?? null,
+      evidenceArticles: Array.isArray(trend.evidenceArticles) ? trend.evidenceArticles : null,
     };
   });
 
