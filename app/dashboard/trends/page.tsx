@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from "react";
 import { LayoutGrid, List, Eye } from "lucide-react";
 import { DataTable } from "@/components/ui/DataTable";
-import { TrendDetailModal } from "@/components/shared/TrendDetailModal";
+import { TrendDetailModal, type TrendRow } from "@/components/shared/TrendDetailModal";
 import {
   Select,
   SelectContent,
@@ -53,23 +53,6 @@ export default function TrendResearchPage({ onOpenManualTopic }: TrendsPageProps
   const [researchMessage, setResearchMessage] = useState("");
   const [isLoadingTrends, setIsLoadingTrends] = useState(true);
   const [page, setPage] = useState(1);
-
-  type TrendRow = {
-    id: string;
-    srcInitial: string;
-    source: string;
-    srcColor: string;
-    score: string;
-    scoreBg: string;
-    scoreFg: string;
-    title: string;
-    cat: string;
-    rec: string;
-    recBg: string;
-    recFg: string;
-    volume: string;
-    scorePct: string;
-  };
 
   useEffect(() => {
     let mounted = true;
