@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { env, isVertexConfigured } from "../shared/env";
 import { generateVertexJson } from "../shared/vertex";
+import { type EvidenceArticle } from "../shared/evidence";
+import { extractClaims } from "./claims";
 
 const FactCheckVerdictSchema = z.enum(["supported", "unsupported", "uncertain"]);
 export type FactCheckVerdict = z.infer<typeof FactCheckVerdictSchema>;
@@ -76,6 +78,170 @@ export async function runFactCheck(content: string, evidenceSummary: string): Pr
     const score = Math.round(weighted / claims.length);
 
     return { claims, score, usage: result.usage, model };
+  } catch {
+    return null;
+  }
+}
+
+/* ------------------------------------------------------------------------ */
+/* Task 3: claim-level fact checking against full-text evidence              */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * Extended verdict set for the full check. "unverifiable" = no source
+ * relates to the claim at all - the hallucination tell that "unsupported"
+ * had to absorb in the legacy sampled check.
+ */
+const FullVerdictSchema = z.enum(["supported", "unsupported", "uncertain", "unverifiable"]);
+export type FullFactCheckVerdict = z.infer<typeof FullVerdictSchema>;
+
+const FullClaimSchema = z.object({
+  claim: z.string(),
+  verdict: FullVerdictSchema,
+  confidence: z.number(),
+  note: z.string().optional(),
+  sourceUrl: z.string().optional(),
+});
+export type FullFactCheckClaim = z.infer<typeof FullClaimSchema>;
+
+const FullBatchResponseSchema = z.object({ claims: z.array(FullClaimSchema) });
+
+export type FullFactCheckDetail = {
+  mode: "full";
+  totalClaims: number;
+  supported: number;
+  uncertain: number;
+  unsupported: number;
+  unverifiable: number;
+  coveragePct: number;
+  claims: FullFactCheckClaim[];
+};
+
+export type FullFactCheckResult = {
+  /** Same shape as FactCheckResult.claims for scorer compatibility, verdict superset. */
+  claims: FullFactCheckClaim[];
+  score: number;
+  usage: { promptTokens: number; completionTokens: number };
+  model: string;
+  detail: FullFactCheckDetail;
+};
+
+const FULL_VERDICT_WEIGHT: Record<FullFactCheckVerdict, number> = {
+  supported: 1,
+  uncertain: 0.5,
+  unverifiable: 0.25,
+  unsupported: 0,
+};
+
+const VERIFY_BATCH_SIZE = 10;
+/** If more than this share of claims binds to no evidence at all, the score is capped below the hard gate. */
+const UNVERIFIABLE_CAP_RATIO = 0.3;
+const UNVERIFIABLE_SCORE_CAP = 60;
+
+function buildVerifyPrompt(claims: string[], articles: EvidenceArticle[]): string {
+  const sourcesBlock = articles
+    .map((article, index) => `[S${index + 1}] ${article.title} - ${article.url}\n    "${article.excerpt}"`)
+    .join("\n");
+  return `You are a fact-checking editor for a technical blog. Verify each CLAIM below against the SOURCES (full-text excerpts of the research evidence the article was grounded in).
+
+SOURCES:
+${sourcesBlock}
+
+CLAIMS:
+${claims.map((claim, index) => `${index + 1}. "${claim}"`).join("\n")}
+
+For each claim return exactly one verdict:
+- "supported": a source explicitly backs the claim.
+- "unsupported": a source directly contradicts the claim.
+- "uncertain": the sources are related but only partially confirm it.
+- "unverifiable": NO source relates to the claim at all (the article asserts it from nowhere).
+
+Return ONLY JSON, one entry per claim, same order:
+{"claims": [{"claim": "the claim text", "verdict": "supported"|"unsupported"|"uncertain"|"unverifiable", "confidence": 0-100, "note": "one sentence", "sourceUrl": "source URL if supported, else omit"}]}`;
+}
+
+/**
+ * Full-coverage fact check (ENHANCEMENT_IMPLEMENTATION_PLAN.md Task 3):
+ * every extracted claim (deterministic + model extraction, claims.ts) is
+ * verified against the full-text evidence articles in parallel batches of
+ * 10. Never throws: a failed batch marks its claims "unverifiable", a total
+ * failure returns null - same fail-open contract as runFactCheck.
+ */
+export async function runFullFactCheck(content: string, articles: EvidenceArticle[]): Promise<FullFactCheckResult | null> {
+  if (!isVertexConfigured || articles.length === 0) return null;
+
+  try {
+    const extraction = await extractClaims(content);
+    if (extraction.claims.length === 0) return null;
+
+    const model = env.VERTEX_FLASH;
+    const batches: string[][] = [];
+    const claimTexts = extraction.claims.map((claim) => claim.text);
+    for (let i = 0; i < claimTexts.length; i += VERIFY_BATCH_SIZE) {
+      batches.push(claimTexts.slice(i, i + VERIFY_BATCH_SIZE));
+    }
+
+    const results = await Promise.allSettled(
+      batches.map((batch) => generateVertexJson<unknown>(model, buildVerifyPrompt(batch, articles)))
+    );
+
+    const verified: FullFactCheckClaim[] = [];
+    const usage = { promptTokens: 0, completionTokens: 0 };
+    if (extraction.extractionUsage) {
+      usage.promptTokens += extraction.extractionUsage.promptTokens;
+      usage.completionTokens += extraction.extractionUsage.completionTokens;
+    }
+
+    results.forEach((result, batchIndex) => {
+      const batchClaims = batches[batchIndex];
+      if (result.status === "rejected") {
+        // Failed batch: its claims are unverifiable this run, never fatal.
+        for (const claim of batchClaims) {
+          verified.push({ claim, verdict: "unverifiable", confidence: 0, note: "Verification batch failed" });
+        }
+        return;
+      }
+      usage.promptTokens += result.value.usage.promptTokens;
+      usage.completionTokens += result.value.usage.completionTokens;
+
+      const parsed = FullBatchResponseSchema.safeParse(result.value.data);
+      if (!parsed.success) {
+        for (const claim of batchClaims) {
+          verified.push({ claim, verdict: "unverifiable", confidence: 0, note: "Verification response invalid" });
+        }
+        return;
+      }
+      // Align returned verdicts to batch claims by index; missing entries
+      // (model dropped one) become unverifiable rather than disappearing.
+      batchClaims.forEach((claim, claimIndex) => {
+        verified.push(
+          parsed.data.claims[claimIndex] ?? { claim, verdict: "unverifiable", confidence: 0, note: "No verdict returned" }
+        );
+      });
+    });
+
+    const counts = { supported: 0, uncertain: 0, unsupported: 0, unverifiable: 0 };
+    let weighted = 0;
+    for (const claim of verified) {
+      counts[claim.verdict] += 1;
+      const confidence = Math.max(0, Math.min(100, claim.confidence));
+      weighted += FULL_VERDICT_WEIGHT[claim.verdict] * confidence;
+    }
+    let score = Math.round(weighted / verified.length);
+    const unverifiableRatio = counts.unverifiable / verified.length;
+    if (unverifiableRatio > UNVERIFIABLE_CAP_RATIO) {
+      score = Math.min(score, UNVERIFIABLE_SCORE_CAP);
+    }
+
+    const detail: FullFactCheckDetail = {
+      mode: "full",
+      totalClaims: verified.length,
+      ...counts,
+      coveragePct: Math.round(((verified.length - counts.unverifiable) / verified.length) * 100),
+      claims: verified,
+    };
+
+    return { claims: verified, score, usage, model: extraction.extractionModel ?? model, detail };
   } catch {
     return null;
   }
