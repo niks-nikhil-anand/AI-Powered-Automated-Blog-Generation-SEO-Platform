@@ -11,6 +11,7 @@ import { dedupeSignals } from "./pipeline/dedupe";
 import { semanticEnrich } from "./pipeline/semantic";
 import { scoreClusters } from "./pipeline/score";
 import { promotableCandidates } from "./pipeline/promote";
+import { fetchEvidenceArticles } from "./pipeline/evidence";
 import { RawSignal, ResearchCandidate } from "./types";
 import {
   failWorkerAttempt,
@@ -141,6 +142,12 @@ export async function runResearch() {
       }
 
       const description = candidateDescription(item);
+      // Full-text evidence ingestion (Task 1): fetch the actual articles
+      // behind the top evidence URLs so downstream stages ground on real
+      // source text. Runs only for promotable candidates (post-dedupe) and
+      // never throws - any failure leaves evidenceArticles unset and every
+      // consumer falls back to the titles-only evidenceSummary path.
+      const evidenceArticles = env.EVIDENCE_FETCH_ENABLED ? await fetchEvidenceArticles(item) : [];
       const trend = await prisma.trend.create({
         data: {
           topic: item.title,
@@ -148,6 +155,7 @@ export async function runResearch() {
           category: item.category,
           score: item.score,
           status: "NEW",
+          ...(evidenceArticles.length > 0 ? { evidenceArticles } : {}),
           // Persisted so later stages (writing-worker's citations, quality-worker's
           // fact-check) can still reach the original evidence - previously this
           // only lived in the one-time planningQueue job payload below and was
