@@ -11,6 +11,14 @@ export const OutlineSectionSchema = z.object({
   heading: z.string().min(1),
   intent: z.string().min(1),
   bullets: z.array(z.string()).min(1),
+  /**
+   * Task 5 (optional, backward-compatible): per-section word target for
+   * section-wise drafting, and the [S1]-style evidence markers this
+   * section is expected to cite. Old outlines without these fields still
+   * validate - the writing worker derives defaults when they're absent.
+   */
+  wordTarget: z.number().optional(),
+  sourceMarkers: z.array(z.string()).optional(),
 });
 
 export const OutlineFaqSchema = z.object({
