@@ -22,11 +22,21 @@ export async function runQualityCheck(payload: QualityJobPayload) {
   });
   const blog = await prisma.blog.findUnique({
     where: { id: payload.blogId },
-    include: { seo: true, featuredImage: true, trend: true },
+    // plan rides along for the Task 4 judge (it scores usefulness against
+    // the plan's stated intent, not in a vacuum).
+    include: { seo: true, featuredImage: true, trend: { include: { plan: true } } },
   });
   if (!blog) throw new Error(`Blog ${payload.blogId} not found`);
 
-  const report = await scoreBlogQuality(blog);
+  const report = await scoreBlogQuality({ ...blog, plan: blog.trend?.plan ?? null });
+
+  // undefined (not null) for the Task 3/4 detail columns when those paths
+  // didn't run - legacy reports must not get their new fields nulled out
+  // on a re-score with the flags off.
+  const detailColumns = {
+    factCheckDetail: report.factCheckDetail ?? undefined,
+    judgeDetail: report.judgeDetail ?? undefined,
+  };
 
   const saved = await prisma.qualityReport.upsert({
     where: { blogId: blog.id },
@@ -37,6 +47,7 @@ export async function runQualityCheck(payload: QualityJobPayload) {
       passed: report.passed,
       recommendation: report.recommendation,
       checks: report.checks,
+      ...detailColumns,
     },
     update: {
       overallScore: report.overallScore,
@@ -44,6 +55,7 @@ export async function runQualityCheck(payload: QualityJobPayload) {
       passed: report.passed,
       recommendation: report.recommendation,
       checks: report.checks,
+      ...detailColumns,
     },
   });
 
@@ -100,6 +112,9 @@ export async function runQualityCheck(payload: QualityJobPayload) {
         recoveryContext: {
           reason: "final_quality_below_threshold",
           qualityReport: gate,
+          // Task 4's actionable fixes - Task 5's targeted-repair path turns
+          // these into section-level splices instead of a blind full rewrite.
+          judgeFixes: report.judgeFixes,
         },
       });
       await passWorkerAttempt({
