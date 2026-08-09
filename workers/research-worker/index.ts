@@ -155,6 +155,9 @@ export async function runResearch() {
           category: item.category,
           score: item.score,
           status: "NEW",
+          // Persisted for the dashboard trend-detail modal's signal-breakdown
+          // bars - the per-dimension scores used to live only in the run log.
+          scoreBreakdown: item.scoreBreakdown,
           ...(evidenceArticles.length > 0 ? { evidenceArticles } : {}),
           // Persisted so later stages (writing-worker's citations, quality-worker's
           // fact-check) can still reach the original evidence - previously this
