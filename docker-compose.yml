@@ -1,19 +1,4 @@
 services:
-  next-app:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    ports:
-      - "3000:3000"
-    environment:
-      - NODE_ENV=production
-      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/blog_agent?schema=public
-      - REDIS_URL=redis://redis:6379
-    depends_on:
-      - postgres
-      - redis
-    restart: always
-
   postgres:
     image: postgres:16-alpine
     container_name: blog-agent-postgres
