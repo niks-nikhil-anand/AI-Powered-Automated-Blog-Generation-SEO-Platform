@@ -180,6 +180,16 @@ model QualityReport {
   /// (AI-disclaimer/placeholder-text patterns) - this is the "actually checks
   /// facts" dimension the plan calls for.
   factVerification    Int      @default(0)
+  /// Claim-level fact-check detail (ENHANCEMENT_IMPLEMENTATION_PLAN.md Task 3).
+  /// JSON: { coveragePct, totalClaims, supported, uncertain, unsupported,
+  /// unverifiable, claims: [{claim, verdict, confidence, note, sourceUrl?}] }.
+  /// Null when the legacy sampled fact-check ran instead.
+  factCheckDetail     Json?
+  /// LLM editorial judge breakdown (ENHANCEMENT_IMPLEMENTATION_PLAN.md Task 4).
+  /// JSON: { scores: {depth, accuracyOfTone, originality, usefulness},
+  /// overall, critique, fixes: [{section, issue, fix, priority}] }.
+  /// Null when the judge was disabled or its call failed (fails soft).
+  judgeDetail         Json?
   passed              Boolean
   recommendation      String
   checks              Json
@@ -206,6 +216,11 @@ model Trend {
   /// override actually survive past all three, instead of being silently
   /// re-rejected one stage after "queued successfully" said it worked.
   manuallyApproved Boolean         @default(false)
+  /// Extracted full-text evidence articles (ENHANCEMENT_IMPLEMENTATION_PLAN.md
+  /// Task 1). JSON array: [{ url, title, excerpt, fetchedAt, extractor, chars }].
+  /// Null for trends created before this feature or when the fetch failed -
+  /// downstream stages fall back to evidenceSummary in that case.
+  evidenceArticles Json?
   plan             ContentPlan?
   outline          ContentOutline?
   blog             Blog?
