@@ -477,6 +477,11 @@ export async function GET() {
       evidenceSummary: trend.evidenceSummary ?? null,
       scoreBreakdown: trend.scoreBreakdown ?? null,
       evidenceArticles: Array.isArray(trend.evidenceArticles) ? trend.evidenceArticles : null,
+      // Research-engine detail (docs/RESEARCH_ENGINE_UPGRADE.md): the 9-dimension
+      // final score, tier, novelty verdict, evidence/topic quality and query
+      // provenance. Null for legacy-path trends - the modal renders the new
+      // section only when this is present. Additive/backward-compatible.
+      researchDetail: trend.researchDetail ?? null,
     };
   });
 
