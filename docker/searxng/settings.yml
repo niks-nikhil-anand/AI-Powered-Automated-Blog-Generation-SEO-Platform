@@ -1,0 +1,44 @@
+# Minimal SearXNG settings for the auto-blog research engine
+# (docs/RESEARCH_ENGINE_UPGRADE.md). The stock SearXNG docker image disables
+# the JSON search API (`format=json`) by default - the research-worker's
+# SearXNG client (workers/research-worker/searxng/client.ts) requires it, so it
+# is enabled explicitly here under `search.formats`.
+#
+# This is a deliberately small, safe config: it enables a few mainstream
+# engines, turns on the JSON format, and leaves SearXNG's built-in rate
+# limiting / bot protection on. Tune `engines` to taste - every engine you
+# enable is one more upstream source SearXNG fans a query out to.
+
+use_default_settings: true
+
+server:
+  # Bind inside the container; docker-compose maps this to the host.
+  bind_address: "0.0.0.0"
+  port: 8080
+  # A secret key is required for the web UI; the JSON API the worker uses does
+  # not need it, but SearXNG refuses to boot without one set.
+  secret_key: "change-me-in-production-please"
+  limiter: true
+  image_proxy: false
+
+search:
+  # The critical bit: allow the JSON response format so the worker can consume
+  # results programmatically.
+  formats:
+    - html
+    - json
+  safe_search: 1
+  default_lang: "en"
+
+# A small, reliable default engine set. Add/remove engines here as needed.
+engines:
+  - name: duckduckgo
+    disabled: false
+  - name: brave
+    disabled: false
+  - name: github
+    disabled: false
+  - name: stackoverflow
+    disabled: false
+  - name: hackernews
+    disabled: false
