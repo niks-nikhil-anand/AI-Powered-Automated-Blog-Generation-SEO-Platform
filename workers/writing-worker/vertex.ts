@@ -316,7 +316,7 @@ async function generateSectionedDraft(topic: string, description: string, contex
     const editorModel = await getSetting(MODEL_SETTING_KEYS.writing, env.VERTEX_MODEL);
     const edited = await generateVertexText(
       editorModel,
-      `You are the editor of a developer blog. Polish this assembled article for voice cohesion and transitions between sections; remove any sentence duplicated across sections. Preserve every "## " heading, every [S1]-style citation marker, every table, and every code block exactly as-is. Return ONLY the full article Markdown.\n\n${markdown}`,
+      `You are the editor of a developer blog. Polish this assembled article for voice cohesion and transitions between sections; remove any sentence duplicated across sections. Do not add, remove, or alter any specific claim (numbers, dates, versions, capabilities) - polish transitions and voice only. Preserve every "## " heading, every [S1]-style citation marker, every table, and every code block exactly as-is. Return ONLY the full article Markdown.\n\n${markdown}`,
       { maxOutputTokens: 8192, temperature: 0.2, timeoutMs: env.WRITING_TIMEOUT_MS }
     );
     markdown = enforceSingleH1(edited.text, title);
