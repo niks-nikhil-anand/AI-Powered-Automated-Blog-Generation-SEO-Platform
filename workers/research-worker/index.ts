@@ -12,6 +12,7 @@ import { semanticEnrich } from "./pipeline/semantic";
 import { scoreClusters } from "./pipeline/score";
 import { promotableCandidates } from "./pipeline/promote";
 import { fetchEvidenceArticles } from "./pipeline/evidence";
+import { runResearchEngine } from "./pipeline/engine";
 import { RawSignal, ResearchCandidate } from "./types";
 import {
   failWorkerAttempt,
@@ -78,6 +79,27 @@ export async function runResearch() {
   });
 
   try {
+    // Research-engine branch (docs/RESEARCH_ENGINE_UPGRADE.md). OFF by default;
+    // when ON, the novelty-driven engine runs the full upgraded pipeline and the
+    // legacy path below is skipped entirely. The audit wrapper (startWorkerAttempt
+    // / passWorkerAttempt / failWorkerAttempt) is identical either way.
+    if (env.RESEARCH_ENGINE_ENABLED) {
+      const engineOutput = await runResearchEngine(attempt.workflow.id);
+      await passWorkerAttempt({
+        workflowRunId: attempt.workflow.id,
+        attemptId: attempt.attempt.id,
+        output: engineOutput.report,
+        qualityReport: {
+          stage: "research-worker",
+          score: engineOutput.report.avgFinalScore,
+          passed: true,
+          reasons: [engineOutput.report.outcomeReason],
+        },
+        nextStage: engineOutput.dispatchedCount > 0 ? "planning-worker" : "stopped",
+      });
+      return engineOutput;
+    }
+
     const sourceResults = await Promise.allSettled(
       sources.map(async (source) => ({
         source: source.name,
