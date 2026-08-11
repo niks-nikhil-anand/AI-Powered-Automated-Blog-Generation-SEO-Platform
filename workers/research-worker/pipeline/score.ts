@@ -13,6 +13,7 @@ const SOURCE_REASON = {
   anthropic_news: "Featured on Anthropic News",
   microsoft_ai_blog: "Featured on Microsoft AI Blog",
   nvidia_blog: "Featured on NVIDIA Developer Blog",
+  searxng: "Surfaced by web search (SearXNG)",
 } as const;
 
 function clampScore(value: number): number {
