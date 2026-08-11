@@ -87,6 +87,43 @@ services:
       - ENABLE_MICROSOFT_AI_BLOG=${ENABLE_MICROSOFT_AI_BLOG:-true}
       - ENABLE_NVIDIA_BLOG=${ENABLE_NVIDIA_BLOG:-true}
       - ENABLE_HACKERNEWS=${ENABLE_HACKERNEWS:-true}
+      # SearXNG self-hosted SERP discovery + validation layer (optional, OFF by
+      # default - docs/RESEARCH_ENGINE_UPGRADE.md). SEARXNG_BASE_URL points at
+      # the `searxng` service below when that service is enabled.
+      - SEARXNG_ENABLED=${SEARXNG_ENABLED:-false}
+      - ENABLE_SEARXNG=${ENABLE_SEARXNG:-false}
+      - SEARXNG_BASE_URL=${SEARXNG_BASE_URL:-http://searxng:8080}
+      - SEARXNG_TIMEOUT_MS=${SEARXNG_TIMEOUT_MS:-8000}
+      - SEARXNG_RESULTS_PER_QUERY=${SEARXNG_RESULTS_PER_QUERY:-10}
+      - SEARXNG_MAX_QUERIES=${SEARXNG_MAX_QUERIES:-60}
+      - SEARXNG_LANGUAGE=${SEARXNG_LANGUAGE:-en}
+      - SEARXNG_CATEGORIES=${SEARXNG_CATEGORIES:-general}
+      - SEARXNG_ENGINES=${SEARXNG_ENGINES:-}
+      - SEARXNG_SAFESEARCH=${SEARXNG_SAFESEARCH:-1}
+      - SEARXNG_TIME_RANGE=${SEARXNG_TIME_RANGE:-}
+      - SEARXNG_DISCOVERY_QUERIES=${SEARXNG_DISCOVERY_QUERIES:-new developer tools this week,AI coding agent announcement,open source LLM release,new JavaScript framework,developer productivity tool launch}
+      # Research engine (novelty-driven topic selection) - OFF by default.
+      - RESEARCH_ENGINE_ENABLED=${RESEARCH_ENGINE_ENABLED:-false}
+      - RESEARCH_CANDIDATE_POOL_SIZE=${RESEARCH_CANDIDATE_POOL_SIZE:-40}
+      - RESEARCH_MAX_QUERIES_PER_CANDIDATE=${RESEARCH_MAX_QUERIES_PER_CANDIDATE:-5}
+      - RESEARCH_LLM_QUERY_EXPANSION_ENABLED=${RESEARCH_LLM_QUERY_EXPANSION_ENABLED:-false}
+      - RESEARCH_LLM_TOPIC_QUALITY_ENABLED=${RESEARCH_LLM_TOPIC_QUALITY_ENABLED:-false}
+      - RESEARCH_LLM_NOVELTY_ENABLED=${RESEARCH_LLM_NOVELTY_ENABLED:-false}
+      - RESEARCH_EMBEDDING_ENABLED=${RESEARCH_EMBEDDING_ENABLED:-true}
+      - RESEARCH_NOVELTY_LOOKBACK_DAYS=${RESEARCH_NOVELTY_LOOKBACK_DAYS:-90}
+      - RESEARCH_NOVELTY_MAX_HISTORY=${RESEARCH_NOVELTY_MAX_HISTORY:-400}
+      - RESEARCH_SEMANTIC_SIMILARITY_THRESHOLD=${RESEARCH_SEMANTIC_SIMILARITY_THRESHOLD:-0.9}
+      - RESEARCH_KEYWORD_SIMILARITY_THRESHOLD=${RESEARCH_KEYWORD_SIMILARITY_THRESHOLD:-0.6}
+      - RESEARCH_FRESHNESS_VERY_SIMILAR_DAYS=${RESEARCH_FRESHNESS_VERY_SIMILAR_DAYS:-7}
+      - RESEARCH_FRESHNESS_HIGHLY_SIMILAR_DAYS=${RESEARCH_FRESHNESS_HIGHLY_SIMILAR_DAYS:-30}
+      - RESEARCH_FRESHNESS_SIMILAR_DAYS=${RESEARCH_FRESHNESS_SIMILAR_DAYS:-90}
+      - RESEARCH_TIER_EXCELLENT_SCORE=${RESEARCH_TIER_EXCELLENT_SCORE:-90}
+      - RESEARCH_TIER_STRONG_SCORE=${RESEARCH_TIER_STRONG_SCORE:-80}
+      - RESEARCH_DISPATCH_MIN_SCORE=${RESEARCH_DISPATCH_MIN_SCORE:-90}
+      - RESEARCH_MIN_EVIDENCE_SCORE=${RESEARCH_MIN_EVIDENCE_SCORE:-55}
+      - RESEARCH_MIN_NOVELTY_SCORE=${RESEARCH_MIN_NOVELTY_SCORE:-60}
+      - RESEARCH_MAX_PER_FAMILY=${RESEARCH_MAX_PER_FAMILY:-2}
+      - RESEARCH_EXPLORATION_RATIO=${RESEARCH_EXPLORATION_RATIO:-0.2}
     depends_on:
       - postgres
       - redis
@@ -234,6 +271,26 @@ services:
       - postgres
       - redis
     restart: always
+
+  # Optional self-hosted SearXNG instance for the research engine's SERP
+  # discovery + validation layer (docs/RESEARCH_ENGINE_UPGRADE.md). It runs
+  # under the "searxng" compose profile so it does NOT start with a plain
+  # `docker compose up` - start it explicitly with:
+  #   docker compose --profile searxng up -d searxng
+  # then set SEARXNG_ENABLED=true / ENABLE_SEARXNG=true on the research-worker.
+  # The mounted settings.yml enables SearXNG's JSON API (format=json), which
+  # stock SearXNG images disable by default - the worker's client needs it.
+  searxng:
+    image: searxng/searxng:latest
+    container_name: blog-agent-searxng
+    profiles: ["searxng"]
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./docker/searxng:/etc/searxng:ro
+    environment:
+      - SEARXNG_BASE_URL=${SEARXNG_PUBLIC_URL:-http://localhost:8080/}
+    restart: unless-stopped
 
 volumes:
   postgres_data:
