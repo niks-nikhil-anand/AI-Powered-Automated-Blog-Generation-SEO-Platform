@@ -32,6 +32,33 @@ export interface TrendEvidenceArticle {
   chars: number;
 }
 
+/**
+ * Trend.researchDetail (docs/RESEARCH_ENGINE_UPGRADE.md) - present only on
+ * trends produced by the research engine. All fields optional/defensive so
+ * legacy rows (and partial writes) render nothing new.
+ */
+export interface TrendResearchDetail {
+  engine?: boolean;
+  tier?: "excellent" | "strong" | "weak" | "reject";
+  family?: string;
+  exploratory?: boolean;
+  finalScore?: Partial<{
+    trendDemand: number;
+    freshness: number;
+    searchDemand: number;
+    githubMomentum: number;
+    sourceDiversity: number;
+    evidenceQuality: number;
+    topicQuality: number;
+    novelty: number;
+    audienceValue: number;
+    final: number;
+  }>;
+  novelty?: { noveltyScore?: number; decision?: string; reason?: string; layer?: string };
+  evidenceQuality?: { total?: number };
+  topicQuality?: { total?: number };
+}
+
 export interface TrendRow {
   id: string;
   srcInitial: string;
@@ -55,6 +82,7 @@ export interface TrendRow {
   evidenceSummary?: string | null;
   scoreBreakdown?: TrendScoreBreakdown | null;
   evidenceArticles?: TrendEvidenceArticle[] | null;
+  researchDetail?: TrendResearchDetail | null;
 }
 
 interface TrendDetailModalProps {
@@ -161,6 +189,32 @@ const BREAKDOWN_ROWS: { key: keyof TrendScoreBreakdown; label: string }[] = [
   { key: "semanticRelevance", label: "Semantic Relevance" },
 ];
 
+/** The research engine's 9-dimension final score (docs/RESEARCH_ENGINE_UPGRADE.md Phase 11). */
+const ENGINE_ROWS: { key: keyof NonNullable<TrendResearchDetail["finalScore"]>; label: string }[] = [
+  { key: "trendDemand", label: "Trend Demand" },
+  { key: "freshness", label: "Freshness" },
+  { key: "searchDemand", label: "Search Demand" },
+  { key: "githubMomentum", label: "GitHub Momentum" },
+  { key: "sourceDiversity", label: "Source Diversity" },
+  { key: "evidenceQuality", label: "Evidence Quality" },
+  { key: "topicQuality", label: "Topic Quality" },
+  { key: "novelty", label: "Novelty" },
+  { key: "audienceValue", label: "Audience Value" },
+];
+
+function tierBadge(tier?: string) {
+  switch (tier) {
+    case "excellent":
+      return { bg: "rgba(16,185,129,0.14)", fg: "var(--emerald)", label: "Excellent" };
+    case "strong":
+      return { bg: "rgba(56,189,248,0.14)", fg: "var(--sky)", label: "Strong" };
+    case "weak":
+      return { bg: "rgba(245,158,11,0.14)", fg: "var(--amber)", label: "Weak" };
+    default:
+      return { bg: "rgba(244,63,94,0.14)", fg: "var(--rose)", label: "Reject" };
+  }
+}
+
 function SectionHeading({ icon, children }: { icon: React.ReactNode; children: React.ReactNode }) {
   return (
     <span className="text-[10px] uppercase font-bold tracking-wider text-[var(--mut)] flex items-center gap-[5px]">
@@ -190,6 +244,12 @@ export function TrendDetailModal({
     ? parseEvidenceSummary(trend.evidenceSummary)
     : { summary: "", keywords: [], evidence: [] };
   const age = formatAgeShort(trend.createdAt);
+
+  // Research-engine detail (only present on engine-produced trends).
+  const rd = trend.researchDetail ?? null;
+  const engineScore = rd?.finalScore ?? null;
+  const hasEngineScore = Boolean(engineScore && typeof engineScore.final === "number");
+  const tier = tierBadge(rd?.tier);
 
   // Distinct evidence domains - from fetched articles when we have them, else
   // from the URLs embedded in the summary evidence lines.
@@ -377,6 +437,73 @@ export function TrendDetailModal({
                   <div className="text-[9.5px] text-[var(--faint)] leading-snug">
                     Semantic relevance is 0 when the LLM scoring pass was skipped or unavailable for
                     this run.
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Research Engine Score - the transparent 9-dimension final score, tier,
+              novelty verdict and family, only for engine-produced trends. */}
+          {hasEngineScore && engineScore && rd && (
+            <div className="flex flex-col gap-[10px]">
+              <SectionHeading icon={<BarChart3 size={11} className="text-[var(--emerald)]" />}>
+                Research Engine Score
+              </SectionHeading>
+              <div className="bg-[var(--card2)] border border-[var(--bd)] rounded-[12px] p-[14px] flex flex-col gap-[9px]">
+                {/* Tier / family / exploratory badges */}
+                <div className="flex gap-[6px] flex-wrap mb-[2px]">
+                  <span
+                    className="text-[9.5px] font-bold px-[8px] py-[2.5px] rounded-[6px]"
+                    style={{ background: tier.bg, color: tier.fg }}
+                  >
+                    {tier.label}
+                  </span>
+                  {rd.family && (
+                    <span className="text-[9.5px] font-semibold px-[8px] py-[2.5px] rounded-[6px] bg-[var(--card)] border border-[var(--bd)] text-[var(--fg2)]">
+                      {rd.family}
+                    </span>
+                  )}
+                  {rd.exploratory && (
+                    <span className="text-[9.5px] font-semibold px-[8px] py-[2.5px] rounded-[6px] bg-[var(--tint)] text-[var(--indigo)]">
+                      Exploratory
+                    </span>
+                  )}
+                </div>
+
+                {ENGINE_ROWS.map((row) => {
+                  const value = clampPct(Number(engineScore[row.key] ?? 0));
+                  return (
+                    <div key={row.key} className="flex items-center gap-[10px]">
+                      <span className="text-[11px] font-medium text-[var(--fg2)] w-[138px] flex-none">
+                        {row.label}
+                      </span>
+                      <div className="flex-1 h-[6px] rounded-[3px] bg-[var(--card)] overflow-hidden">
+                        <div
+                          className="h-full rounded-[3px]"
+                          style={{ width: `${value}%`, background: barColor(value) }}
+                        />
+                      </div>
+                      <span className="font-mono text-[10.5px] font-bold text-[var(--fg2)] w-[24px] text-right flex-none">
+                        {value}
+                      </span>
+                    </div>
+                  );
+                })}
+
+                <div className="border-t border-[var(--bd)] pt-[9px] mt-[2px] flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-[var(--fg)]">Final Score</span>
+                  <span
+                    className="font-mono text-[11px] font-bold px-[8px] py-[2px] rounded-[6px]"
+                    style={{ background: trend.scoreBg, color: trend.scoreFg }}
+                  >
+                    {Math.round(Number(engineScore.final ?? 0))}/100
+                  </span>
+                </div>
+
+                {rd.novelty?.reason && (
+                  <div className="text-[9.5px] text-[var(--faint)] leading-snug">
+                    Novelty: {rd.novelty.reason}
                   </div>
                 )}
               </div>
