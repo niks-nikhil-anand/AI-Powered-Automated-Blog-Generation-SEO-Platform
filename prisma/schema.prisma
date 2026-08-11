@@ -225,9 +225,33 @@ model Trend {
   /// (workers/research-worker/pipeline/score.ts). JSON:
   /// { trendDemand, newsFreshness, githubMomentum, multiSourceValidation,
   ///   semanticRelevance } - persisted so the dashboard trend-detail modal can
-  /// show the signal-breakdown bars. Null for trends created before this
-  /// column existed.
+  ///   show the signal-breakdown bars. Null for trends created before this
+  ///   column existed.
   scoreBreakdown   Json?
+  /// Canonicalized primary source URL (tracking params stripped, trailing
+  /// slash normalized) used by the research engine's topic-memory layer for
+  /// exact URL dedupe. Null for legacy rows / topics with no URL evidence.
+  /// See workers/research-worker/utils/similarity.ts.
+  canonicalUrl     String?
+  /// Stable, URL-independent topic fingerprint (normalized entity + top
+  /// keywords). Two differently-worded write-ups of the same story share it,
+  /// which is what lets topic memory catch "Microsoft launches AI agent for
+  /// automated unit test generation" ~= "Microsoft's AI-powered unit testing
+  /// agent". Null for legacy rows. Indexed for the novelty lookup.
+  topicFingerprint String?
+  /// Gemini text-embedding of title+keywords as a JSON number[] (cosine
+  /// compared in-process - the repo has no pgvector/vector DB today, and the
+  /// trend volume is small enough that an in-memory scan is fine). Null when
+  /// RESEARCH_EMBEDDING_ENABLED is off or the call failed. See
+  /// workers/shared/embeddings.ts.
+  topicEmbedding   Json?
+  /// Full enriched research detail for engine-produced trends (final score
+  /// dimensions, evidence quality, topic quality, novelty verdict, content
+  /// opportunity, query provenance, tier, topic family). Kept separate from
+  /// scoreBreakdown so the dashboard's existing signal bars keep working.
+  /// JSON - see ResearchDetail in workers/research-worker/types.ts. Null for
+  /// legacy-path trends.
+  researchDetail   Json?
   plan             ContentPlan?
   outline          ContentOutline?
   blog             Blog?
@@ -236,7 +260,34 @@ model Trend {
 
   @@index([topic, createdAt])
   @@index([status])
+  @@index([topicFingerprint])
+  @@index([canonicalUrl])
 }
+
+/// One row per research-engine run (docs/RESEARCH_ENGINE_UPGRADE.md Phase 17),
+/// holding the structured run report: raw->selected funnel counts, rejection
+/// buckets, SERP usage, score/novelty/evidence averages, topic-family mix and
+/// the dispatch outcome. Powers observability into "why did we get N topics"
+/// and gives the calibration loop real data. Written only when
+/// RESEARCH_ENGINE_ENABLED is on; legacy runs don't touch this table.
+model ResearchRun {
+  id            String   @id @default(cuid())
+  /// Links back to the WorkflowRun/WorkerAttempt audit trail when available.
+  workflowRunId String?
+  /// Structured report payload - see ResearchRunReport in
+  /// workers/research-worker/types.ts for the exact shape.
+  metrics       Json
+  /// How many topics were actually dispatched to planning this run.
+  selectedCount Int      @default(0)
+  /// Best final score found this run (0 when nothing qualified).
+  bestScore     Float    @default(0)
+  /// Why the dispatch target was/wasn't met ("ok", "insufficient_90plus", ...).
+  outcome       String   @default("ok")
+  createdAt     DateTime @default(now())
+
+  @@index([createdAt])
+}
+
 
 /// Persisted Winston output. Written by the buffered PrismaTransport in
 /// workers/shared/log-transport.ts; pruned to LOG_RETENTION_DAYS.
