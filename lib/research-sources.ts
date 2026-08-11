@@ -28,6 +28,7 @@ export const RESEARCH_SOURCE_ORDER: ResearchSourceName[] = [
   "microsoft_ai_blog",
   "nvidia_blog",
   "hackernews",
+  "searxng",
 ];
 
 export const RESEARCH_SOURCE_META: Record<
@@ -45,6 +46,7 @@ export const RESEARCH_SOURCE_META: Record<
   microsoft_ai_blog: { label: "Microsoft AI Blog", initial: "MS", color: "var(--sky)" },
   nvidia_blog: { label: "NVIDIA Blog", initial: "NV", color: "#76b900" },
   hackernews: { label: "Hacker News", initial: "HN", color: "#ff6600" },
+  searxng: { label: "SearXNG", initial: "SX", color: "var(--amber)" },
 };
 
 function firstMatch(rawSource: string): ResearchSourceName | null {
