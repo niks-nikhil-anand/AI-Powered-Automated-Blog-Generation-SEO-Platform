@@ -159,9 +159,142 @@ export const env = {
   ENABLE_MICROSOFT_AI_BLOG: optional("ENABLE_MICROSOFT_AI_BLOG", "true") !== "false",
   ENABLE_NVIDIA_BLOG: optional("ENABLE_NVIDIA_BLOG", "true") !== "false",
   ENABLE_HACKERNEWS: optional("ENABLE_HACKERNEWS", "true") !== "false",
+  /**
+   * SearXNG *discovery source* switch - the only ENABLE_* that defaults OFF,
+   * since SearXNG is new and self-hosted (unlike the pre-existing sources that
+   * ran unconditionally before flags existed). Only takes effect together with
+   * SEARXNG_ENABLED (see the SearXNG block above).
+   */
+  ENABLE_SEARXNG: optional("ENABLE_SEARXNG", "false") !== "false",
 
   /** Blogs/day the dashboard measures against. 3 slots x 1 topic per run. */
   DAILY_BLOG_TARGET: Number(optional("DAILY_BLOG_TARGET", "3")),
+
+  /**
+   * SearXNG — optional self-hosted SERP discovery + validation layer
+   * (docs/RESEARCH_ENGINE_UPGRADE.md). It is ADDITIVE: it never replaces the
+   * existing trend/news/GitHub sources, and a SearXNG outage must never fail a
+   * research run (every call fails soft to []). Two distinct flags:
+   *   SEARXNG_ENABLED  - master switch for the SearXNG client (both the
+   *                      discovery source AND the candidate research layer).
+   *   ENABLE_SEARXNG   - per-source switch for SearXNG *discovery* only, same
+   *                      pattern as the other ENABLE_* source flags.
+   * Both default OFF, so out of the box nothing about research changes.
+   */
+  SEARXNG_ENABLED: optional("SEARXNG_ENABLED", "false") !== "false",
+  /** Base URL of the self-hosted instance, e.g. http://localhost:8080 or the docker-compose `searxng` service. */
+  SEARXNG_BASE_URL: optional("SEARXNG_BASE_URL", "http://localhost:8080"),
+  SEARXNG_TIMEOUT_MS: Number(optional("SEARXNG_TIMEOUT_MS", "8000")),
+  /** Results requested per query (SearXNG `format=json` returns up to this many). */
+  SEARXNG_RESULTS_PER_QUERY: Number(optional("SEARXNG_RESULTS_PER_QUERY", "10")),
+  /**
+   * Hard budget on total SearXNG queries per research run across BOTH the
+   * discovery source and the per-candidate research layer. Bounds added
+   * latency and protects a shared/self-hosted instance from a runaway run.
+   * Sized so a candidate pool can actually be researched (a handful of
+   * discovery queries + a few per top candidate); once exhausted, remaining
+   * candidates degrade to the offline evidence profile rather than failing.
+   */
+  SEARXNG_MAX_QUERIES: Number(optional("SEARXNG_MAX_QUERIES", "60")),
+  SEARXNG_LANGUAGE: optional("SEARXNG_LANGUAGE", "en"),
+  /** Comma-separated SearXNG categories (e.g. "general,it"). Empty = SearXNG default. */
+  SEARXNG_CATEGORIES: optional("SEARXNG_CATEGORIES", "general"),
+  /** Comma-separated SearXNG engines (e.g. "google,duckduckgo,github"). Empty = instance default. */
+  SEARXNG_ENGINES: optional("SEARXNG_ENGINES", ""),
+  /** Safe-search level: 0 (off) | 1 (moderate) | 2 (strict). */
+  SEARXNG_SAFESEARCH: optional("SEARXNG_SAFESEARCH", "1"),
+  /** Optional recency filter where the engine supports it: day|week|month|year. Empty = no filter. */
+  SEARXNG_TIME_RANGE: optional("SEARXNG_TIME_RANGE", ""),
+  /**
+   * Comma-separated seed queries the SearXNG DISCOVERY source runs to surface
+   * fresh developer content into the candidate pool. These are discovery
+   * probes, distinct from the per-candidate expanded queries in Phase 3.
+   */
+  SEARXNG_DISCOVERY_QUERIES: optional(
+    "SEARXNG_DISCOVERY_QUERIES",
+    "new developer tools this week,AI coding agent announcement,open source LLM release,new JavaScript framework,developer productivity tool launch"
+  )
+    .split(",")
+    .map((query) => query.trim())
+    .filter(Boolean),
+
+  /**
+   * Research-engine master switch (docs/RESEARCH_ENGINE_UPGRADE.md). OFF =
+   * runResearch() takes the legacy path byte-for-byte; ON = the novelty-driven
+   * engine (large candidate pool, topic memory, topic/evidence quality,
+   * transparent final score, diversity + exploration, structured run report).
+   * Default OFF per the project's ship-dark convention.
+   */
+  RESEARCH_ENGINE_ENABLED: optional("RESEARCH_ENGINE_ENABLED", "false") !== "false",
+  /**
+   * How many candidates survive preliminary scoring into the SERP/evidence
+   * research + final scoring stage. The engine deliberately evaluates far
+   * more candidates than it ultimately dispatches (Phase 4) so "first topic
+   * that cleared 90" is not the only discovery mechanism.
+   */
+  RESEARCH_CANDIDATE_POOL_SIZE: Number(optional("RESEARCH_CANDIDATE_POOL_SIZE", "40")),
+  /** Cap on SearXNG research queries spent on a single candidate (Phase 3 budget). */
+  RESEARCH_MAX_QUERIES_PER_CANDIDATE: Number(optional("RESEARCH_MAX_QUERIES_PER_CANDIDATE", "5")),
+  /**
+   * Optional LLM query expansion on top of the deterministic templates
+   * (Phase 3). OFF = templates only (deterministic, zero cost). ON = one
+   * batched Vertex call proposes a few extra intents per promising candidate.
+   */
+  RESEARCH_LLM_QUERY_EXPANSION_ENABLED:
+    optional("RESEARCH_LLM_QUERY_EXPANSION_ENABLED", "false") !== "false",
+
+  /**
+   * Topic memory / novelty (Phases 5-6). How far back to compare candidates
+   * against historical Trends + Blogs, and the similarity thresholds per
+   * layer. RESEARCH_SEMANTIC_SIMILARITY_THRESHOLD is the cosine-similarity
+   * cutoff for "same topic" on Gemini embeddings - the WORKER_ENHANCEMENT_GUIDE
+   * R2 note recommends ~0.9; treat it as a starting point and calibrate against
+   * real runs before tightening. Embeddings are Gemini text-embedding stored as
+   * Trend.topicEmbedding (no new vector DB).
+   */
+  RESEARCH_NOVELTY_LOOKBACK_DAYS: Number(optional("RESEARCH_NOVELTY_LOOKBACK_DAYS", "90")),
+  RESEARCH_SEMANTIC_SIMILARITY_THRESHOLD: Number(
+    optional("RESEARCH_SEMANTIC_SIMILARITY_THRESHOLD", "0.9")
+  ),
+  /** Keyword-Jaccard similarity at/above which two titles are treated as the same topic. */
+  RESEARCH_KEYWORD_SIMILARITY_THRESHOLD: Number(optional("RESEARCH_KEYWORD_SIMILARITY_THRESHOLD", "0.6")),
+  /** Kill switch for the (paid) embedding calls in novelty scoring. OFF = novelty uses the free deterministic layers only. */
+  RESEARCH_EMBEDDING_ENABLED: optional("RESEARCH_EMBEDDING_ENABLED", "true") !== "false",
+  /** Freshness windows (days) - see pipeline/novelty.ts. */
+  RESEARCH_FRESHNESS_VERY_SIMILAR_DAYS: Number(optional("RESEARCH_FRESHNESS_VERY_SIMILAR_DAYS", "7")),
+  RESEARCH_FRESHNESS_HIGHLY_SIMILAR_DAYS: Number(optional("RESEARCH_FRESHNESS_HIGHLY_SIMILAR_DAYS", "30")),
+  RESEARCH_FRESHNESS_SIMILAR_DAYS: Number(optional("RESEARCH_FRESHNESS_SIMILAR_DAYS", "90")),
+  /** Optional LLM "is this a genuinely new development" check that lets a legitimate follow-up survive an entity match (Phase 6). OFF = deterministic version/update-signal heuristic only. */
+  RESEARCH_LLM_NOVELTY_ENABLED: optional("RESEARCH_LLM_NOVELTY_ENABLED", "false") !== "false",
+
+  /**
+   * Optional LLM topic-quality score (Phase 7), batched like the semantic pass.
+   * OFF = topic quality is the deterministic heuristic only. Either way it is
+   * computed separately from raw trend strength so a viral-but-vague topic
+   * cannot score well on trend signal alone.
+   */
+  RESEARCH_LLM_TOPIC_QUALITY_ENABLED: optional("RESEARCH_LLM_TOPIC_QUALITY_ENABLED", "false") !== "false",
+
+  /**
+   * Final selection (Phases 12-16). These are HONEST gates - the engine never
+   * inflates a score to reach them (docs/RESEARCH_ENGINE_UPGRADE.md). A run
+   * that finds too few genuine 90+ topics dispatches the best valid candidates
+   * and records why the target was unmet instead of manufacturing points.
+   */
+  /** Tier cutoffs: >=RESEARCH_TIER_EXCELLENT_SCORE auto-dispatch eligible; >=RESEARCH_TIER_STRONG_SCORE strong/backlog. */
+  RESEARCH_TIER_EXCELLENT_SCORE: Number(optional("RESEARCH_TIER_EXCELLENT_SCORE", "90")),
+  RESEARCH_TIER_STRONG_SCORE: Number(optional("RESEARCH_TIER_STRONG_SCORE", "80")),
+  /** Minimum final score a topic needs to be auto-dispatched to writing. */
+  RESEARCH_DISPATCH_MIN_SCORE: Number(optional("RESEARCH_DISPATCH_MIN_SCORE", "90")),
+  /** Hard minimums a dispatchable topic must clear regardless of total score. */
+  RESEARCH_MIN_EVIDENCE_SCORE: Number(optional("RESEARCH_MIN_EVIDENCE_SCORE", "55")),
+  RESEARCH_MIN_NOVELTY_SCORE: Number(optional("RESEARCH_MIN_NOVELTY_SCORE", "60")),
+  /** Topic-family diversity: at most this many selected topics per family per run (Phase 14). */
+  RESEARCH_MAX_PER_FAMILY: Number(optional("RESEARCH_MAX_PER_FAMILY", "2")),
+  /** Fraction of the dispatch slot reserved for exploratory (emerging/niche) topics (Phase 15). */
+  RESEARCH_EXPLORATION_RATIO: Number(optional("RESEARCH_EXPLORATION_RATIO", "0.2")),
+  /** How many historical Trends/Blogs to load for novelty comparison (bounds memory + embedding work). */
+  RESEARCH_NOVELTY_MAX_HISTORY: Number(optional("RESEARCH_NOVELTY_MAX_HISTORY", "400")),
 
   // Writing worker
   BLOG_MIN_WORDS: Number(optional("BLOG_MIN_WORDS", "1200")),
