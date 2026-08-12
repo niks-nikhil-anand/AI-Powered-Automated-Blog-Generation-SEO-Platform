@@ -25,12 +25,41 @@ const CAPABILITY_RE = /\b(supports?|enables?|allows?|offers?|provides?|integrate
 /** Structural lines that look like claims but aren't checkable facts. */
 const NOISE_LINE_RE = /^(#{1,6}\s|[-*]?\s*\[|\||```|>|\s*\d+\.\s*$)/;
 
+/**
+ * Sentences that contain digits/versions/dates but are NOT checkable
+ * factual claims - hypothetical framings, questions, code instructions,
+ * self-referential article structure, and quoted speech.
+ */
+const HYPOTHETICAL_RE = /\b(imagine|for example|for instance|let's say|suppose|consider a|what if|think of|picture this)\b/i;
+const QUESTION_RE = /\?\s*$/;
+const CODE_INSTRUCTION_RE = /\b(run|install|execute|type|enter|press|click|navigate to|open)\s+(the\s+)?(following|this|these)\s+(command|code|command|snippet)/i;
+const SELF_REFERENCE_RE = /\b(this article|this guide|this post|we'll cover|we will cover|as we (saw|discussed)|in this section|as shown (above|below)|see (above|below|the))\b/i;
+const TOC_LINE_RE = /^\[.+\]\(#.+\)$/;
+
 function splitSentences(content: string): string[] {
-  return content
+  // Strip fenced code blocks before splitting - code content is never a
+  // checkable factual claim about the article's subject.
+  const withoutCodeBlocks = content.replace(/```[\s\S]*?```/g, "");
+  return withoutCodeBlocks
     .split(/\n{2,}/) // paragraphs first - keeps table rows/code out via NOISE_LINE_RE below
     .flatMap((paragraph) => paragraph.split(/(?<=[.!?])\s+(?=[A-Z])/))
     .map((sentence) => sentence.replace(/\s+/g, " ").trim())
     .filter((sentence) => sentence.length >= 30 && sentence.length <= 400);
+}
+
+/**
+ * Beyond the structural NOISE_LINE_RE check, filter out sentences that
+ * match a claim regex but are not actually verifiable factual assertions
+ * about the article's subject. Each filter targets a specific false-
+ * positive class observed in blocked-at-QA drafts.
+ */
+function isCheckableClaim(sentence: string): boolean {
+  if (HYPOTHETICAL_RE.test(sentence)) return false;
+  if (QUESTION_RE.test(sentence)) return false;
+  if (CODE_INSTRUCTION_RE.test(sentence)) return false;
+  if (SELF_REFERENCE_RE.test(sentence)) return false;
+  if (TOC_LINE_RE.test(sentence.trim())) return false;
+  return true;
 }
 
 function classify(sentence: string): ExtractedClaim["kind"] | null {
@@ -50,6 +79,7 @@ export function extractClaimsDeterministic(content: string): ExtractedClaim[] {
   const claims: ExtractedClaim[] = [];
   for (const sentence of splitSentences(content)) {
     if (NOISE_LINE_RE.test(sentence)) continue;
+    if (!isCheckableClaim(sentence)) continue;
     const kind = classify(sentence);
     if (kind) claims.push({ text: sentence, kind });
   }

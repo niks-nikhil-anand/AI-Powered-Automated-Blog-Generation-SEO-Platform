@@ -65,12 +65,12 @@ type VerifiedClaim = z.infer<typeof SelfCheckClaimSchema>;
 const VERDICT_WEIGHT: Record<SelfCheckVerdict, number> = {
   supported: 1,
   uncertain: 0.5,
-  unverifiable: 0.25,
+  unverifiable: 0.4,
   unsupported: 0,
 };
 
 /** Same cap rule as factcheck.ts: mostly-ungrounded articles cannot pass. */
-const UNVERIFIABLE_CAP_RATIO = 0.3;
+const UNVERIFIABLE_CAP_RATIO = 0.4;
 const UNVERIFIABLE_SCORE_CAP = 60;
 
 const VERIFY_BATCH_SIZE = 10;
