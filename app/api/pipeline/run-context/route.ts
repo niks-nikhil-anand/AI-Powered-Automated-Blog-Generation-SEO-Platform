@@ -2,6 +2,12 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { researchQueue } from "@/workers/shared/queues";
 import { allQueueCounts, STAGE_ORDER } from "@/lib/queues";
+import {
+  RESEARCH_SLOT_IDS,
+  RESEARCH_SLOT_LABELS,
+  RECONCILE_SLOT_ID,
+  scheduleSettingKey,
+} from "@/workers/shared/research-slots";
 
 export const dynamic = "force-dynamic";
 
@@ -9,14 +15,8 @@ export const dynamic = "force-dynamic";
 const FALLBACK_COST_USD = 0.067;
 const FALLBACK_DURATION_MS = 3 * 60 * 1000;
 
-const SLOT_LABELS: Record<string, string> = {
-  "research-overnight": "Overnight",
-  "research-midday": "Midday",
-  "research-us-daytime": "US daytime",
-};
-
 function slotLabel(key: string) {
-  return SLOT_LABELS[key] ?? key.replace(/^research-/, "").replace(/-/g, " ");
+  return RESEARCH_SLOT_LABELS[key] ?? key.replace(/^research-/, "").replace(/-/g, " ");
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -29,7 +29,7 @@ export async function GET() {
   try {
     const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
 
-  const [schedulers, queues, workersConnected, lastAttempt, usageRows, passedRuns] =
+  const [schedulers, queues, workersConnected, lastAttempt, usageRows, passedRuns, overrideRows] =
     await Promise.all([
       researchQueue.getJobSchedulers().catch(() => []),
       allQueueCounts(),
@@ -48,21 +48,41 @@ export async function GET() {
         take: 100,
         orderBy: { createdAt: "desc" },
       }),
+      // Dashboard-edited schedule overrides (see /api/pipeline/schedules/[id]) -
+      // presence of the AppSetting row is what makes a slot "overridden".
+      prisma.appSetting.findMany({
+        where: { key: { in: RESEARCH_SLOT_IDS.map(scheduleSettingKey) } },
+        select: { key: true },
+      }),
     ]);
+  const overriddenSlotKeys = new Set(overrideRows.map((row) => row.key));
 
   // Next fire times come straight from BullMQ rather than re-parsing cron, so
-  // this reflects what is actually registered in Redis. A stale scheduler that
-  // survived the reconcile would show up here instead of staying invisible.
+  // this reflects what is actually registered in Redis. Only the three real
+  // research slots are returned as editable schedules - the reconcile
+  // scheduler ("daily-target-reconcile", a */30 tick) also lives on this
+  // queue and used to leak into the settings UI as a 4th "--:--" card whose
+  // Edit button 404'd; it's surfaced separately below as read-only info.
   const schedules = schedulers
-    .filter((scheduler) => typeof scheduler.next === "number")
+    .filter((scheduler) => typeof scheduler.next === "number" && RESEARCH_SLOT_IDS.includes(scheduler.key))
     .map((scheduler) => ({
       id: scheduler.key,
       label: slotLabel(scheduler.key),
       pattern: scheduler.pattern ?? null,
       tz: scheduler.tz ?? null,
       next: scheduler.next as number,
+      overridden: overriddenSlotKeys.has(scheduleSettingKey(scheduler.key)),
     }))
     .sort((a, b) => a.next - b.next);
+
+  const reconcileScheduler = schedulers.find((scheduler) => scheduler.key === RECONCILE_SLOT_ID);
+  const reconcile = reconcileScheduler
+    ? {
+        id: RECONCILE_SLOT_ID,
+        pattern: reconcileScheduler.pattern ?? null,
+        next: typeof reconcileScheduler.next === "number" ? reconcileScheduler.next : null,
+      }
+    : null;
 
   const output = asRecord(lastAttempt?.output);
   const lastRun = lastAttempt
@@ -106,6 +126,7 @@ export async function GET() {
 
   return NextResponse.json({
     schedules,
+    reconcile,
     lastRun,
     queues,
     stageOrder: STAGE_ORDER,
