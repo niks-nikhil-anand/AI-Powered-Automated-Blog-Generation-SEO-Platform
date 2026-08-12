@@ -14,6 +14,7 @@ import {
   startWorkerAttempt,
   QualityGateError,
 } from "../shared/recovery";
+import { logVertexRuntimeConfig } from "../shared/vertex";
 
 const log = logger.child({ worker: "outline-worker" });
 
@@ -132,6 +133,7 @@ export function startOutlineWorker() {
   worker.on("completed", (job, result) => log.info(`Job ${job.id} completed`, result));
   worker.on("failed", (job, err) => log.error(`Job ${job?.id ?? "?"} failed: ${err.message}`));
 
+  logVertexRuntimeConfig(log);
   log.info(`Outline worker listening on "${QUEUE_NAMES.outline}"`);
   return worker;
 }

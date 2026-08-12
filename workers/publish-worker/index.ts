@@ -12,6 +12,7 @@ import {
   QualityGateError,
 } from "../shared/recovery";
 import { reconcileDailyTarget } from "../shared/daily-target";
+import { logVertexRuntimeConfig } from "../shared/vertex";
 
 const log = logger.child({ worker: "publish-worker" });
 
@@ -109,6 +110,10 @@ export function startPublishWorker() {
   worker.on("completed", (job, result) => log.info(`Job ${job.id} completed`, result));
   worker.on("failed", (job, err) => log.error(`Job ${job?.id ?? "?"} failed: ${err.message}`));
 
+  // Boot fingerprint (docs/VERTEX_429_RESOLUTION_PLAN.md Step 1.2) - publish
+  // calls no Vertex API, but logging the config here too proves the container
+  // is running the resilience build when grepping `docker compose logs`.
+  logVertexRuntimeConfig(log);
   log.info(`Publish worker listening on "${QUEUE_NAMES.publish}"`);
   return worker;
 }
