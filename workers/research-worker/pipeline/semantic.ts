@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { env, isVertexConfigured } from "../../shared/env";
-import { generateVertexJson } from "../../shared/vertex";
+import { batchStagger, generateVertexJson } from "../../shared/vertex";
 import { getSetting, MODEL_SETTING_KEYS } from "../../shared/settings";
 import { logger } from "../../shared/logger";
 import { researchConfig } from "../config";
@@ -179,10 +179,18 @@ export async function semanticEnrich(clusters: SignalCluster[]): Promise<Enriche
     `Semantic scoring ${clusters.length} cluster(s) in ${batches.length} batch(es) of up to ${researchConfig.semanticBatchSize}`
   );
 
+  // Staggered starts (docs/VERTEX_429_RESILIENCE_PLAN.md Task 9): N parallel
+  // batches fired at the same millisecond spike the shared project quota.
   const results = await Promise.allSettled(
-    batches.map((batch) =>
-      generateVertexJson<unknown>(model, buildPrompt(batch), { timeoutMs: researchConfig.semanticTimeoutMs })
-    )
+    batches.map(async (batch, index) => {
+      await batchStagger(index);
+      // Deferrable: semantic scoring is enrichment - under a quota breaker
+      // it sheds and clusters fall back to heuristic scores.
+      return generateVertexJson<unknown>(model, buildPrompt(batch), {
+        timeoutMs: researchConfig.semanticTimeoutMs,
+        priority: "deferrable",
+      });
+    })
   );
 
   const scored: SemanticClusterOutput[] = [];
