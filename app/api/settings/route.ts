@@ -19,6 +19,7 @@ const MODEL_DEFAULTS: Record<keyof typeof MODEL_SETTING_KEYS, string> = {
   semantic: env.VERTEX_FLASH,
   judge: env.VERTEX_FLASH,
   writingSections: env.VERTEX_FLASH,
+  writingSelfcheck: env.VERTEX_FLASH,
 };
 
 const MODEL_STAGES = Object.keys(MODEL_SETTING_KEYS) as (keyof typeof MODEL_SETTING_KEYS)[];
