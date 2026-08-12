@@ -29,6 +29,8 @@ export const MODEL_SETTING_KEYS = {
   judge: "model:judge",
   /** Per-section draft generation when sectioned writing is on (Task 5). */
   writingSections: "model:writingSections",
+  /** Write-time claim self-check verification batches (Task 6). */
+  writingSelfcheck: "model:writingSelfcheck",
 } as const;
 
 export type ModelStage = keyof typeof MODEL_SETTING_KEYS;
