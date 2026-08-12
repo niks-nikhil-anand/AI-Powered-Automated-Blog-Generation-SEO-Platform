@@ -10,6 +10,7 @@ import {
   startWorkerAttempt,
   type QualityGateReport,
 } from "../shared/recovery";
+import { logVertexRuntimeConfig } from "../shared/vertex";
 import { reconcileDailyTarget } from "../shared/daily-target";
 
 const log = logger.child({ worker: "quality-worker" });
@@ -107,6 +108,16 @@ export async function runQualityCheck(payload: QualityJobPayload) {
     const lastWritingInput = workflow?.attempts[0]?.input as WritingJobPayload | undefined;
 
     if (lastWritingInput && writingAttemptCount < 4) {
+      // Task 6.1: the concrete claims the fact check could not verify.
+      // Until now the rewrite prompt only saw "Fact Verification: 5/10" and
+      // hallucinated fresh claims on every retry; handing the writer the
+      // exact failing claim texts makes the retry (and Task 6's
+      // claim-repair path) targeted instead of blind. Empty on the legacy
+      // sampled path (factCheckDetail is null there) - no behavior change.
+      const factCheckIssues = (report.factCheckDetail?.claims ?? [])
+        .filter((claim) => claim.verdict !== "supported")
+        .slice(0, 10)
+        .map(({ claim, verdict, note }) => ({ claim, verdict, note }));
       await writingQueue.add("write_blog", {
         ...lastWritingInput,
         recoveryContext: {
@@ -115,6 +126,7 @@ export async function runQualityCheck(payload: QualityJobPayload) {
           // Task 4's actionable fixes - Task 5's targeted-repair path turns
           // these into section-level splices instead of a blind full rewrite.
           judgeFixes: report.judgeFixes,
+          factCheckIssues,
         },
       });
       await passWorkerAttempt({
@@ -167,6 +179,7 @@ export function startQualityWorker() {
   worker.on("completed", (job, result) => log.info(`Job ${job.id} completed`, result));
   worker.on("failed", (job, err) => log.error(`Job ${job?.id ?? "?"} failed: ${err.message}`));
 
+  logVertexRuntimeConfig(log);
   log.info(`Quality worker listening on "${QUEUE_NAMES.quality}"`);
   return worker;
 }

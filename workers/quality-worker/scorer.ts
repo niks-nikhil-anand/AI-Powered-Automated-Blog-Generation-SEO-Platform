@@ -99,10 +99,12 @@ async function assessFeaturedImage(blog: BlogForQuality): Promise<VisionAssessme
     const mimeType = response.headers.get("content-type") || "image/jpeg";
 
     const startedAt = Date.now();
+    // Deferrable: a skipped vision check degrades one score dimension.
     const result = await generateVertexVisionJson<VisionAssessment>(
       env.VERTEX_FLASH,
       `You are reviewing the hero image for a blog post titled "${blog.title}". Assess two things: (1) relevance - does the image plausibly depict this article's subject; (2) visual appeal - is it well-composed and polished (this is a best-effort proxy for taste, not an objective measurement). Return ONLY JSON: {"relevant": boolean, "appealScore": 0-100, "reason": "one sentence"}.`,
-      { data, mimeType }
+      { data, mimeType },
+      { priority: "deferrable" }
     );
     await recordAIUsage({
       worker: "quality-worker",
