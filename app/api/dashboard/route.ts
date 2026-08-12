@@ -10,7 +10,15 @@ import {
   researchQueue,
   writingQueue,
 } from "@/workers/shared/queues";
-import { queueCounts } from "@/lib/queues";
+import {
+  queueCounts,
+  queueHealth,
+  queueMetrics,
+  recentFailedJobs,
+  STAGE_ORDER,
+  STAGE_QUEUES,
+  type StageKey,
+} from "@/lib/queues";
 import {
   trendSourceLabel,
   trendSourceInitial,
@@ -96,6 +104,15 @@ function wordCount(markdown: string) {
   return markdown.split(/\s+/).filter(Boolean).length;
 }
 
+/** "750ms" / "45s" / "2m 10s" - for job durations on the workers page. */
+function formatDurationMs(ms: number) {
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  const seconds = Math.round(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}m ${seconds % 60}s`;
+}
+
 function asStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.map(String) : [];
 }
@@ -162,7 +179,7 @@ function recommendation(score: number) {
 }
 
 function statusStyle(status: string) {
-  if (status === "Published" || status === "PROCESSED") {
+  if (status === "Published" || status === "PROCESSED" || status === "PASSED") {
     return {
       sBg: "rgba(16,185,129,0.12)",
       sFg: "var(--emerald)",
@@ -217,7 +234,7 @@ export async function GET() {
     aiUsage,
     plansCount,
     outlinesCount,
-    jobs,
+    recentAttempts,
     researchCounts,
     planningCounts,
     outlineCounts,
@@ -248,7 +265,27 @@ export async function GET() {
     }),
     prisma.contentPlan.count(),
     prisma.contentOutline.count(),
-    prisma.job.findMany({ orderBy: { createdAt: "desc" }, take: 25 }),
+    // Recent WorkerAttempt rows power both the workers page job inspector
+    // (latest 100, paginated client-side) and per-worker duration stats
+    // (avg/p95). This is the audit
+    // trail workers actually write via workers/shared/recovery.ts - the
+    // legacy Prisma `Job` table it replaces has no writers anywhere in the
+    // codebase, so the inspector previously rendered "No jobs yet." forever
+    // (docs/workers-page-uiux-plan.md §1/§3.4).
+    prisma.workerAttempt.findMany({
+      orderBy: { startedAt: "desc" },
+      take: 300,
+      select: {
+        id: true,
+        worker: true,
+        attempt: true,
+        status: true,
+        input: true,
+        error: true,
+        startedAt: true,
+        finishedAt: true,
+      },
+    }),
     queueCounts(researchQueue),
     queueCounts(planningQueue),
     queueCounts(outlineQueue),
@@ -265,6 +302,35 @@ export async function GET() {
       })
     : [];
   const workflowsByBlogId = new Map(workflowRuns.filter((run) => run.blogId).map((run) => [run.blogId!, run]));
+
+  // ---------------------------------------------------------------------
+  // Worker health (Queue & Worker Operations page): live consumer count +
+  // pause state + 15-min throughput per queue, merged with per-worker
+  // duration stats from the recentAttempts rows above. `getWorkers()` is
+  // BullMQ's registry of connected consumers (Redis CLIENT LIST) - 0
+  // consumers means no process is consuming that queue right now. BullMQ
+  // metrics store per-minute *counts* only, so duration stats come from
+  // the attempt rows, not Redis.
+  // ---------------------------------------------------------------------
+  type QueueOps = { consumers: number; paused: boolean; completedLast15m: number; failedLast15m: number };
+  const opsEntries = await Promise.all(
+    STAGE_ORDER.map(async (stage) => {
+      const queue = STAGE_QUEUES[stage];
+      const [health, metrics] = await Promise.all([queueHealth(queue), queueMetrics(queue)]);
+      return [stage, { ...health, ...metrics }] as const;
+    })
+  );
+  const opsByStage = Object.fromEntries(opsEntries) as Record<StageKey, QueueOps>;
+  const failedJobs = await recentFailedJobs();
+
+  // recentAttempts is already ordered by startedAt desc, so each worker's
+  // first entry below is its latest attempt.
+  const attemptsByWorkerAll = new Map<string, typeof recentAttempts>();
+  for (const attempt of recentAttempts) {
+    const list = attemptsByWorkerAll.get(attempt.worker) ?? [];
+    list.push(attempt);
+    attemptsByWorkerAll.set(attempt.worker, list);
+  }
 
   // Settings page "Worker Activity" panel, for the six workers that have no
   // schedule (they run reactively - see workers/shared/settings.ts). Built
@@ -720,6 +786,48 @@ export async function GET() {
     { key: "quality", name: "quality_queue", counts: qualityCounts, total: stageTotals.quality, doneColor: "var(--amber)" },
     { key: "publish", name: "publish_queue", counts: publishCounts, total: stageTotals.publish, doneColor: "var(--emerald)" },
   ] as const;
+
+  // One health entry per worker, in pipeline order, for the workers page
+  // health strip. Liveness is instantaneous (Tier 0 in the plan) - a worker
+  // mid-deploy briefly reads down, which is accurate for an ops page.
+  const workerHealth = queueSnapshots.map((snap) => {
+    const worker = `${snap.key}-worker`;
+    const attempts = attemptsByWorkerAll.get(worker) ?? [];
+    const last = attempts[0];
+    const durations = attempts
+      .filter((attempt) => attempt.finishedAt)
+      .map((attempt) => attempt.finishedAt!.getTime() - attempt.startedAt.getTime())
+      .sort((a, b) => a - b);
+    const avgDurationMs = durations.length
+      ? Math.round(durations.reduce((sum, ms) => sum + ms, 0) / durations.length)
+      : null;
+    const p95DurationMs = durations.length
+      ? durations[Math.min(durations.length - 1, Math.floor(durations.length * 0.95))]
+      : null;
+    const ops = opsByStage[snap.key];
+    return {
+      key: snap.key,
+      worker,
+      queue: snap.name,
+      live: ops.consumers > 0,
+      consumers: ops.consumers,
+      paused: ops.paused,
+      state:
+        snap.counts.active > 0
+          ? "active"
+          : snap.counts.waiting + snap.counts.delayed > 0
+            ? "queued"
+            : snap.counts.failed > 0
+              ? "failed"
+              : "idle",
+      lastRanAt: last ? last.startedAt.toISOString() : null,
+      lastStatus: last?.status ?? null,
+      avgDurationMs,
+      p95DurationMs,
+      scheduled: snap.key === "research",
+    };
+  });
+
   const pipeline = queueSnapshots.reduce(
     (acc, item) => {
       acc.active += item.counts.active;
@@ -851,29 +959,65 @@ export async function GET() {
       createdAt: row.createdAt,
     })),
     workerActivity,
-    queues: queueSnapshots.map((queue) => ({
-      name: queue.name,
-      waiting: String(queue.counts.waiting + queue.counts.delayed),
-      active: String(queue.counts.active),
-      completed: String(queue.counts.completed),
-      failed: String(queue.counts.failed),
-      dot: queueColor(queue.counts, queue.total, queue.doneColor),
-      anim: queue.counts.active > 0 ? "animate-dkpulse" : "none",
-      rate: "db",
-      p95: "-",
-      failedColor: queue.counts.failed > 0 ? "var(--rose)" : "var(--mut)",
-    })),
-    jobs: jobs.map((job) => ({
-      id: job.id,
-      queue: job.queue,
-      payload: JSON.stringify(job.payload),
-      attempts: job.attempts,
-      duration: "-",
-      state: job.status,
-      ...statusStyle(job.status),
-      errBtn: job.error ? "inline-block" : "none",
-      stack: job.error ?? undefined,
-    })),
+    queues: queueSnapshots.map((queue) => {
+      const ops = opsByStage[queue.key];
+      const health = workerHealth.find((entry) => entry.key === queue.key);
+      const perMinute = ops.completedLast15m / 15;
+      return {
+        name: queue.name,
+        key: queue.key,
+        waiting: String(queue.counts.waiting + queue.counts.delayed),
+        active: String(queue.counts.active),
+        completed: String(queue.counts.completed),
+        failed: String(queue.counts.failed),
+        dot: queueColor(queue.counts, queue.total, queue.doneColor),
+        anim: queue.counts.active > 0 ? "animate-dkpulse" : "none",
+        rate: ops.completedLast15m > 0
+          ? `${perMinute >= 1 ? perMinute.toFixed(1) : perMinute.toFixed(2)}/min`
+          : "—",
+        p95: health?.p95DurationMs ? formatDurationMs(health.p95DurationMs) : "—",
+        paused: ops.paused,
+        live: ops.consumers > 0,
+        failedColor: queue.counts.failed > 0 ? "var(--rose)" : "var(--mut)",
+      };
+    }),
+    workerHealth,
+    // Job inspector rows: currently-failed BullMQ jobs (retryable) merged
+    // with the WorkerAttempt audit trail (latest 100 - the page paginates
+    // client-side). Retry only operates on the BullMQ rows - DB audit
+    // attempts are history, not re-runnable jobs.
+    jobs: [
+      ...failedJobs.map((job) => ({
+        kind: "failedJob",
+        id: job.id,
+        queue: job.queue,
+        payload: job.payload,
+        attempts: job.attemptsMade,
+        duration: job.durationMs !== null ? formatDurationMs(job.durationMs) : "—",
+        state: "FAILED",
+        ...statusStyle("FAILED"),
+        errBtn: job.failedReason || job.stacktrace.length > 0 ? "inline-block" : "none",
+        stack: [job.failedReason, ...job.stacktrace].filter(Boolean).join("\n\n") || undefined,
+        retryable: true,
+        started: job.failedAt ? formatAgo(new Date(job.failedAt)) : "—",
+      })),
+      ...recentAttempts.slice(0, 100).map((attempt) => ({
+        kind: "attempt",
+        id: attempt.id,
+        queue: attempt.worker,
+        payload: JSON.stringify(attempt.input ?? {}).slice(0, 160),
+        attempts: attempt.attempt,
+        duration: attempt.finishedAt
+          ? formatDurationMs(attempt.finishedAt.getTime() - attempt.startedAt.getTime())
+          : "running",
+        state: attempt.status,
+        ...statusStyle(attempt.status),
+        errBtn: attempt.error ? "inline-block" : "none",
+        stack: attempt.error ?? undefined,
+        retryable: false,
+        started: formatAgo(attempt.startedAt),
+      })),
+    ],
     workflows: workflowRuns.map((run) => ({
       id: run.id,
       blogId: run.blogId,
