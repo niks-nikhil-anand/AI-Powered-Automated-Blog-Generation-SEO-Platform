@@ -109,7 +109,8 @@ export async function judgeBlog(blog: JudgeableBlog): Promise<JudgeResult | null
 
   try {
     const model = await getSetting(MODEL_SETTING_KEYS.judge, env.VERTEX_FLASH);
-    const result = await generateVertexJson<unknown>(model, buildJudgePrompt(blog), { temperature: 0.2 });
+    // Deferrable: the judge is a degradable score dimension, not a gate.
+    const result = await generateVertexJson<unknown>(model, buildJudgePrompt(blog), { temperature: 0.2, priority: "deferrable" });
     const parsed = JudgeResponseSchema.safeParse(result.data);
     if (!parsed.success) {
       log.warn("Judge response failed schema validation, skipping judge dimension", { error: parsed.error.message });

@@ -21,6 +21,7 @@ import {
   startWorkerAttempt,
   QualityGateError,
 } from "../shared/recovery";
+import { logVertexRuntimeConfig } from "../shared/vertex";
 
 const log = logger.child({ worker: "research-worker" });
 
@@ -374,6 +375,7 @@ export function startResearchWorker() {
 
   registerSchedules().catch((err) => log.error(`Failed to register schedules: ${err.message}`));
 
+  logVertexRuntimeConfig(log);
   log.info(`Research worker listening on "${QUEUE_NAMES.research}"`);
   return worker;
 }
