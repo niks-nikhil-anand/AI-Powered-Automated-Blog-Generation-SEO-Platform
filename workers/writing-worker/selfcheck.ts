@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { env, isVertexConfigured } from "../shared/env";
-import { generateVertexJson } from "../shared/vertex";
+import { batchStagger, generateVertexJson } from "../shared/vertex";
 import { logger } from "../shared/logger";
 import { recordAIUsage } from "../shared/pricing";
 import { getSetting, MODEL_SETTING_KEYS } from "../shared/settings";
@@ -159,8 +159,14 @@ export async function selfCheckClaims(
     }
 
     const startedAt = Date.now();
+    // Staggered starts - docs/VERTEX_429_RESILIENCE_PLAN.md Task 9.
     const results = await Promise.allSettled(
-      batches.map((batch) => generateVertexJson<unknown>(model, buildVerifyPrompt(batch, sources, evidenceSummary ?? null)))
+      batches.map(async (batch, index) => {
+        await batchStagger(index);
+        // Deferrable: self-check is pre-publication enrichment - a quota
+        // breaker skips it and the writing gate fails open.
+        return generateVertexJson<unknown>(model, buildVerifyPrompt(batch, sources, evidenceSummary ?? null), { priority: "deferrable" });
+      })
     );
 
     const verified: VerifiedClaim[] = [];

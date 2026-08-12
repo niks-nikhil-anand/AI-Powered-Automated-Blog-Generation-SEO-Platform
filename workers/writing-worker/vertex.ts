@@ -1,11 +1,46 @@
 import { env, isVertexConfigured } from "../shared/env";
 import { logger } from "../shared/logger";
-import { generateVertexText, slugify } from "../shared/vertex";
+import { generateVertexText, slugify, VertexQuotaError, type VertexTextResult } from "../shared/vertex";
 import { getSetting, MODEL_SETTING_KEYS } from "../shared/settings";
 import { buildSectionPlan, generateAllSections, type SectionArticleContext } from "./sections";
 import type { GroundedSource } from "./citations";
 
 const log = logger.child({ worker: "writing-worker" });
+
+/**
+ * Task 10 (docs/VERTEX_429_RESILIENCE_PLAN.md): when the Pro-class writing
+ * model is persistently quota-exhausted (VertexQuotaError after the
+ * call-level retries in shared/vertex.ts), rerun the same prompt once on
+ * VERTEX_FLASH instead of failing the whole job. The returned model is the
+ * one that ACTUALLY produced the text - callers record/report that
+ * (BlogDraft.model already flows into AIUsage, so the fallback is visible
+ * in cost/model rollups, and the error log makes it greppable).
+ */
+async function generateTextWithQuotaFallback(
+  configuredModel: string,
+  prompt: string,
+  options: { maxOutputTokens: number; temperature: number }
+): Promise<{ result: VertexTextResult; model: string }> {
+  try {
+    return {
+      result: await generateVertexText(configuredModel, prompt, { ...options, timeoutMs: env.WRITING_TIMEOUT_MS }),
+      model: configuredModel,
+    };
+  } catch (error) {
+    if (!env.VERTEX_MODEL_FALLBACK_ENABLED || !(error instanceof VertexQuotaError) || configuredModel === env.VERTEX_FLASH) {
+      throw error;
+    }
+    log.error("Writing model quota exhausted - falling back to Flash for this call", {
+      model: configuredModel,
+      fallbackModel: env.VERTEX_FLASH,
+      fallback: true,
+    });
+    return {
+      result: await generateVertexText(env.VERTEX_FLASH, prompt, { ...options, timeoutMs: env.WRITING_TIMEOUT_MS }),
+      model: env.VERTEX_FLASH,
+    };
+  }
+}
 
 export type BlogDraft = {
   title: string;
@@ -249,12 +284,11 @@ async function generateMock(topic: string, description: string, context: Writing
 }
 
 async function generateWithVertex(topic: string, description: string, context: WritingContext = {}): Promise<BlogDraft> {
-  const model = await getSetting(MODEL_SETTING_KEYS.writing, env.VERTEX_MODEL);
+  const configuredModel = await getSetting(MODEL_SETTING_KEYS.writing, env.VERTEX_MODEL);
   const prompt = buildPrompt(topic, description, context);
-  const result = await generateVertexText(model, prompt, {
+  const { result, model } = await generateTextWithQuotaFallback(configuredModel, prompt, {
     maxOutputTokens: 8192,
     temperature: 0.35,
-    timeoutMs: env.WRITING_TIMEOUT_MS,
   });
 
   const title = context.outline?.title ?? topic;
@@ -312,18 +346,30 @@ async function generateSectionedDraft(topic: string, description: string, contex
 
   // Optional Pro-class cohesion pass over the assembled article. Off by
   // default - enable only after measuring its value against its cost.
+  // Deferrable (docs/VERTEX_429_RESOLUTION_PLAN.md Step 5): polish is
+  // enrichment, not correctness - under quota exhaustion the pass is
+  // SKIPPED and the assembled sections ship as-is, rather than failing
+  // the whole draft or burning the scarce Pro pool on a nice-to-have.
   if (env.EDITOR_PASS_ENABLED) {
     const editorModel = await getSetting(MODEL_SETTING_KEYS.writing, env.VERTEX_MODEL);
-    const edited = await generateVertexText(
-      editorModel,
-      `You are the editor of a developer blog. Polish this assembled article for voice cohesion and transitions between sections; remove any sentence duplicated across sections. Do not add, remove, or alter any specific claim (numbers, dates, versions, capabilities) - polish transitions and voice only. Preserve every "## " heading, every [S1]-style citation marker, every table, and every code block exactly as-is. Return ONLY the full article Markdown.\n\n${markdown}`,
-      { maxOutputTokens: 8192, temperature: 0.2, timeoutMs: env.WRITING_TIMEOUT_MS }
-    );
-    markdown = enforceSingleH1(edited.text, title);
-    usage.promptTokens += edited.usage.promptTokens;
-    usage.completionTokens += edited.usage.completionTokens;
-    usageRecords.push({ model: editorModel, usage: edited.usage });
-    models.push(editorModel);
+    try {
+      const edited = await generateVertexText(
+        editorModel,
+        `You are the editor of a developer blog. Polish this assembled article for voice cohesion and transitions between sections; remove any sentence duplicated across sections. Do not add, remove, or alter any specific claim (numbers, dates, versions, capabilities) - polish transitions and voice only. Preserve every "## " heading, every [S1]-style citation marker, every table, and every code block exactly as-is. Return ONLY the full article Markdown.\n\n${markdown}`,
+        { maxOutputTokens: 8192, temperature: 0.2, timeoutMs: env.WRITING_TIMEOUT_MS, priority: "deferrable" }
+      );
+      markdown = enforceSingleH1(edited.text, title);
+      usage.promptTokens += edited.usage.promptTokens;
+      usage.completionTokens += edited.usage.completionTokens;
+      usageRecords.push({ model: editorModel, usage: edited.usage });
+      models.push(editorModel);
+    } catch (error) {
+      if (error instanceof VertexQuotaError) {
+        log.warn("Editor pass skipped - quota exhausted (circuit breaker)", { model: editorModel });
+      } else {
+        throw error;
+      }
+    }
   }
 
   log.info("Sectioned draft assembled", {
