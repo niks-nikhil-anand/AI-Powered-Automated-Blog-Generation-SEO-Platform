@@ -12,9 +12,14 @@ export function workerOptions(concurrency = 1): WorkerOptions {
     settings: {
       backoffStrategy: (attemptsMade, type) => {
         if (type !== "recovery") return 30000;
-        if (attemptsMade <= 1) return 0;
-        if (attemptsMade === 2) return 30000;
-        return 60000;
+        // Vertex RPM quota windows are 60s+; sub-minute whole-job retries
+        // land inside the still-saturated window and just burn another
+        // full-draft attempt (docs/VERTEX_429_RESILIENCE_PLAN.md Task 8).
+        // Call-level retry (Task 7) covers sub-minute transients, so a job
+        // that still needs a retry should wait out the window.
+        if (attemptsMade <= 1) return 60000;
+        if (attemptsMade === 2) return 180000;
+        return 300000;
       },
     },
   };
