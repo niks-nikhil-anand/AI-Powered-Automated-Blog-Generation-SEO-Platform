@@ -4,7 +4,15 @@ import { prisma } from "../shared/prisma";
 import { logger } from "../shared/logger";
 import { env } from "../shared/env";
 import { workerOptions } from "../shared/worker-options";
-import { reconcileDailyTarget } from "../shared/daily-target";
+import { getDailyTargetStatus, reconcileDailyTarget } from "../shared/daily-target";
+import { getSetting } from "../shared/settings";
+import {
+  RESEARCH_SLOTS,
+  RECONCILE_SLOT_ID,
+  envPatternForSlot,
+  isValidCronPattern,
+  scheduleSettingKey,
+} from "../shared/research-slots";
 import { getEnabledSources } from "./sources";
 import { normalizeSignals } from "./pipeline/normalize";
 import { dedupeSignals } from "./pipeline/dedupe";
@@ -255,14 +263,61 @@ export async function runResearch() {
       return output;
     }
 
+    // Daily Target Controller coupling: the dashboard goal is a ceiling as
+    // well as a floor. Previously a run dispatched TRENDS_TO_WRITE_PER_RUN
+    // topics regardless of the goal, so "3/day" could actually publish up to
+    // 9; now dispatch is capped at the day's remaining need. Anything above
+    // the cap simply stays status "NEW" - the reconcile tick
+    // (workers/shared/daily-target.ts) picks it up as backlog later the same
+    // day, which is exactly what the backlog is for.
+    const { remaining: dailyRemaining, target: dailyTarget } = await getDailyTargetStatus();
+    const dispatchable = topN.slice(0, Math.max(0, dailyRemaining));
+    const goalClampedCount = topN.length - dispatchable.length;
+
+    if (dispatchable.length === 0) {
+      const output = {
+        rawSignals: rawSignals.length,
+        clusterCount: clusters.length,
+        promotableCount: promotable.length,
+        savedCount: created.length,
+        duplicateSkippedCount,
+        dispatchedCount: 0,
+        goalClampedCount,
+        failedSources,
+        reason: "daily_target_already_met",
+      };
+      log.info(
+        `Daily target ${dailyTarget} already met - ${topN.length} qualified topic(s) stay in backlog for later reconcile ticks`,
+        output
+      );
+      await passWorkerAttempt({
+        workflowRunId: attempt.workflow.id,
+        attemptId: attempt.attempt.id,
+        output,
+        qualityReport: {
+          stage: "research-worker",
+          score: bestScore,
+          passed: true,
+          reasons: [
+            `Daily target ${dailyTarget} already met; ${topN.length} qualified topic(s) saved as backlog`,
+          ],
+        },
+        nextStage: "stopped",
+      });
+      return output;
+    }
+
     const researchGate: QualityGateReport = {
       stage: "research-worker",
       score: bestScore,
       passed: true,
-      reasons: [`Selected ${topN.length} score-qualified topic(s)`],
+      reasons: [
+        `Selected ${dispatchable.length} score-qualified topic(s)` +
+          (goalClampedCount > 0 ? ` (${goalClampedCount} held as backlog - daily target ${dailyTarget} needs ${dailyRemaining} more)` : ""),
+      ],
     };
 
-    for (const trend of topN) {
+    for (const trend of dispatchable) {
       await planningQueue.add("plan_blog", {
         trendId: trend.id,
         topic: trend.topic,
@@ -274,7 +329,8 @@ export async function runResearch() {
     }
 
     log.info(
-      `Saved ${created.length} new research candidates, dispatched ${topN.length} score>=${env.RESEARCH_MIN_SCORE_TO_WRITE} topic(s) to ${QUEUE_NAMES.planning}`
+      `Saved ${created.length} new research candidates, dispatched ${dispatchable.length} score>=${env.RESEARCH_MIN_SCORE_TO_WRITE} topic(s) to ${QUEUE_NAMES.planning}` +
+        (goalClampedCount > 0 ? ` (${goalClampedCount} clamped to backlog by daily target)` : "")
     );
 
     const output = {
@@ -282,7 +338,8 @@ export async function runResearch() {
       clusterCount: clusters.length,
       promotableCount: promotable.length,
       savedCount: created.length,
-      dispatchedCount: topN.length,
+      dispatchedCount: dispatchable.length,
+      goalClampedCount,
       failedSources,
     };
     await passWorkerAttempt({
@@ -305,17 +362,11 @@ export async function runResearch() {
 }
 
 /**
- * Three research slots per day. See SCHEDULING_PLAN.md for why these times -
- * each is aligned to the news cycle it is named for, in env.TIMEZONE.
+ * Three research slots per day (metadata in workers/shared/research-slots.ts)
+ * plus the daily-target reconcile tick. Each slot's pattern comes from its
+ * RESEARCH_CRON_* env var UNLESS the dashboard has an AppSetting override -
+ * see below.
  */
-const RESEARCH_SLOTS = [
-  { id: "research-overnight", pattern: env.RESEARCH_CRON_OVERNIGHT, label: "overnight sweep" },
-  { id: "research-midday", pattern: env.RESEARCH_CRON_MIDDAY, label: "midday" },
-  { id: "research-us-daytime", pattern: env.RESEARCH_CRON_US_DAYTIME, label: "US daytime" },
-] as const;
-
-const RECONCILE_SLOT_ID = "daily-target-reconcile";
-
 async function registerSchedules() {
   if (!env.SCHEDULER_ENABLED) {
     log.info("SCHEDULER_ENABLED=false - skipping schedule registration");
@@ -331,13 +382,24 @@ async function registerSchedules() {
 
   // BullMQ v5+ replaced the old `{ repeat: {...} }` job option with an
   // explicit Job Scheduler API - upsert is idempotent, safe on every boot.
+  //
+  // Dashboard edits (PATCH /api/pipeline/schedules/[id]) are persisted to
+  // AppSetting as `schedule:<slotId>`; without reading them back here, every
+  // boot would silently re-upsert the env defaults and revert the user's
+  // edit. Precedence: AppSetting override > RESEARCH_CRON_* env var. A
+  // corrupt stored pattern fails isValidCronPattern and falls back to env
+  // rather than crashing BullMQ's cron parser.
   for (const slot of RESEARCH_SLOTS) {
+    const stored = await getSetting<string | null>(scheduleSettingKey(slot.id), null);
+    const pattern = isValidCronPattern(stored) ? stored : envPatternForSlot(slot.id);
     await researchQueue.upsertJobScheduler(
       slot.id,
-      { pattern: slot.pattern, tz: env.TIMEZONE },
+      { pattern, tz: env.TIMEZONE },
       { name: "scheduled-research", data: { slot: slot.id } }
     );
-    log.info(`Registered "${slot.label}" schedule "${slot.pattern}" (${env.TIMEZONE})`);
+    log.info(
+      `Registered "${slot.label}" schedule "${pattern}" (${env.TIMEZONE})${isValidCronPattern(stored) ? " [dashboard override]" : ""}`
+    );
   }
 
   // Daily Target Controller safety net - reuses this queue rather than
