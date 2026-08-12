@@ -10,6 +10,8 @@ export interface ScheduleSlot {
   pattern: string | null;
   tz: string | null;
   next: number | null;
+  /** True when the time came from a dashboard edit (AppSetting override) rather than the RESEARCH_CRON_* env default. */
+  overridden?: boolean;
 }
 
 interface ScheduleSlotCardProps {
@@ -51,11 +53,32 @@ export function ScheduleSlotCard({ slot, color, onUpdated }: ScheduleSlotCardPro
       });
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || "Failed to update schedule");
-      onUpdated({ id: slot.id, label: slot.label, pattern: data.pattern, tz: data.tz, next: data.next });
-      setMessage({ text: "Saved - takes effect immediately.", tone: "ok" });
+      onUpdated({ id: slot.id, label: slot.label, pattern: data.pattern, tz: data.tz, next: data.next, overridden: data.overridden });
+      setMessage({ text: "Saved - takes effect immediately and survives restarts.", tone: "ok" });
       setEditing(false);
     } catch (err) {
       setMessage({ text: err instanceof Error ? err.message : "Failed to update schedule", tone: "error" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  /** Drops the AppSetting override server-side and re-upserts the RESEARCH_CRON_* env default. */
+  const handleReset = async () => {
+    setSaving(true);
+    setMessage(null);
+    try {
+      const res = await fetch(`/api/pipeline/schedules/${slot.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reset: true }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || "Failed to reset schedule");
+      onUpdated({ id: slot.id, label: slot.label, pattern: data.pattern, tz: data.tz, next: data.next, overridden: false });
+      setMessage({ text: "Reset to the env default.", tone: "ok" });
+    } catch (err) {
+      setMessage({ text: err instanceof Error ? err.message : "Failed to reset schedule", tone: "error" });
     } finally {
       setSaving(false);
     }
@@ -115,8 +138,21 @@ export function ScheduleSlotCard({ slot, color, onUpdated }: ScheduleSlotCardPro
         </div>
       )}
 
-      <div className="text-[10.5px] text-[var(--mut)]">
-        {slot.next ? `Next run ${formatCountdown(slot.next, now)}` : "Next run time unknown - worker may not have booted"}
+      <div className="flex items-center justify-between gap-[8px]">
+        <span className="text-[10.5px] text-[var(--mut)]">
+          {slot.next ? `Next run ${formatCountdown(slot.next, now)}` : "Next run time unknown - worker may not have booted"}
+        </span>
+        {slot.overridden && !editing && (
+          <button
+            type="button"
+            disabled={saving}
+            onClick={handleReset}
+            title="Back to the RESEARCH_CRON_* env default"
+            className="flex-none text-[9.5px] font-semibold text-[var(--amber)] hover:text-[var(--indigo)] cursor-pointer bg-transparent border-0 p-0 disabled:opacity-60"
+          >
+            {saving ? "…" : "edited · Reset"}
+          </button>
+        )}
       </div>
 
       {message && (
