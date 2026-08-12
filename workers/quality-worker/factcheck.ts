@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { env, isVertexConfigured } from "../shared/env";
-import { generateVertexJson } from "../shared/vertex";
+import { batchStagger, generateVertexJson } from "../shared/vertex";
 import { type EvidenceArticle } from "../shared/evidence";
 import { extractClaims } from "./claims";
 
@@ -65,7 +65,8 @@ export async function runFactCheck(content: string, evidenceSummary: string): Pr
 
   try {
     const model = env.VERTEX_FLASH;
-    const result = await generateVertexJson<unknown>(model, buildPrompt(content, evidenceSummary));
+    // Deferrable: a fact-check that can't run degrades one score dimension.
+    const result = await generateVertexJson<unknown>(model, buildPrompt(content, evidenceSummary), { priority: "deferrable" });
     const parsed = FactCheckResponseSchema.safeParse(result.data);
     if (!parsed.success || parsed.data.claims.length === 0) return null;
 
@@ -181,8 +182,12 @@ export async function runFullFactCheck(content: string, articles: EvidenceArticl
       batches.push(claimTexts.slice(i, i + VERIFY_BATCH_SIZE));
     }
 
+    // Staggered starts - docs/VERTEX_429_RESILIENCE_PLAN.md Task 9.
     const results = await Promise.allSettled(
-      batches.map((batch) => generateVertexJson<unknown>(model, buildVerifyPrompt(batch, articles)))
+      batches.map(async (batch, index) => {
+        await batchStagger(index);
+        return generateVertexJson<unknown>(model, buildVerifyPrompt(batch, articles), { priority: "deferrable" });
+      })
     );
 
     const verified: FullFactCheckClaim[] = [];
