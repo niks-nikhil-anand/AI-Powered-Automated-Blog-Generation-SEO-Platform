@@ -33,6 +33,43 @@ export const env = {
   VERTEX_IMAGE_MODEL: optional("VERTEX_IMAGE_MODEL", "gemini-2.5-flash-image"),
 
   /**
+   * Vertex call-level resilience (docs/VERTEX_429_RESILIENCE_PLAN.md
+   * Tasks 7/9/10). Transient failures (429 RESOURCE_EXHAUSTED, 500/503,
+   * local timeouts) retry in-call with exponential backoff + jitter so a
+   * self-healing quota window never reaches the BullMQ job layer (which
+   * retries the WHOLE job and amplifies quota burn).
+   * VERTEX_MAX_CONCURRENT_CALLS caps parallel generate* calls across all
+   * workers in the process (all workers share one process - one
+   * module-level semaphore covers the actual contention point).
+   * VERTEX_MODEL_FALLBACK_ENABLED lets the writing worker rerun a draft
+   * on VERTEX_FLASH when the Pro-class model is persistently
+   * quota-exhausted (logged loudly, never silently).
+   */
+  VERTEX_RETRY_MAX_ATTEMPTS: Number(optional("VERTEX_RETRY_MAX_ATTEMPTS", "4")),
+  VERTEX_RETRY_BASE_MS: Number(optional("VERTEX_RETRY_BASE_MS", "5000")),
+  VERTEX_RETRY_MAX_MS: Number(optional("VERTEX_RETRY_MAX_MS", "90000")),
+  VERTEX_MAX_CONCURRENT_CALLS: Number(optional("VERTEX_MAX_CONCURRENT_CALLS", "6")),
+  VERTEX_MODEL_FALLBACK_ENABLED: optional("VERTEX_MODEL_FALLBACK_ENABLED", "false") !== "false",
+
+  /**
+   * Cross-container quota pacing + circuit breaker
+   * (docs/VERTEX_429_RESOLUTION_PLAN.md Steps 3-5). Workers run as separate
+   * Docker containers, so an in-process semaphore can't coordinate them -
+   * these Redis-backed controls can. RPM limits are PER MODEL CLASS
+   * (Vertex quotas are per base model per region); defaults are
+   * deliberately conservative - set them to ~80% of the real quotas from
+   * the Cloud Console. VERTEX_RETRY_BUDGET_MS caps total retry wall-clock
+   * per call so retry-stacking can't pin a job past BullMQ's lock
+   * semantics. VERTEX_BREAKER_COOLDOWN_MS is how long deferrable calls
+   * fail fast after a call exhausts all retries on quota.
+   */
+  VERTEX_FLASH_RPM: Number(optional("VERTEX_FLASH_RPM", "20")),
+  VERTEX_PRO_RPM: Number(optional("VERTEX_PRO_RPM", "4")),
+  VERTEX_IMAGE_RPM: Number(optional("VERTEX_IMAGE_RPM", "10")),
+  VERTEX_RETRY_BUDGET_MS: Number(optional("VERTEX_RETRY_BUDGET_MS", "300000")),
+  VERTEX_BREAKER_COOLDOWN_MS: Number(optional("VERTEX_BREAKER_COOLDOWN_MS", "120000")),
+
+  /**
    * Kill switch for real AI hero-image generation in image-worker (see
    * IMPLEMENTATION_PLAN.md's hero-image-quality addendum). Off falls back
    * to the pre-existing procedural SVG generator, same pattern as
@@ -330,6 +367,24 @@ export const env = {
   TARGETED_REPAIR_ENABLED: optional("TARGETED_REPAIR_ENABLED", "false") !== "false",
   EDITOR_PASS_ENABLED: optional("EDITOR_PASS_ENABLED", "false") !== "false",
   WRITING_SECTION_CONCURRENCY: Number(optional("WRITING_SECTION_CONCURRENCY", "4")),
+
+  /**
+   * Write-time claim self-check + claim-aware repair
+   * (docs/WRITING_FACT_SAFETY_PLAN.md Task 6). On = after drafting, every
+   * deterministic claim is verified against the same evidence the quality
+   * worker's fact check will use; claims that would be blocked at QA are
+   * repaired section-by-section before the draft is persisted, and the
+   * writing gate fails with the concrete claim list when repair can't fix
+   * them (so the BullMQ retry's priorAttempt carries specifics).
+   * WRITING_SELFCHECK_MAX_REPAIR_PASSES bounds the section-repair loop
+   * (one qualitative full redraft may follow, then the gate decides).
+   * WRITING_CLAIM_MARKER_ENFORCEMENT adds the zero-cost deterministic
+   * check that every specific claim carries its [S]-marker (grounded mode
+   * only). All fail-soft: a self-check that can't run changes nothing.
+   */
+  WRITING_SELFCHECK_ENABLED: optional("WRITING_SELFCHECK_ENABLED", "false") !== "false",
+  WRITING_SELFCHECK_MAX_REPAIR_PASSES: Number(optional("WRITING_SELFCHECK_MAX_REPAIR_PASSES", "1")),
+  WRITING_CLAIM_MARKER_ENFORCEMENT: optional("WRITING_CLAIM_MARKER_ENFORCEMENT", "false") !== "false",
 
   /**
    * Quality worker upgrades (Tasks 3 & 4).

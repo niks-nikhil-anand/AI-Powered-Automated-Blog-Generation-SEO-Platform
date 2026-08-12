@@ -2,6 +2,7 @@ import { GoogleGenAI } from "@google/genai";
 import { env, isVertexConfigured } from "./env";
 import { logger } from "./logger";
 import { recordAIUsage, timed } from "./pricing";
+import { withVertexRetry } from "./vertex";
 
 const log = logger.child({ worker: "research-worker", stage: "embeddings" });
 
@@ -59,8 +60,15 @@ export async function embedText(text: string, trendId?: string): Promise<number[
   if (!trimmed || !isVertexConfigured) return null;
 
   try {
+    // Through withVertexRetry (docs/VERTEX_429_RESOLUTION_PLAN.md Step 3.3):
+    // embedContent bypassed the resilience layer before, so a transient 429
+    // killed the call with no retry and no RPM pacing. Deferrable: novelty
+    // falls back to free deterministic layers when it's shed.
     const { result, latencyMs } = await timed(() =>
-      client().models.embedContent({ model: EMBEDDING_MODEL, contents: trimmed })
+      withVertexRetry(() => client().models.embedContent({ model: EMBEDDING_MODEL, contents: trimmed }), {
+        model: EMBEDDING_MODEL,
+        priority: "deferrable",
+      })
     );
     const values = result.embeddings?.[0]?.values;
     if (!values || values.length === 0) return null;
