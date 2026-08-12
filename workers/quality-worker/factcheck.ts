@@ -130,13 +130,13 @@ export type FullFactCheckResult = {
 const FULL_VERDICT_WEIGHT: Record<FullFactCheckVerdict, number> = {
   supported: 1,
   uncertain: 0.5,
-  unverifiable: 0.25,
+  unverifiable: 0.4,
   unsupported: 0,
 };
 
 const VERIFY_BATCH_SIZE = 10;
 /** If more than this share of claims binds to no evidence at all, the score is capped below the hard gate. */
-const UNVERIFIABLE_CAP_RATIO = 0.3;
+const UNVERIFIABLE_CAP_RATIO = 0.4;
 const UNVERIFIABLE_SCORE_CAP = 60;
 
 function buildVerifyPrompt(claims: string[], articles: EvidenceArticle[]): string {
