@@ -302,11 +302,13 @@ export async function scoreBlogQuality(blog: BlogForQuality) {
       // 11th check (IMPLEMENTATION_PLAN.md Phase 2.5) - a real Vertex-verified
       // claims check against Trend.evidenceSummary. Distinct from "AI & Fact
       // Quality" above, which stays a cheap regex heuristic; this is the
-      // "actually checks facts" dimension. Scores 0 (not a neutral/skipped
-      // value) when there's no evidence to check against or the call fails -
-      // an unverifiable claim isn't a verified one.
+      // "actually checks facts" dimension. Scores a neutral 7 (not 0) when
+      // there's no evidence to check against or the call fails - "couldn't
+      // verify" is not the same as "verified as wrong", and a 0 here drags
+      // the overall score down ~9 points for something that isn't the
+      // draft's fault.
       label: "Fact Verification",
-      score: clamp(factCheck ? factCheck.score / 10 : 0),
+      score: clamp(factCheck ? factCheck.score / 10 : 7),
       maxScore: 10,
       notes: factCheck
         ? [
@@ -318,8 +320,8 @@ export async function scoreBlogQuality(blog: BlogForQuality) {
           ]
         : [
             blog.trend?.evidenceSummary
-              ? "Fact-check unavailable (Vertex call failed or returned no claims)"
-              : "Fact-check skipped (trend has no persisted evidence summary)",
+              ? "Fact-check unavailable (Vertex call failed or returned no claims) - scored neutral 7/10"
+              : "Fact-check skipped (trend has no persisted evidence) - scored neutral 7/10",
           ],
     },
   ];

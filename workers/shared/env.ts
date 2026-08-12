@@ -176,9 +176,9 @@ export const env = {
    * fetched article bodies (EVIDENCE_MAX_CHARS each) stored as
    * Trend.evidenceArticles for grounded writing/fact-checking downstream.
    */
-  EVIDENCE_FETCH_ENABLED: optional("EVIDENCE_FETCH_ENABLED", "false") !== "false",
-  EVIDENCE_MAX_ARTICLES: Number(optional("EVIDENCE_MAX_ARTICLES", "3")),
-  EVIDENCE_MAX_CHARS: Number(optional("EVIDENCE_MAX_CHARS", "4000")),
+  EVIDENCE_FETCH_ENABLED: optional("EVIDENCE_FETCH_ENABLED", "true") !== "false",
+  EVIDENCE_MAX_ARTICLES: Number(optional("EVIDENCE_MAX_ARTICLES", "4")),
+  EVIDENCE_MAX_CHARS: Number(optional("EVIDENCE_MAX_CHARS", "6000")),
 
   /**
    * Per-source on/off switches. All default "true" since every source ran
@@ -353,7 +353,7 @@ export const env = {
    * Requires the trend to actually have evidenceArticles (Task 1) - trends
    * without them always use the legacy path regardless of this flag.
    */
-  GROUNDED_WRITING_ENABLED: optional("GROUNDED_WRITING_ENABLED", "false") !== "false",
+  GROUNDED_WRITING_ENABLED: optional("GROUNDED_WRITING_ENABLED", "true") !== "false",
 
   /**
    * Section-by-section writing + targeted repair (Task 5). Off = one
@@ -363,10 +363,10 @@ export const env = {
    * instead of a full rewrite. EDITOR_PASS_ENABLED adds a final Pro-class
    * cohesion pass over the assembled draft (measure value before enabling).
    */
-  SECTIONED_WRITING_ENABLED: optional("SECTIONED_WRITING_ENABLED", "false") !== "false",
-  TARGETED_REPAIR_ENABLED: optional("TARGETED_REPAIR_ENABLED", "false") !== "false",
+  SECTIONED_WRITING_ENABLED: optional("SECTIONED_WRITING_ENABLED", "true") !== "false",
+  TARGETED_REPAIR_ENABLED: optional("TARGETED_REPAIR_ENABLED", "true") !== "false",
   EDITOR_PASS_ENABLED: optional("EDITOR_PASS_ENABLED", "false") !== "false",
-  WRITING_SECTION_CONCURRENCY: Number(optional("WRITING_SECTION_CONCURRENCY", "4")),
+  WRITING_SECTION_CONCURRENCY: Number(optional("WRITING_SECTION_CONCURRENCY", "3")),
 
   /**
    * Write-time claim self-check + claim-aware repair
@@ -382,9 +382,9 @@ export const env = {
    * check that every specific claim carries its [S]-marker (grounded mode
    * only). All fail-soft: a self-check that can't run changes nothing.
    */
-  WRITING_SELFCHECK_ENABLED: optional("WRITING_SELFCHECK_ENABLED", "false") !== "false",
-  WRITING_SELFCHECK_MAX_REPAIR_PASSES: Number(optional("WRITING_SELFCHECK_MAX_REPAIR_PASSES", "1")),
-  WRITING_CLAIM_MARKER_ENFORCEMENT: optional("WRITING_CLAIM_MARKER_ENFORCEMENT", "false") !== "false",
+  WRITING_SELFCHECK_ENABLED: optional("WRITING_SELFCHECK_ENABLED", "true") !== "false",
+  WRITING_SELFCHECK_MAX_REPAIR_PASSES: Number(optional("WRITING_SELFCHECK_MAX_REPAIR_PASSES", "2")),
+  WRITING_CLAIM_MARKER_ENFORCEMENT: optional("WRITING_CLAIM_MARKER_ENFORCEMENT", "true") !== "false",
 
   /**
    * Quality worker upgrades (Tasks 3 & 4).
@@ -399,7 +399,7 @@ export const env = {
    * DIMENSION_FLOOR: minimum per-check score (of 10) - one collapsed
    *   dimension can no longer be averaged into a pass.
    */
-  FULL_FACTCHECK_ENABLED: optional("FULL_FACTCHECK_ENABLED", "false") !== "false",
+  FULL_FACTCHECK_ENABLED: optional("FULL_FACTCHECK_ENABLED", "true") !== "false",
   JUDGE_ENABLED: optional("JUDGE_ENABLED", "false") !== "false",
   JUDGE_SHADOW_MODE: optional("JUDGE_SHADOW_MODE", "true") !== "false",
   JUDGE_WEIGHT: Number(optional("JUDGE_WEIGHT", "0.25")),
