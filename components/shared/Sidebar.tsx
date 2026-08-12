@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTheme } from "./ThemeProvider";
@@ -10,10 +10,43 @@ interface SidebarProps {
   onToggleCollapse?: () => void;
 }
 
+type WorkerHealthEntry = {
+  key: string;
+  worker: string;
+  live: boolean;
+  consumers: number;
+  paused: boolean;
+  state: string;
+};
+
 export function Sidebar({ collapsed: externalCollapsed, onToggleCollapse }: SidebarProps) {
   const pathname = usePathname();
   const { theme, toggleTheme } = useTheme();
   const [internalCollapsed, setInternalCollapsed] = useState(false);
+  const [workerHealth, setWorkerHealth] = useState<WorkerHealthEntry[]>([]);
+
+  useEffect(() => {
+    let mounted = true;
+    const load = () => {
+      fetch("/api/dashboard", { cache: "no-store" })
+        .then((res) => res.json())
+        .then((data) => {
+          if (mounted && Array.isArray(data.workerHealth)) {
+            setWorkerHealth(data.workerHealth);
+          }
+        })
+        .catch(() => {});
+    };
+    load();
+    const timer = window.setInterval(load, 15000);
+    return () => {
+      mounted = false;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  const workersUp = workerHealth.filter((w) => w.live && !w.paused).length;
+  const workersTotal = workerHealth.length || 7;
 
   const isCollapsed = externalCollapsed !== undefined ? externalCollapsed : internalCollapsed;
 
@@ -188,13 +221,54 @@ export function Sidebar({ collapsed: externalCollapsed, onToggleCollapse }: Side
       {/* Pipeline Active Badge */}
       {!isCollapsed && (
         <div className="p-[10px_10px_4px]">
-          <div className="flex items-center gap-[7px] p-[7px_9px] rounded-[8px] bg-[rgba(16,185,129,0.10)] border border-[rgba(16,185,129,0.25)]">
-            <span className="w-[7px] h-[7px] rounded-full bg-[var(--emerald)] animate-dkpulse" />
-            <span className="text-[11px] font-semibold text-[var(--emerald)] whitespace-nowrap">
-              Pipeline Active
+          <div
+            className="flex items-center gap-[7px] p-[7px_9px] rounded-[8px] border"
+            style={{
+              background: workersUp === workersTotal
+                ? "rgba(16,185,129,0.10)"
+                : workersUp > 0
+                  ? "rgba(245,158,11,0.10)"
+                  : "rgba(244,63,94,0.10)",
+              borderColor: workersUp === workersTotal
+                ? "rgba(16,185,129,0.25)"
+                : workersUp > 0
+                  ? "rgba(245,158,11,0.25)"
+                  : "rgba(244,63,94,0.25)",
+            }}
+          >
+            <span
+              className="w-[7px] h-[7px] rounded-full animate-dkpulse"
+              style={{
+                background: workersUp === workersTotal
+                  ? "var(--emerald)"
+                  : workersUp > 0
+                    ? "var(--amber)"
+                    : "var(--rose)",
+              }}
+            />
+            <span
+              className="text-[11px] font-semibold whitespace-nowrap"
+              style={{
+                color: workersUp === workersTotal
+                  ? "var(--emerald)"
+                  : workersUp > 0
+                    ? "var(--amber)"
+                    : "var(--rose)",
+              }}
+            >
+              {workersUp === workersTotal ? "Pipeline Active" : workersUp > 0 ? "Pipeline Degraded" : "Pipeline Down"}
             </span>
-            <span className="ml-auto font-mono text-[10px] font-medium text-[var(--emerald)]">
-              7/7
+            <span
+              className="ml-auto font-mono text-[10px] font-medium"
+              style={{
+                color: workersUp === workersTotal
+                  ? "var(--emerald)"
+                  : workersUp > 0
+                    ? "var(--amber)"
+                    : "var(--rose)",
+              }}
+            >
+              {workersUp}/{workersTotal}
             </span>
           </div>
         </div>
@@ -250,17 +324,36 @@ export function Sidebar({ collapsed: externalCollapsed, onToggleCollapse }: Side
               <span className="text-[10px] font-bold tracking-wider uppercase text-[var(--mut)]">
                 Worker health
               </span>
-              <span className="font-mono text-[10px] font-semibold text-[var(--emerald)]">
-                0 up
+              <span
+                className="font-mono text-[10px] font-semibold"
+                style={{ color: workersUp === workersTotal ? "var(--emerald)" : workersUp > 0 ? "var(--amber)" : "var(--rose)" }}
+              >
+                {workersUp}/{workersTotal} up
               </span>
             </div>
             <div className="flex gap-[3px]">
-              {[...Array(7)].map((_, i) => (
-                <span
-                  key={i}
-                  className="flex-1 h-[5px] rounded-[3px] bg-[var(--bd2)]"
-                />
-              ))}
+              {workerHealth.length > 0
+                ? workerHealth.map((worker) => (
+                    <span
+                      key={worker.key}
+                      title={`${worker.worker}: ${worker.paused ? "paused" : worker.live ? worker.state : "down"}`}
+                      className="flex-1 h-[5px] rounded-[3px] transition-colors"
+                      style={{
+                        background: worker.paused
+                          ? "var(--amber)"
+                          : worker.live
+                            ? worker.state === "active"
+                              ? "var(--indigo)"
+                              : worker.state === "failed"
+                                ? "var(--rose)"
+                                : "var(--emerald)"
+                            : "var(--bd2)",
+                      }}
+                    />
+                  ))
+                : [...Array(7)].map((_, i) => (
+                    <span key={i} className="flex-1 h-[5px] rounded-[3px] bg-[var(--bd2)]" />
+                  ))}
             </div>
           </div>
         )}
