@@ -16,6 +16,7 @@ import { startImageWorker } from "./image-worker/index";
 import { startQualityWorker } from "./quality-worker/index";
 import { startPublishWorker } from "./publish-worker/index";
 import { logger } from "./shared/logger";
+import { logVertexRuntimeConfig } from "./shared/vertex";
 
 const log = logger.child({ worker: "start" });
 
@@ -27,6 +28,11 @@ startImageWorker();
 startQualityWorker();
 startPublishWorker();
 
+// Boot fingerprint (docs/VERTEX_429_RESOLUTION_PLAN.md Step 1.2): proves at a
+// glance whether a running process has the 429-resilience build. Each
+// worker's own start* logs it too (Docker runs one worker per container);
+// this covers the all-in-one `npm run worker:dev` process.
+logVertexRuntimeConfig(log);
 log.info("All workers started (research-worker, planning-worker, outline-worker, writing-worker, image-worker, quality-worker, publish-worker)");
 
 process.on("SIGTERM", () => {
