@@ -13,6 +13,7 @@ import {
   startWorkerAttempt,
   QualityGateError,
 } from "../shared/recovery";
+import { logVertexRuntimeConfig } from "../shared/vertex";
 
 const log = logger.child({ worker: "image-worker" });
 
@@ -135,6 +136,7 @@ export function startImageWorker() {
   worker.on("completed", (job, result) => log.info(`Job ${job.id} completed`, result));
   worker.on("failed", (job, err) => log.error(`Job ${job?.id ?? "?"} failed: ${err.message}`));
 
+  logVertexRuntimeConfig(log);
   log.info(`Image worker listening on "${QUEUE_NAMES.image}"`);
   return worker;
 }
