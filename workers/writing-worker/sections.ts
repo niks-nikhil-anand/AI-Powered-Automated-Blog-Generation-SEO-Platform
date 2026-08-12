@@ -215,7 +215,7 @@ function buildSectionPrompt(spec: SectionSpec, context: SectionArticleContext, r
       ? `
 SOURCES (ground truth for any specific fact - cite with markers, never URLs):
 ${sources.map((source) => `${source.marker} ${source.title}\n    "${source.excerpt}"`).join("\n")}
-Marker rules: append [S1]-style markers immediately after any specific claim (number, date, version, capability). Only ${sources.map((s) => s.marker).join(", ")} exist. If no source covers a specific, write it qualitatively.`
+Marker rules: every number, percentage, date, version, or benchmark you write MUST end with its source marker (e.g. [S1]). Only ${sources.map((s) => s.marker).join(", ")} exist - never invent markers. If no source covers a specific, write it qualitatively instead of inventing a figure. When the SOURCES are thin on the subject's actual product/mechanics, write this section about the general category/technology instead of presenting invented specifics as confirmed facts about the named subject. Vagueness on uncovered specifics is fine; invented precision is not.`
       : "";
 
   const keywordsBlock = context.keywords.length > 0 ? `\nWeave in these keywords if natural to THIS section (never force): ${context.keywords.join(", ")}.` : "";

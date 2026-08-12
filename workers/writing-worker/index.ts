@@ -24,6 +24,15 @@ import {
   type SectionSpec,
 } from "./sections";
 import {
+  buildClaimRepairNote,
+  findUnmarkedClaims,
+  locateClaimSection,
+  selfCheckClaims,
+  SELFCHECK_PASS_SCORE,
+  type SelfCheckIssue,
+  type SelfCheckResult,
+} from "./selfcheck";
+import {
   assertGate,
   failWorkerAttempt,
   passWorkerAttempt,
@@ -31,6 +40,7 @@ import {
   type QualityGateReport,
   QualityGateError,
 } from "../shared/recovery";
+import { logVertexRuntimeConfig } from "../shared/vertex";
 
 const log = logger.child({ worker: "writing-worker" });
 
@@ -99,7 +109,8 @@ function citationCheck(markdown: string, evidenceSummary?: string | null): { ok:
 function writingGate(
   markdown: string,
   evidenceSummary?: string | null,
-  grounded?: { citedMarkers: string[]; sources: GroundedSource[] }
+  grounded?: { citedMarkers: string[]; sources: GroundedSource[] },
+  factSafety?: { selfCheck: SelfCheckResult | null; unmarkedClaims: string[] }
 ): QualityGateReport {
   const score = heuristicScore(markdown);
   const reasons: string[] = [];
@@ -122,6 +133,23 @@ function writingGate(
     if (!citations.ok) {
       reasons.push(`Cites ${citations.found}/${citations.required} required evidence source URL(s), not just any external link`);
     }
+  }
+
+  // Task 6.7: a draft that would be "Blocked - unverified facts" at QA
+  // fails HERE instead, with the concrete claim list in the reasons - the
+  // BullMQ retry's priorAttempt then carries specifics, not a bare score.
+  // Fail-open when the self-check couldn't run (null), same philosophy as
+  // the quality worker's own fact-check gate.
+  if (factSafety?.selfCheck && factSafety.selfCheck.score < SELFCHECK_PASS_SCORE) {
+    reasons.push(
+      `Claim self-check score ${factSafety.selfCheck.score} is below ${SELFCHECK_PASS_SCORE} (the quality worker's fact-check threshold)`
+    );
+    for (const issue of factSafety.selfCheck.issues.slice(0, 5)) {
+      reasons.push(`${issue.verdict} claim: "${issue.claim.slice(0, 140)}"${issue.note ? ` - ${issue.note}` : ""}`);
+    }
+  }
+  if (factSafety && factSafety.unmarkedClaims.length > 0) {
+    reasons.push(`${factSafety.unmarkedClaims.length} specific claim(s) lack an evidence marker`);
   }
 
   return {
@@ -264,6 +292,218 @@ async function attemptTargetedRepair(args: {
   return { blogId: blog.id, slug: blog.slug, score: gate.score };
 }
 
+/**
+ * Task 6.4: regenerate ONLY the sections holding failing claims and splice
+ * them back - shared by the pre-persist repair (fresh drafts, markers
+ * intact) and attemptClaimRepair (QA requeues, already-materialized
+ * content). Returns null when the problem isn't section-local (no affected
+ * section, > 3 affected sections, or a claim that can't be mapped to a
+ * concrete section) - the caller then falls back to a full redraft/rewrite.
+ */
+async function repairSectionsWithClaims(args: {
+  markdown: string;
+  issues: SelfCheckIssue[];
+  unmarkedClaims: string[];
+  context: SectionArticleContext;
+}): Promise<{
+  markdown: string;
+  usageRecords: { model: string; usage: { promptTokens: number; completionTokens: number } }[];
+  repairedSections: string[];
+} | null> {
+  const { markdown, issues, unmarkedClaims, context } = args;
+  const sections = splitIntoSections(markdown);
+
+  // Group work by section. null heading = the preamble (H1 + intro).
+  const targets = new Map<number, { issues: SelfCheckIssue[]; unmarked: string[] }>();
+  const targetFor = (sectionHeading: string | null): number => sections.findIndex((section) => section.heading === sectionHeading);
+  const addTo = (index: number, issue: SelfCheckIssue | null, unmarked: string | null) => {
+    const entry = targets.get(index) ?? { issues: [], unmarked: [] };
+    if (issue) entry.issues.push(issue);
+    if (unmarked) entry.unmarked.push(unmarked);
+    targets.set(index, entry);
+  };
+
+  for (const issue of issues) {
+    const index = targetFor(issue.section);
+    if (index === -1) {
+      log.info("Claim issue targets an unmatched section, repair not section-local", { section: issue.section });
+      return null;
+    }
+    addTo(index, issue, null);
+  }
+  for (const claim of unmarkedClaims) {
+    const index = targetFor(locateClaimSection(markdown, claim));
+    if (index === -1) return null;
+    addTo(index, null, claim);
+  }
+
+  // Too many affected sections = a whole-article grounding problem, not a
+  // splice - same contract as attemptTargetedRepair's >3-fixes guard.
+  if (targets.size === 0 || targets.size > 3) return null;
+
+  const usageRecords: { model: string; usage: { promptTokens: number; completionTokens: number } }[] = [];
+  const repairedSections: string[] = [];
+  for (const [index, group] of targets) {
+    const section = sections[index];
+    const existingWords = section.body.split(/\s+/).filter(Boolean).length;
+    const spec: SectionSpec = {
+      heading: section.heading,
+      kind: section.heading === null ? "intro" : "generic",
+      intent:
+        section.heading === null
+          ? "Repair the article introduction."
+          : "Repair this section of a larger article so every specific claim is backed by the SOURCES.",
+      bullets: [],
+      wordTarget: Math.max(80, existingWords),
+    };
+    const draft = await generateSection(spec, context, {
+      repairNote: buildClaimRepairNote(group.issues, group.unmarked),
+    });
+    usageRecords.push({ model: draft.model, usage: draft.usage });
+
+    let newBody = draft.markdown.trim();
+    if (section.heading === null) {
+      // The preamble holds the H1 title - regenerating the intro must not
+      // lose it. Strip any heading the model emitted despite the intro
+      // instructions, then re-attach the original H1.
+      const h1Line = section.body.match(/^#\s+.*$/m)?.[0] ?? null;
+      newBody = newBody.replace(/^#{1,2}\s+.*$/m, "").trim();
+      section.body = h1Line ? `${h1Line}\n\n${newBody}\n` : `${newBody}\n`;
+    } else {
+      // Keep the ORIGINAL heading text no matter what the model emitted -
+      // the quality scorer's requiredSections matching depends on it.
+      if (!newBody.startsWith("## ")) {
+        newBody = `## ${section.heading}\n\n${newBody}`;
+      } else {
+        newBody = newBody.replace(/^##\s+.*$/m, `## ${section.heading}`);
+      }
+      section.body = `${newBody}\n`;
+    }
+    repairedSections.push(section.heading ?? "Introduction");
+  }
+
+  return { markdown: joinSections(sections), usageRecords, repairedSections };
+}
+
+/**
+ * Task 6: when quality-worker requeues a blog specifically because the
+ * fact check couldn't verify concrete claims (recoveryContext.factCheckIssues,
+ * Task 6.1), splice-fix just the affected sections instead of the blind
+ * full rewrite that used to hallucinate fresh claims every attempt.
+ * Returns null (falls through to full generation) when repair isn't
+ * applicable - no blog row, too many issues, or an unmappable claim.
+ */
+async function attemptClaimRepair(args: {
+  trend: { id: string; evidenceSummary: string | null };
+  topic: string;
+  description: string;
+  outline: { title: string; plan?: SectionArticleContext["plan"] } | null;
+  groundedSources: GroundedSource[];
+  factCheckIssues: { claim: string; verdict: string; note?: string }[];
+  attempt: { workflow: { id: string }; attempt: { id: string } };
+}): Promise<{ blogId: string; slug: string; score: number } | null> {
+  const { trend, topic, description, outline, groundedSources, factCheckIssues, attempt } = args;
+  if (factCheckIssues.length === 0 || factCheckIssues.length > 10) return null;
+  if (!isVertexConfigured) return null;
+
+  const blog = await prisma.blog.findUnique({ where: { trendId: trend.id } });
+  if (!blog) {
+    log.info("Claim repair skipped - no existing blog row, falling back to full rewrite", { trendId: trend.id });
+    return null;
+  }
+
+  // QA's claims were extracted from the stored (materialized) content, so
+  // they substring-match it directly. A claim that maps to no section is a
+  // whole-article concern - full rewrite.
+  const validVerdicts = new Set(["unsupported", "uncertain", "unverifiable"]);
+  const issues: SelfCheckIssue[] = [];
+  for (const issue of factCheckIssues) {
+    const section = locateClaimSection(blog.content, issue.claim);
+    if (section === null && !splitIntoSections(blog.content).some((s) => s.heading === null)) {
+      log.info("Fact-check issue not locatable in the article, falling back to full rewrite", { trendId: trend.id });
+      return null;
+    }
+    issues.push({
+      claim: issue.claim,
+      verdict: validVerdicts.has(issue.verdict) ? (issue.verdict as SelfCheckIssue["verdict"]) : "unverifiable",
+      note: issue.note,
+      section,
+    });
+  }
+
+  const startedAt = Date.now();
+  const context: SectionArticleContext = {
+    title: blog.title,
+    topic,
+    description,
+    plan: outline?.plan,
+    sources: groundedSources,
+    keywords: [],
+  };
+  const repair = await repairSectionsWithClaims({ markdown: blog.content, issues, unmarkedClaims: [], context });
+  if (!repair) return null;
+
+  // Verify the splice before persisting - a repair that didn't actually
+  // fix the claims must not burn a QA round-trip to find out.
+  const selfCheck = await selfCheckClaims(repair.markdown, groundedSources, trend.evidenceSummary, trend.id);
+
+  // Repaired sections carry fresh [S]-markers; untouched sections already
+  // hold real links (materialize only touches marker tokens - idempotent).
+  const materialized = groundedSources.length > 0 ? materializeCitations(repair.markdown, groundedSources) : null;
+  const markdown = materialized?.markdown ?? repair.markdown;
+
+  let usageRecordId: string | null = null;
+  const latencyShare = Math.round((Date.now() - startedAt) / Math.max(1, repair.usageRecords.length));
+  for (const record of repair.usageRecords) {
+    const saved = await recordAIUsage({ worker: "writing-worker", model: record.model, usage: record.usage, latencyMs: latencyShare, trendId: trend.id });
+    if (!usageRecordId) usageRecordId = saved.id;
+  }
+
+  // Legacy URL citation check (not the marker check): the spliced article
+  // carries already-materialized links, same as attemptTargetedRepair.
+  const gate = writingGate(markdown, trend.evidenceSummary, undefined, { selfCheck, unmarkedClaims: [] });
+  assertGate(gate);
+
+  const html = await marked.parse(markdown);
+  await prisma.blog.update({
+    where: { id: blog.id },
+    data: { content: markdown, html, status: "DRAFT" },
+  });
+  if (usageRecordId) await attachUsageToBlog(usageRecordId, blog.id);
+
+  // Image worker's featuredImageId skip makes this a pass-through to QA.
+  await imageQueue.add("generate_blog_image", {
+    blogId: blog.id,
+    trendId: trend.id,
+    title: blog.title,
+    slug: blog.slug,
+    category: "",
+    excerpt: blog.excerpt ?? undefined,
+  });
+  await passWorkerAttempt({
+    workflowRunId: attempt.workflow.id,
+    attemptId: attempt.attempt.id,
+    output: {
+      blogId: blog.id,
+      slug: blog.slug,
+      score: gate.score,
+      repairMode: "claim-targeted",
+      repairedSections: repair.repairedSections,
+      selfCheck: selfCheck ? { score: selfCheck.score, totalClaims: selfCheck.totalClaims, issues: selfCheck.issues.length } : undefined,
+    },
+    qualityReport: gate,
+    nextStage: "image-worker",
+    blogId: blog.id,
+  });
+
+  log.info(`Blog repaired via claim-targeted splice: ${blog.slug}`, {
+    blogId: blog.id,
+    sections: repair.repairedSections,
+    selfCheckScore: selfCheck?.score,
+  });
+  return { blogId: blog.id, slug: blog.slug, score: gate.score };
+}
+
 async function generateBlogForTrend(
   trendId: string,
   topic: string,
@@ -312,6 +552,22 @@ async function generateBlogForTrend(
   });
 
   const priorReport = recoveryContext?.qualityReport as QualityGateReport | undefined;
+  // Task 6.1 (consumer side): QA's concrete failing claims join the rewrite
+  // prompt's priorAttempt reasons, so even a FULL rewrite knows exactly
+  // which claims to drop or qualify instead of hallucinating fresh ones.
+  const priorFactCheckIssues = recoveryContext?.factCheckIssues ?? [];
+  const priorAttempt =
+    priorReport || priorFactCheckIssues.length > 0
+      ? {
+          score: priorReport?.score ?? 0,
+          reasons: [
+            ...(priorReport?.reasons ?? []),
+            ...priorFactCheckIssues.map(
+              (issue) => `${issue.verdict} claim from fact-check: "${issue.claim}"${issue.note ? ` - ${issue.note}` : ""}`
+            ),
+          ],
+        }
+      : undefined;
 
   // Task 2: when the trend carries full-text evidence (Task 1) and the flag
   // is on, the draft grounds on [S1]-marked sources and citations are
@@ -339,6 +595,24 @@ async function generateBlogForTrend(
       if (repaired) return repaired;
     }
 
+    // Task 6: QA requeued this blog with concrete unverified claims -
+    // splice-fix just the affected sections. Runs even when
+    // TARGETED_REPAIR_ENABLED is off: that flag governs judge-fix repair,
+    // this path is gated by WRITING_SELFCHECK_ENABLED since it depends on
+    // the self-check module for post-repair verification.
+    if (env.WRITING_SELFCHECK_ENABLED && priorFactCheckIssues.length > 0) {
+      const repaired = await attemptClaimRepair({
+        trend,
+        topic,
+        description,
+        outline,
+        groundedSources,
+        factCheckIssues: priorFactCheckIssues,
+        attempt,
+      });
+      if (repaired) return repaired;
+    }
+
     const startedAt = Date.now();
     const draft = await generateBlogDraft(topic, description, {
       plan: outline?.plan,
@@ -353,10 +627,104 @@ async function generateBlogForTrend(
         : undefined,
       evidenceSummary: trend.evidenceSummary ?? undefined,
       evidenceSources: groundedSources.length > 0 ? groundedSources : undefined,
-      priorAttempt: priorReport ? { score: priorReport.score, reasons: priorReport.reasons } : undefined,
+      priorAttempt,
       trendId,
     });
     const latencyMs = Date.now() - startedAt;
+
+    // Task 6.3/6.4/6.5: write-time claim self-check + claim-aware repair.
+    // Runs on the RAW draft (markers intact) so marker enforcement can see
+    // [S]-tokens; materializeCitations below then runs once, on the final
+    // text. A draft that would be "Blocked - unverified facts" at QA is
+    // repaired here - or, if repair can't fix it, fails the writing gate
+    // with the concrete claim list instead of burning a QA round-trip.
+    let selfCheck: SelfCheckResult | null = null;
+    let unmarkedClaims: string[] = [];
+    const repairUsageRecords: { model: string; usage: { promptTokens: number; completionTokens: number } }[] = [];
+    let repairedSections: string[] = [];
+    if (env.WRITING_SELFCHECK_ENABLED) {
+      const repairStartedAt = Date.now();
+      const markerEnforcementOn = env.WRITING_CLAIM_MARKER_ENFORCEMENT && groundedSources.length > 0;
+      if (markerEnforcementOn) unmarkedClaims = findUnmarkedClaims(draft.markdown);
+      selfCheck = await selfCheckClaims(draft.markdown, groundedSources, trend.evidenceSummary, trendId);
+
+      const sectionContext: SectionArticleContext = {
+        title: draft.title,
+        topic,
+        description,
+        plan: outline?.plan,
+        sources: groundedSources,
+        keywords: draft.keywords,
+      };
+
+      // Bounded section-repair loop: regenerate only the sections holding
+      // failing/unmarked claims, then re-verify. A null repair means the
+      // problem isn't section-local - the redraft below handles it.
+      for (let pass = 0; pass < env.WRITING_SELFCHECK_MAX_REPAIR_PASSES; pass += 1) {
+        const failing = selfCheck && selfCheck.score < SELFCHECK_PASS_SCORE ? selfCheck.issues : [];
+        if (failing.length === 0 && unmarkedClaims.length === 0) break;
+        const repair = await repairSectionsWithClaims({
+          markdown: draft.markdown,
+          issues: failing,
+          unmarkedClaims,
+          context: sectionContext,
+        });
+        if (!repair) break;
+        repairUsageRecords.push(...repair.usageRecords);
+        repairedSections = repair.repairedSections;
+        draft.markdown = repair.markdown;
+        if (markerEnforcementOn) unmarkedClaims = findUnmarkedClaims(draft.markdown);
+        else unmarkedClaims = [];
+        selfCheck = await selfCheckClaims(draft.markdown, groundedSources, trend.evidenceSummary, trendId);
+      }
+
+      // Last resort: one qualitative redraft carrying the concrete failing
+      // claims as priorAttempt reasons (the rewrite prompt already knows
+      // how to consume those - see buildPrompt's REWRITE block).
+      if (selfCheck && selfCheck.score < SELFCHECK_PASS_SCORE) {
+        log.warn("Claim repair insufficient, attempting one qualitative redraft", {
+          trendId,
+          selfCheckScore: selfCheck.score,
+          issues: selfCheck.issues.length,
+        });
+        const redraft = await generateBlogDraft(topic, description, {
+          plan: outline?.plan,
+          outline: outline
+            ? {
+                title: outline.title,
+                metaTitle: outline.metaTitle,
+                metaDescription: outline.metaDescription,
+                sections: outline.sections,
+                faqs: outline.faqs,
+              }
+            : undefined,
+          evidenceSummary: trend.evidenceSummary ?? undefined,
+          evidenceSources: groundedSources.length > 0 ? groundedSources : undefined,
+          priorAttempt: {
+            score: selfCheck.score,
+            reasons: selfCheck.issues
+              .slice(0, 10)
+              .map((issue) => `${issue.verdict} claim: "${issue.claim}"${issue.note ? ` - ${issue.note}` : ""}`),
+          },
+          trendId,
+        });
+        if (redraft.usageRecords && redraft.usageRecords.length > 0) {
+          repairUsageRecords.push(...redraft.usageRecords);
+        } else {
+          repairUsageRecords.push({ model: redraft.model, usage: redraft.usage });
+        }
+        draft.markdown = redraft.markdown;
+        if (markerEnforcementOn) unmarkedClaims = findUnmarkedClaims(draft.markdown);
+        selfCheck = await selfCheckClaims(draft.markdown, groundedSources, trend.evidenceSummary, trendId);
+      }
+
+      // Repair/redraft spend is real spend - record it with wall-clock
+      // latency split evenly, the same convention as sectioned drafts.
+      const repairLatencyShare = Math.round((Date.now() - repairStartedAt) / Math.max(1, repairUsageRecords.length));
+      for (const record of repairUsageRecords) {
+        await recordAIUsage({ worker: "writing-worker", model: record.model, usage: record.usage, latencyMs: repairLatencyShare, trendId });
+      }
+    }
 
     // Task 2: convert [S1]-markers into real Markdown links BEFORE the gate
     // and before HTML rendering, so the stored content is the linked version
@@ -413,7 +781,8 @@ async function generateBlogForTrend(
       trend.evidenceSummary,
       groundedSources.length > 0 && citationMeta
         ? { citedMarkers: citationMeta.citedMarkers, sources: groundedSources }
-        : undefined
+        : undefined,
+      env.WRITING_SELFCHECK_ENABLED ? { selfCheck, unmarkedClaims } : undefined
     );
     assertGate(gate);
     const html = await marked.parse(draft.markdown);
@@ -489,13 +858,23 @@ async function generateBlogForTrend(
         score,
         grounded: groundedSources.length > 0,
         citations: citationMeta ?? undefined,
+        selfCheck: selfCheck
+          ? { score: selfCheck.score, totalClaims: selfCheck.totalClaims, issues: selfCheck.issues.length }
+          : undefined,
+        claimRepairedSections: repairedSections.length > 0 ? repairedSections : undefined,
       },
       qualityReport: gate,
       nextStage: "image-worker",
       blogId: blog.id,
     });
 
-    log.info(`Blog created: ${blog.slug}`, { blogId: blog.id, score, grounded: groundedSources.length > 0 });
+    log.info(`Blog created: ${blog.slug}`, {
+      blogId: blog.id,
+      score,
+      grounded: groundedSources.length > 0,
+      selfCheckScore: selfCheck?.score,
+      claimRepairedSections: repairedSections.length > 0 ? repairedSections : undefined,
+    });
     return { blogId: blog.id, slug: blog.slug, score };
   } catch (err) {
     await failWorkerAttempt({
@@ -521,6 +900,7 @@ export function startWritingWorker() {
   worker.on("completed", (job, result) => log.info(`Job ${job.id} completed`, result));
   worker.on("failed", (job, err) => log.error(`Job ${job?.id ?? "?"} failed: ${err.message}`));
 
+  logVertexRuntimeConfig(log);
   log.info(`Writing worker listening on "${QUEUE_NAMES.writing}"`);
   return worker;
 }
