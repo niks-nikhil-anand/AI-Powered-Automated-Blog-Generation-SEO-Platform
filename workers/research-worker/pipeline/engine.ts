@@ -2,6 +2,7 @@ import { planningQueue, QUEUE_NAMES } from "../../shared/queues";
 import { prisma } from "../../shared/prisma";
 import { logger } from "../../shared/logger";
 import { env } from "../../shared/env";
+import { getDailyTargetStatus } from "../../shared/daily-target";
 import { embedMany } from "../../shared/embeddings";
 import { researchConfig } from "../config";
 import { getEnabledSources } from "../sources";
@@ -305,12 +306,22 @@ export async function runResearchEngine(workflowRunId?: string): Promise<EngineR
   }
 
   // Dispatch the selected topics (excellent tier, gate-passing) to planning.
+  // Same daily-target ceiling as the legacy path (runResearch): the dashboard
+  // goal caps how many selected topics actually dispatch this run; the rest
+  // stay status "NEW" as backlog for the reconcile tick.
   const selectedIds = new Set(
     selection.selected.map((c) => c.topicFingerprint)
   );
+  const { remaining: dailyRemaining, target: dailyTarget } = await getDailyTargetStatus();
+  let dispatchBudget = Math.max(0, dailyRemaining);
   let dispatchedCount = 0;
+  let goalClampedCount = 0;
   for (const entry of saved) {
     if (!selectedIds.has(entry.candidate.topicFingerprint)) continue;
+    if (dispatchBudget <= 0) {
+      goalClampedCount += 1;
+      continue;
+    }
     await planningQueue.add("plan_blog", {
       trendId: entry.trendId,
       topic: entry.candidate.candidate.title,
@@ -319,13 +330,17 @@ export async function runResearchEngine(workflowRunId?: string): Promise<EngineR
       evidenceSummary: buildEvidenceSummary(entry.candidate),
     });
     await prisma.trend.update({ where: { id: entry.trendId }, data: { status: "PLANNED" } });
+    dispatchBudget -= 1;
     dispatchedCount += 1;
   }
 
   await persistRunReport(report, workflowRunId);
   log.info(formatRunReport(report));
   log.info(
-    `Research engine run complete: ${saved.length} saved, ${dispatchedCount} dispatched to ${QUEUE_NAMES.planning} (outcome: ${report.outcome})`
+    `Research engine run complete: ${saved.length} saved, ${dispatchedCount} dispatched to ${QUEUE_NAMES.planning} (outcome: ${report.outcome})` +
+      (goalClampedCount > 0
+        ? ` - ${goalClampedCount} selected topic(s) held as backlog (daily target ${dailyTarget} needs ${dailyRemaining} more)`
+        : "")
   );
 
   return { engine: true, report, savedCount: saved.length, dispatchedCount, failedSources };

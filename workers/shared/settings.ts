@@ -75,3 +75,13 @@ export async function getAllSettings(keys: string[]) {
   const rows = await prisma.appSetting.findMany({ where: { key: { in: keys } } });
   return new Map(rows.map((row) => [row.key, row.value] as const));
 }
+
+/**
+ * Removes an override row so the env fallback applies again ("Reset to
+ * default" in the dashboard). deleteMany instead of delete so resetting a
+ * key that was never overridden is a no-op rather than a P2025 throw.
+ */
+export async function deleteSetting(key: string) {
+  cache.delete(key);
+  await prisma.appSetting.deleteMany({ where: { key } });
+}
