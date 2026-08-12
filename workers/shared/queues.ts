@@ -116,6 +116,15 @@ export type WritingJobPayload = {
      * worker's targeted-repair path (Task 5).
      */
     judgeFixes?: { section: string; issue: string; fix: string; priority: "high" | "medium" | "low" }[];
+    /**
+     * Failing claims from quality-worker's fact check (Task 6.1), shape
+     * mirrored from workers/quality-worker/factcheck.ts's FullFactCheckClaim
+     * (declared inline to keep this file dependency-free). These are the
+     * concrete claim texts QA could not verify - the writing worker's
+     * claim-repair path consumes them so a fact-check block no longer
+     * triggers a blind full rewrite.
+     */
+    factCheckIssues?: { claim: string; verdict: string; note?: string }[];
   };
 };
 
