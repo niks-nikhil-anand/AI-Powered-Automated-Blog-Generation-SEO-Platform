@@ -15,7 +15,8 @@
     "worker:image": "tsx workers/image-worker/index.ts",
     "worker:quality": "tsx workers/quality-worker/index.ts",
     "worker:publish": "tsx workers/publish-worker/index.ts",
-    "worker:dev": "tsx workers/start.ts"
+    "worker:dev": "tsx workers/start.ts",
+    "worker:drill:rate-limit": "tsx workers/shared/rate-limit.drill.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
