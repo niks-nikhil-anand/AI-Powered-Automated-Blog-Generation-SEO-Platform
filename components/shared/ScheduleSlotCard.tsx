@@ -7,11 +7,17 @@ import { useLiveNow } from "./WorldClocks";
 export interface ScheduleSlot {
   id: string;
   label: string;
+  /** Publish-time daily cron ("M H * * *") - the time the blog goes live. Null = not configured. */
   pattern: string | null;
-  tz: string | null;
+  tz?: string | null;
+  /** Next generation fire time (epoch ms) from BullMQ - earlier than publish by the lead. */
   next: number | null;
-  /** True when the time came from a dashboard edit (AppSetting override) rather than the RESEARCH_CRON_* env default. */
-  overridden?: boolean;
+  /** "HH:MM" target publish time, straight from the API. */
+  publishTime?: string | null;
+  /** "HH:MM" wall-clock generation start (publish minus lead). */
+  generationStart?: string | null;
+  /** True when the slot has a publish time configured. */
+  configured?: boolean;
 }
 
 interface ScheduleSlotCardProps {
@@ -20,7 +26,13 @@ interface ScheduleSlotCardProps {
   onUpdated: (slot: ScheduleSlot) => void;
 }
 
-/** Editable digital-clock card for one of the three real research-worker schedule slots. Saves immediately against the live BullMQ scheduler - no restart needed. */
+/**
+ * Editable digital-clock card for one publish slot. The time shown and
+ * edited is the TARGET PUBLISH time (when the blog goes live), not the
+ * generation start - generation fires earlier by the lead and a finished
+ * blog is held until this time. Saves immediately against the live BullMQ
+ * scheduler and persists to AppSetting, so it survives worker restarts.
+ */
 export function ScheduleSlotCard({ slot, color, onUpdated }: ScheduleSlotCardProps) {
   const now = useLiveNow();
   const parsed = parseDailyCron(slot.pattern);
@@ -53,8 +65,11 @@ export function ScheduleSlotCard({ slot, color, onUpdated }: ScheduleSlotCardPro
       });
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || "Failed to update schedule");
-      onUpdated({ id: slot.id, label: slot.label, pattern: data.pattern, tz: data.tz, next: data.next, overridden: data.overridden });
-      setMessage({ text: "Saved - takes effect immediately and survives restarts.", tone: "ok" });
+      onUpdated({ ...slot, ...data });
+      setMessage({
+        text: `Saved - publishes daily at ${formatHourMinute(hour, minute)} (survives restarts).`,
+        tone: "ok",
+      });
       setEditing(false);
     } catch (err) {
       setMessage({ text: err instanceof Error ? err.message : "Failed to update schedule", tone: "error" });
@@ -63,8 +78,8 @@ export function ScheduleSlotCard({ slot, color, onUpdated }: ScheduleSlotCardPro
     }
   };
 
-  /** Drops the AppSetting override server-side and re-upserts the RESEARCH_CRON_* env default. */
-  const handleReset = async () => {
+  /** Clears the slot's publish time (AppSetting row + Redis scheduler both removed server-side). */
+  const handleClear = async () => {
     setSaving(true);
     setMessage(null);
     try {
@@ -74,11 +89,11 @@ export function ScheduleSlotCard({ slot, color, onUpdated }: ScheduleSlotCardPro
         body: JSON.stringify({ reset: true }),
       });
       const data = await res.json();
-      if (!res.ok || !data.ok) throw new Error(data.error || "Failed to reset schedule");
-      onUpdated({ id: slot.id, label: slot.label, pattern: data.pattern, tz: data.tz, next: data.next, overridden: false });
-      setMessage({ text: "Reset to the env default.", tone: "ok" });
+      if (!res.ok || !data.ok) throw new Error(data.error || "Failed to clear slot");
+      onUpdated({ ...slot, ...data });
+      setMessage({ text: "Cleared - this slot won't fire until you set a new time.", tone: "ok" });
     } catch (err) {
-      setMessage({ text: err instanceof Error ? err.message : "Failed to reset schedule", tone: "error" });
+      setMessage({ text: err instanceof Error ? err.message : "Failed to clear slot", tone: "error" });
     } finally {
       setSaving(false);
     }
@@ -96,7 +111,7 @@ export function ScheduleSlotCard({ slot, color, onUpdated }: ScheduleSlotCardPro
         <div className="flex flex-col gap-[8px]">
           <input
             type="time"
-            aria-label={`Set time for ${slot.label}`}
+            aria-label={`Set publish time for ${slot.label}`}
             value={timeValue}
             onChange={(e) => setTimeValue(e.target.value)}
             className="h-[34px] px-[10px] rounded-[8px] border border-[var(--bd)] bg-[var(--card)] text-[var(--fg)] font-mono font-bold text-[15px] outline-none focus:border-[var(--indigo)]"
@@ -140,17 +155,21 @@ export function ScheduleSlotCard({ slot, color, onUpdated }: ScheduleSlotCardPro
 
       <div className="flex items-center justify-between gap-[8px]">
         <span className="text-[10.5px] text-[var(--mut)]">
-          {slot.next ? `Next run ${formatCountdown(slot.next, now)}` : "Next run time unknown - worker may not have booted"}
+          {!parsed
+            ? "Not set - Edit to pick a publish time"
+            : slot.next
+              ? `Generation ${formatCountdown(slot.next, now)} · on air ${slot.publishTime ?? formatHourMinute(parsed.hour, parsed.minute)}`
+              : `On air ${slot.publishTime ?? formatHourMinute(parsed.hour, parsed.minute)} daily`}
         </span>
-        {slot.overridden && !editing && (
+        {parsed && !editing && (
           <button
             type="button"
             disabled={saving}
-            onClick={handleReset}
-            title="Back to the RESEARCH_CRON_* env default"
+            onClick={handleClear}
+            title="Clear this slot's publish time"
             className="flex-none text-[9.5px] font-semibold text-[var(--amber)] hover:text-[var(--indigo)] cursor-pointer bg-transparent border-0 p-0 disabled:opacity-60"
           >
-            {saving ? "…" : "edited · Reset"}
+            {saving ? "…" : "set · Clear"}
           </button>
         )}
       </div>
