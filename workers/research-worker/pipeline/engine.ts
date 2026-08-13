@@ -1,4 +1,4 @@
-import { planningQueue, QUEUE_NAMES } from "../../shared/queues";
+import { JOB_IDS, planningQueue, QUEUE_NAMES } from "../../shared/queues";
 import { prisma } from "../../shared/prisma";
 import { logger } from "../../shared/logger";
 import { env } from "../../shared/env";
@@ -322,13 +322,18 @@ export async function runResearchEngine(workflowRunId?: string): Promise<EngineR
       goalClampedCount += 1;
       continue;
     }
-    await planningQueue.add("plan_blog", {
-      trendId: entry.trendId,
-      topic: entry.candidate.candidate.title,
-      category: entry.candidate.candidate.category,
-      score: entry.candidate.finalScore.final,
-      evidenceSummary: buildEvidenceSummary(entry.candidate),
-    });
+    // Deterministic jobId - same duplicate-blog guard as the legacy path.
+    await planningQueue.add(
+      "plan_blog",
+      {
+        trendId: entry.trendId,
+        topic: entry.candidate.candidate.title,
+        category: entry.candidate.candidate.category,
+        score: entry.candidate.finalScore.final,
+        evidenceSummary: buildEvidenceSummary(entry.candidate),
+      },
+      { jobId: JOB_IDS.plan(entry.trendId) }
+    );
     await prisma.trend.update({ where: { id: entry.trendId }, data: { status: "PLANNED" } });
     dispatchBudget -= 1;
     dispatchedCount += 1;
