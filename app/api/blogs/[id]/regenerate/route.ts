@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { writingQueue, type WritingJobPayload } from "@/workers/shared/queues";
+import { JOB_IDS, writingQueue, type WritingJobPayload } from "@/workers/shared/queues";
 
 export const dynamic = "force-dynamic";
 
@@ -63,12 +63,20 @@ export async function POST(_request: Request, context: RouteContext) {
       );
     }
 
-    const job = await writingQueue.add("write_blog", {
-      ...lastWritingInput,
-      recoveryContext: {
-        reason: "manual_regenerate_requested",
+    // Epoch-keyed jobId: double-clicking "Regenerate" before the job runs
+    // dedupes on the same attempt count; once it runs, the count moves and
+    // the next click is a fresh job. Never collides with the fresh write
+    // (write-${trendId}) or QA requeues (write-${trendId}-qaN).
+    const job = await writingQueue.add(
+      "write_blog",
+      {
+        ...lastWritingInput,
+        recoveryContext: {
+          reason: "manual_regenerate_requested",
+        },
       },
-    });
+      { jobId: JOB_IDS.writeManualRegen(lastWritingInput.trendId, writingAttemptCount) }
+    );
 
     await prisma.blog.update({
       where: { id: blog.id },
