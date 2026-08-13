@@ -37,6 +37,9 @@ export type ModelStage = keyof typeof MODEL_SETTING_KEYS;
 
 export const DAILY_TARGET_KEY = "dailyBlogTarget";
 
+/** Retries AFTER the initial attempt, per pipeline stage - see workers/shared/retry-config.ts. */
+export const RETRY_ATTEMPTS_KEY = "retryAttempts";
+
 const CACHE_TTL_MS = 15_000;
 const cache = new Map<string, { value: unknown; expiresAt: number }>();
 
