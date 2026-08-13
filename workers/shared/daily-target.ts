@@ -1,7 +1,7 @@
 import { env } from "./env";
 import { prisma } from "./prisma";
 import { logger } from "./logger";
-import { planningQueue } from "./queues";
+import { JOB_IDS, planningQueue } from "./queues";
 import { getSetting, DAILY_TARGET_KEY } from "./settings";
 
 const log = logger.child({ worker: "daily-target" });
@@ -79,7 +79,7 @@ export async function reconcileDailyTarget() {
         score: trend.score,
         evidenceSummary: trend.evidenceSummary,
       },
-      { jobId: `plan-${trend.id}` }
+      { jobId: JOB_IDS.plan(trend.id) }
     );
     await prisma.trend.update({ where: { id: trend.id }, data: { status: "PLANNED" } });
   }
