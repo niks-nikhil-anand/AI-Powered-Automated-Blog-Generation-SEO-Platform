@@ -1,6 +1,6 @@
 import { Worker } from "bullmq";
 import { marked } from "marked";
-import { imageQueue, QUEUE_NAMES, type WritingJobPayload } from "../shared/queues";
+import { imageQueue, JOB_IDS, QUEUE_NAMES, type WritingJobPayload } from "../shared/queues";
 import { prisma } from "../shared/prisma";
 import { generateBlogDraft } from "./vertex";
 import { logger } from "../shared/logger";
@@ -268,14 +268,20 @@ async function attemptTargetedRepair(args: {
   if (usageRecordId) await attachUsageToBlog(usageRecordId, blog.id);
 
   // Image worker's featuredImageId skip makes this a pass-through to QA.
-  await imageQueue.add("generate_blog_image", {
-    blogId: blog.id,
-    trendId: trend.id,
-    title: blog.title,
-    slug: blog.slug,
-    category: "",
-    excerpt: blog.excerpt ?? undefined,
-  });
+  // Epoch-keyed jobId: each repair run gets a fresh ID so the QA re-score is
+  // never deduped away against the original image job (see JOB_IDS docs).
+  await imageQueue.add(
+    "generate_blog_image",
+    {
+      blogId: blog.id,
+      trendId: trend.id,
+      title: blog.title,
+      slug: blog.slug,
+      category: "",
+      excerpt: blog.excerpt ?? undefined,
+    },
+    { jobId: JOB_IDS.image(blog.id, attempt.attempt.id) }
+  );
   await passWorkerAttempt({
     workflowRunId: attempt.workflow.id,
     attemptId: attempt.attempt.id,
@@ -472,14 +478,20 @@ async function attemptClaimRepair(args: {
   if (usageRecordId) await attachUsageToBlog(usageRecordId, blog.id);
 
   // Image worker's featuredImageId skip makes this a pass-through to QA.
-  await imageQueue.add("generate_blog_image", {
-    blogId: blog.id,
-    trendId: trend.id,
-    title: blog.title,
-    slug: blog.slug,
-    category: "",
-    excerpt: blog.excerpt ?? undefined,
-  });
+  // Epoch-keyed jobId: each repair run gets a fresh ID so the QA re-score is
+  // never deduped away against the original image job (see JOB_IDS docs).
+  await imageQueue.add(
+    "generate_blog_image",
+    {
+      blogId: blog.id,
+      trendId: trend.id,
+      title: blog.title,
+      slug: blog.slug,
+      category: "",
+      excerpt: blog.excerpt ?? undefined,
+    },
+    { jobId: JOB_IDS.image(blog.id, attempt.attempt.id) }
+  );
   await passWorkerAttempt({
     workflowRunId: attempt.workflow.id,
     attemptId: attempt.attempt.id,
@@ -841,14 +853,20 @@ async function generateBlogForTrend(
     await attachUsageToBlog(usageRecordId, blog.id);
 
     await prisma.trend.update({ where: { id: trendId }, data: { status: "PROCESSED" } });
-    await imageQueue.add("generate_blog_image", {
-      blogId: blog.id,
-      trendId,
-      title: blog.title,
-      slug: blog.slug,
-      category: category.name,
-      excerpt: draft.excerpt,
-    });
+    // Epoch-keyed jobId: a QA-requeued full rewrite re-runs this path with an
+    // existing image job - the fresh ID keeps the chain moving (no stall).
+    await imageQueue.add(
+      "generate_blog_image",
+      {
+        blogId: blog.id,
+        trendId,
+        title: blog.title,
+        slug: blog.slug,
+        category: category.name,
+        excerpt: draft.excerpt,
+      },
+      { jobId: JOB_IDS.image(blog.id, attempt.attempt.id) }
+    );
     await passWorkerAttempt({
       workflowRunId: attempt.workflow.id,
       attemptId: attempt.attempt.id,
