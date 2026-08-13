@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { useLiveNow } from "./WorldClocks";
+import { useHydrated, useLiveNow } from "./WorldClocks";
 import { parseDailyCron } from "@/lib/utils";
 
 export interface TimelineSlot {
@@ -23,6 +23,10 @@ function pct(hour: number, minute: number) {
 /** 24h horizontal strip with the real research-worker slots plotted on it, plus a live "now" marker for the given timezone. */
 export function ScheduleTimeline({ slots, tz }: ScheduleTimelineProps) {
   const now = useLiveNow();
+  // Same hydration guard as WorldClocks: keep the live "now" marker out of
+  // the SSR/hydration render entirely (a marker parked at 0% for the first
+  // frame would be wrong anyway) and mount it right after.
+  const mounted = useHydrated();
   const nowDate = new Date(now);
   const nowParts = nowDate
     .toLocaleTimeString("en-GB", { timeZone: tz, hour: "2-digit", minute: "2-digit", hour12: false })
@@ -54,12 +58,14 @@ export function ScheduleTimeline({ slots, tz }: ScheduleTimelineProps) {
             </div>
           );
         })}
-        {/* Live "now" marker */}
-        <div
-          className="absolute -top-[3px] w-[2px] h-[12px] rounded-full bg-[var(--rose)]"
-          style={{ left: `${nowPct}%`, transform: "translateX(-50%)" }}
-          title={`Now (${tz})`}
-        />
+        {/* Live "now" marker - client-only, see the mounted comment above */}
+        {mounted && (
+          <div
+            className="absolute -top-[3px] w-[2px] h-[12px] rounded-full bg-[var(--rose)]"
+            style={{ left: `${nowPct}%`, transform: "translateX(-50%)" }}
+            title={`Now (${tz})`}
+          />
+        )}
       </div>
       <div className="flex justify-between font-mono text-[9px] text-[var(--faint)] mt-[6px]">
         <span>00:00</span>
