@@ -204,8 +204,26 @@ export const env = {
    */
   ENABLE_SEARXNG: optional("ENABLE_SEARXNG", "false") !== "false",
 
-  /** Blogs/day the dashboard measures against. 3 slots x 1 topic per run. */
+  /** Blogs/day the dashboard measures against - and the number of publish slots (see workers/shared/publish-slots.ts). */
   DAILY_BLOG_TARGET: Number(optional("DAILY_BLOG_TARGET", "3")),
+
+  /**
+   * Minutes before a publish slot's target time that its pipeline fires
+   * (generation lead). The quality-worker holds the finished blog (BullMQ
+   * delay) until the slot's publish time; if retries run past it, the blog
+   * publishes immediately instead. 30 min comfortably covers the measured
+   * ~4-minute happy path plus a couple of stage retries.
+   */
+  SLOT_GENERATION_LEAD_MINUTES: Number(optional("SLOT_GENERATION_LEAD_MINUTES", "30")),
+
+  /**
+   * Retries AFTER the initial attempt for every pipeline stage job
+   * (planning/outline/writing/image/quality/publish) and for the QA-failure
+   * regeneration loop. This is only the env fallback - the live value is the
+   * AppSetting "retryAttempts" edited in Settings (workers/shared/retry-config.ts).
+   * BullMQ `attempts` = this + 1 (the initial try).
+   */
+  PIPELINE_RETRY_ATTEMPTS: Number(optional("PIPELINE_RETRY_ATTEMPTS", "3")),
 
   /**
    * SearXNG — optional self-hosted SERP discovery + validation layer

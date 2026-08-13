@@ -1,4 +1,5 @@
 import { prisma } from "./prisma";
+import { refreshRetryAttempts } from "./retry-config";
 
 export const QUALITY_THRESHOLD = 90;
 
@@ -74,6 +75,11 @@ async function getOrCreateWorkflow(input: AttemptInput) {
 }
 
 export async function startWorkerAttempt(input: AttemptInput) {
+  // Every worker calls this at job start, so it's the cheapest place to keep
+  // this process's retry-attempts cache (queues.ts defaultJobOptions getter)
+  // in step with the Settings page value - getSetting's 15s cache makes it
+  // ~free, and a failure must never block the job itself.
+  await refreshRetryAttempts().catch(() => {});
   const workflow = await getOrCreateWorkflow(input);
   const previousAttempts = await prisma.workerAttempt.count({
     where: { workflowRunId: workflow.id, worker: input.worker },
