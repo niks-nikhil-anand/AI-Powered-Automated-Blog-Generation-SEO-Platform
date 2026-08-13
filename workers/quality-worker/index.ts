@@ -12,6 +12,8 @@ import {
 } from "../shared/recovery";
 import { logVertexRuntimeConfig } from "../shared/vertex";
 import { reconcileDailyTarget } from "../shared/daily-target";
+import { getPublishTarget } from "../shared/publish-slots";
+import { getRetryAttempts } from "../shared/retry-config";
 
 const log = logger.child({ worker: "quality-worker" });
 
@@ -80,11 +82,24 @@ export async function runQualityCheck(payload: QualityJobPayload) {
     // Deterministic jobId - BullMQ refuses a second enqueue for the same
     // id outright, the idiomatic equivalent of a `publish:{blogId}:{date}`
     // idempotency key without hand-rolling a Redis check.
+    //
+    // Publish-slot hold: when this blog came from a scheduled slot, its
+    // target publish time was recorded at dispatch (keyed by trendId).
+    // Finishing early holds the publish job (BullMQ delayed job) until that
+    // time; finishing at/past it (retries ran long) publishes immediately -
+    // the blog is never abandoned for missing its slot.
+    const targetPublishAt = blog.trendId ? await getPublishTarget(blog.trendId) : null;
+    const holdMs = targetPublishAt ? Math.max(0, targetPublishAt - Date.now()) : 0;
     await publishQueue.add(
       "publish_blog",
       { blogId: blog.id, qualityReportId: saved.id },
-      { jobId: `publish-${blog.id}` }
+      { jobId: `publish-${blog.id}`, delay: holdMs }
     );
+    if (holdMs > 0) {
+      log.info(
+        `Blog ${blog.id} passed QA - holding publish until ${new Date(targetPublishAt!).toISOString()} (in ${Math.round(holdMs / 60000)}m)`
+      );
+    }
     await passWorkerAttempt({
       workflowRunId: attempt.workflow.id,
       attemptId: attempt.attempt.id,
@@ -107,7 +122,12 @@ export async function runQualityCheck(payload: QualityJobPayload) {
     const writingAttemptCount = workflow?.attempts.length ?? 0;
     const lastWritingInput = workflow?.attempts[0]?.input as WritingJobPayload | undefined;
 
-    if (lastWritingInput && writingAttemptCount < 4) {
+    // Dynamic budget from Settings' Retry Attempts (workers/shared/retry-config.ts):
+    // N configured retries -> at most N+1 writing attempts before the blog is
+    // a permanent QA failure. No hard-coded retry count anywhere.
+    const maxWritingAttempts = (await getRetryAttempts()) + 1;
+
+    if (lastWritingInput && writingAttemptCount < maxWritingAttempts) {
       // Task 6.1: the concrete claims the fact check could not verify.
       // Until now the rewrite prompt only saw "Fact Verification: 5/10" and
       // hallucinated fresh claims on every retry; handing the writer the
@@ -144,7 +164,7 @@ export async function runQualityCheck(payload: QualityJobPayload) {
         qualityReport: gate,
       });
     }
-    const permanentlyFailed = !(lastWritingInput && writingAttemptCount < 4);
+    const permanentlyFailed = !(lastWritingInput && writingAttemptCount < maxWritingAttempts);
     await prisma.blog.update({
       where: { id: blog.id },
       data: { status: permanentlyFailed ? "FAILED" : "PENDING_REVIEW" },
