@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { qualityQueue } from "@/workers/shared/queues";
+import { JOB_IDS, qualityQueue } from "@/workers/shared/queues";
 
 export const dynamic = "force-dynamic";
 
@@ -18,7 +18,13 @@ export async function POST(_request: Request, context: RouteContext) {
       return NextResponse.json({ ok: false, error: "Blog not found" }, { status: 404 });
     }
 
-    const job = await qualityQueue.add("quality_check_blog", { blogId: blog.id });
+    // Unique per click on purpose: every manual re-run is a legitimate new
+    // scoring run (the QA report upsert makes repeats idempotent).
+    const job = await qualityQueue.add(
+      "quality_check_blog",
+      { blogId: blog.id },
+      { jobId: JOB_IDS.qualityManual(blog.id) }
+    );
 
     return NextResponse.json({
       ok: true,
