@@ -3,10 +3,13 @@ import { env } from "@/workers/shared/env";
 import {
   DAILY_TARGET_KEY,
   MODEL_SETTING_KEYS,
+  RETRY_ATTEMPTS_KEY,
   deleteSetting,
   getAllSettings,
   setSetting,
 } from "@/workers/shared/settings";
+import { reconcilePublishSlots } from "@/workers/shared/publish-slots";
+import { getRetryAttempts, refreshRetryAttempts } from "@/workers/shared/retry-config";
 
 export const dynamic = "force-dynamic";
 
@@ -51,7 +54,11 @@ const MODEL_NAME_PATTERN = /^gemini-[a-z0-9][\w.:-]*$/i;
 
 export async function GET() {
   try {
-    const stored = await getAllSettings([...MODEL_STAGES.map((stage) => MODEL_SETTING_KEYS[stage]), DAILY_TARGET_KEY]);
+    const stored = await getAllSettings([
+      ...MODEL_STAGES.map((stage) => MODEL_SETTING_KEYS[stage]),
+      DAILY_TARGET_KEY,
+      RETRY_ATTEMPTS_KEY,
+    ]);
 
     const models: Record<string, string> = {};
     const modelOverridden: Record<string, boolean> = {};
@@ -76,6 +83,11 @@ export async function GET() {
       dailyBlogTarget,
       dailyBlogTargetDefault: Number(env.DAILY_BLOG_TARGET),
       dailyBlogTargetOverridden: storedTarget !== undefined,
+      // Retries after the initial attempt per pipeline stage (drives BullMQ
+      // attempts + the QA regeneration budget via workers/shared/retry-config.ts).
+      retryAttempts: await getRetryAttempts(),
+      retryAttemptsDefault: Number(env.PIPELINE_RETRY_ATTEMPTS),
+      retryAttemptsOverridden: stored.get(RETRY_ATTEMPTS_KEY) !== undefined,
       // Env-flag snapshot so the page's "no model call" notes can be truthful
       // about which stages actually call an LLM right now (they were stale
       // hardcoded strings before - e.g. claiming Image "draws an SVG locally"
@@ -112,10 +124,21 @@ export async function PATCH(request: Request) {
     const { key, value } = body as { key?: string; value?: unknown };
 
     if (key === DAILY_TARGET_KEY) {
+      // Goal change = slot-count change: reconcilePublishSlots resizes the
+      // publish schedule to exactly N slots (existing times on slots 1..N
+      // are kept, schedulers beyond N are removed; brand-new slots start
+      // unset so the UI asks for their publish times).
       // value === null resets to the env default (removes the override row).
       if (value === null) {
         await deleteSetting(DAILY_TARGET_KEY);
-        return NextResponse.json({ ok: true, key, value: Number(env.DAILY_BLOG_TARGET), overridden: false });
+        const slotCount = await reconcilePublishSlots();
+        return NextResponse.json({
+          ok: true,
+          key,
+          value: Number(env.DAILY_BLOG_TARGET),
+          overridden: false,
+          publishSlots: slotCount,
+        });
       }
       const num = Number(value);
       if (!Number.isFinite(num) || num < 1 || num > 20) {
@@ -125,7 +148,41 @@ export async function PATCH(request: Request) {
         );
       }
       await setSetting(DAILY_TARGET_KEY, Math.round(num));
-      return NextResponse.json({ ok: true, key, value: Math.round(num), overridden: true });
+      const slotCount = await reconcilePublishSlots();
+      return NextResponse.json({
+        ok: true,
+        key,
+        value: Math.round(num),
+        overridden: true,
+        publishSlots: slotCount,
+      });
+    }
+
+    if (key === RETRY_ATTEMPTS_KEY) {
+      // value === null resets to the env default (PIPELINE_RETRY_ATTEMPTS).
+      // refreshRetryAttempts() keeps this process's queue-getter cache in
+      // step immediately; worker processes refresh per job via
+      // startWorkerAttempt (15s settings cache).
+      if (value === null) {
+        await deleteSetting(RETRY_ATTEMPTS_KEY);
+        await refreshRetryAttempts();
+        return NextResponse.json({
+          ok: true,
+          key,
+          value: Number(env.PIPELINE_RETRY_ATTEMPTS),
+          overridden: false,
+        });
+      }
+      const num = Number(value);
+      if (!Number.isInteger(num) || num < 0 || num > 10) {
+        return NextResponse.json(
+          { ok: false, error: "retryAttempts must be an integer between 0 and 10." },
+          { status: 422 }
+        );
+      }
+      await setSetting(RETRY_ATTEMPTS_KEY, num);
+      await refreshRetryAttempts();
+      return NextResponse.json({ ok: true, key, value: num, overridden: true });
     }
 
     const stage = MODEL_STAGES.find((s) => MODEL_SETTING_KEYS[s] === key);

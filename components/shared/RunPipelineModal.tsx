@@ -8,7 +8,8 @@ type Schedule = {
   label: string;
   pattern: string | null;
   tz: string | null;
-  next: number;
+  /** Null when the slot isn't registered right now (no publish time configured for it). */
+  next: number | null;
 };
 
 type LastRun = {
@@ -152,6 +153,12 @@ export function RunPipelineModal({ onClose }: RunPipelineModalProps) {
   const noWorkers = context !== null && context.workersConnected === 0;
   const runInFlight = context?.runInFlight ?? false;
   const runDisabled = submitting || loading || runInFlight;
+  // run-context always returns the three canonical slots; ones with next ===
+  // null aren't registered right now (schedule cleared via a Daily Blog Goal
+  // change) and have no countdown to show.
+  const configuredSchedules = (context?.schedules ?? []).filter(
+    (schedule): schedule is Schedule & { next: number } => schedule.next !== null
+  );
 
   return (
     <div
@@ -196,12 +203,13 @@ export function RunPipelineModal({ onClose }: RunPipelineModalProps) {
           <div className={LABEL_CLASS}>Next scheduled runs</div>
           <div className="flex flex-col gap-[7px] mt-[9px]">
             {loading && <div className="text-[11.5px] text-[var(--faint)]">Loading…</div>}
-            {!loading && (context?.schedules.length ?? 0) === 0 && (
+            {!loading && configuredSchedules.length === 0 && (
               <div className="text-[11.5px] text-[var(--amber)]">
-                No schedules registered — the worker may not have booted yet.
+                No publish slots configured right now — the worker may not have booted, or no target
+                times are set. Configure them in Settings → Publish Schedule.
               </div>
             )}
-            {context?.schedules.map((schedule, index) => (
+            {configuredSchedules.map((schedule, index) => (
               <div key={schedule.id} className="flex items-center gap-[10px]">
                 <span
                   className="w-[5px] h-[5px] rounded-full flex-none"
