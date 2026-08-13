@@ -7,12 +7,15 @@ import { workerOptions } from "../shared/worker-options";
 import { getDailyTargetStatus, reconcileDailyTarget } from "../shared/daily-target";
 import { getSetting } from "../shared/settings";
 import {
-  RESEARCH_SLOTS,
   RECONCILE_SLOT_ID,
-  envPatternForSlot,
-  isValidCronPattern,
-  scheduleSettingKey,
-} from "../shared/research-slots";
+  blogSlotId,
+  getPublishSlotView,
+  nextOccurrenceOf,
+  parseSlotTime,
+  reconcilePublishSlots,
+  setPublishTarget,
+  slotSettingKey,
+} from "../shared/publish-slots";
 import { getEnabledSources } from "./sources";
 import { normalizeSignals } from "./pipeline/normalize";
 import { dedupeSignals } from "./pipeline/dedupe";
@@ -72,13 +75,25 @@ function candidateDescription(candidate: ResearchCandidate): string {
  * writing-worker currently does title/outline/copy generation in one
  * Vertex AI call. Swap this `writingQueue.add` for `planningQueue.add`
  * once the planning/outline workers exist.
+ *
+ * Options:
+ *  - maxDispatch: cap on topics dispatched this run (publish slots pass 1;
+ *    manual/legacy runs use TRENDS_TO_WRITE_PER_RUN). The daily-remaining
+ *    clamp below still applies on top.
+ *  - targetPublishAt: when set, each dispatched trend gets this "hold
+ *    until" timestamp recorded (workers/shared/publish-slots.ts) so
+ *    quality-worker delays the publish job until the slot's publish time.
  */
-export async function runResearch() {
+export async function runResearch(options: { maxDispatch?: number; targetPublishAt?: number } = {}) {
   const attempt = await startWorkerAttempt({
     worker: "research-worker",
     input: {
       sources: getEnabledSources().map((source) => source.name),
       geo: env.GOOGLE_TRENDS_GEO,
+      ...(options.maxDispatch !== undefined ? { maxDispatch: options.maxDispatch } : {}),
+      ...(options.targetPublishAt !== undefined
+        ? { targetPublishAt: new Date(options.targetPublishAt).toISOString() }
+        : {}),
     },
   });
   const sources = getEnabledSources();
@@ -214,10 +229,11 @@ export async function runResearch() {
       throw new Error(`All ${sources.length} research sources failed: ${failedSources.join("; ")}`);
     }
 
+    const maxDispatch = Math.max(1, options.maxDispatch ?? env.TRENDS_TO_WRITE_PER_RUN);
     const topN = created
       .filter((trend) => trend.score >= env.RESEARCH_MIN_SCORE_TO_WRITE)
       .sort((a, b) => b.score - a.score)
-      .slice(0, Math.max(1, env.TRENDS_TO_WRITE_PER_RUN));
+      .slice(0, maxDispatch);
     // Best score among everything this run *found* (promotable), not just
     // what got newly saved (created). `created` is empty whenever every
     // promotable candidate turned out to be a duplicate of something already
@@ -318,13 +334,23 @@ export async function runResearch() {
     };
 
     for (const trend of dispatchable) {
-      await planningQueue.add("plan_blog", {
-        trendId: trend.id,
-        topic: trend.topic,
-        category: trend.category,
-        score: trend.score,
-        evidenceSummary: trend.description,
-      });
+      // Slot-driven runs carry the slot's target publish time down the chain
+      // via Redis (keyed by trendId) - quality-worker reads it when queueing
+      // the publish job and holds the blog until then.
+      if (options.targetPublishAt) await setPublishTarget(trend.id, options.targetPublishAt);
+      // Deterministic jobId: retrying/re-dispatching the same trend can never
+      // enqueue a second planning job for it (duplicate-blog guard).
+      await planningQueue.add(
+        "plan_blog",
+        {
+          trendId: trend.id,
+          topic: trend.topic,
+          category: trend.category,
+          score: trend.score,
+          evidenceSummary: trend.description,
+        },
+        { jobId: `plan-${trend.id}` }
+      );
       await prisma.trend.update({ where: { id: trend.id }, data: { status: "PLANNED" } });
     }
 
@@ -362,10 +388,81 @@ export async function runResearch() {
 }
 
 /**
- * Three research slots per day (metadata in workers/shared/research-slots.ts)
- * plus the daily-target reconcile tick. Each slot's pattern comes from its
- * RESEARCH_CRON_* env var UNLESS the dashboard has an AppSetting override -
- * see below.
+ * One publish slot fired: produce exactly ONE blog targeting the slot's
+ * publish time. Runs research first (which also refills the backlog), then
+ * falls back to the best qualified backlog trend when the run found nothing
+ * new (later slots on a day mostly re-find duplicates - that's normal).
+ *
+ * Retry story for the slot's blog: every stage queue carries attempts: 4
+ * (1 initial + 3 retries) with quota-aware backoff, QA failure re-queues
+ * writing with the concrete fix list (up to 4 writing attempts), and a
+ * permanent failure drops the blog out of in-flight, which makes the next
+ * reconcile tick backfill the day from backlog. If the pipeline beats the
+ * target time, quality-worker holds the publish job until it; if retries
+ * ran past it, the blog publishes immediately on completion.
+ */
+async function runScheduledSlot(slotNumber: number) {
+  const parsed = parseSlotTime(await getSetting<string | null>(slotSettingKey(slotNumber), null));
+  if (!parsed) {
+    log.warn(`Publish slot ${slotNumber} fired without a configured time - skipping (set it in Settings)`);
+    return { slot: slotNumber, dispatchedCount: 0, reason: "slot_unconfigured" };
+  }
+
+  const targetPublishAt = nextOccurrenceOf(parsed.hour, parsed.minute, env.TIMEZONE, Date.now());
+  log.info(
+    `Publish slot ${slotNumber} fired - one blog targeting ${new Date(targetPublishAt).toISOString()} (${env.TIMEZONE})`
+  );
+
+  const output = (await runResearch({ maxDispatch: 1, targetPublishAt })) as {
+    dispatchedCount?: number;
+    reason?: string;
+  };
+  if ((output.dispatchedCount ?? 0) > 0 || output.reason === "daily_target_already_met") {
+    return output;
+  }
+
+  // Research produced nothing new - backfill the slot from the backlog so
+  // the day still gets its blog. The goal ceiling is respected because
+  // runResearch above already returned early when the day was met.
+  const { remaining } = await getDailyTargetStatus();
+  if (remaining <= 0) return output;
+
+  const backlog = await prisma.trend.findFirst({
+    where: { status: "NEW", score: { gte: env.RESEARCH_MIN_SCORE_TO_WRITE } },
+    orderBy: { score: "desc" },
+  });
+  if (!backlog) {
+    log.warn(
+      `Publish slot ${slotNumber}: nothing new and no qualified backlog trend - the reconcile tick retries in up to 30m`
+    );
+    return { ...output, reason: output.reason ?? "no_qualified_topic_available" };
+  }
+
+  await setPublishTarget(backlog.id, targetPublishAt);
+  await planningQueue.add(
+    "plan_blog",
+    {
+      trendId: backlog.id,
+      topic: backlog.topic,
+      category: backlog.category,
+      score: backlog.score,
+      evidenceSummary: backlog.evidenceSummary ?? "",
+    },
+    { jobId: `plan-${backlog.id}` }
+  );
+  await prisma.trend.update({ where: { id: backlog.id }, data: { status: "PLANNED" } });
+  log.info(
+    `Publish slot ${slotNumber}: dispatched backlog trend "${backlog.topic}" (score ${Math.round(backlog.score)}) targeting ${new Date(targetPublishAt).toISOString()}`
+  );
+  return { ...output, dispatchedCount: 1, backlogDispatched: true };
+}
+
+/**
+ * Schedule registration = the daily-target reconcile tick + the dynamic
+ * publish slots (one per Daily Blog Goal, times from AppSetting). BullMQ v5+
+ * upsertJobScheduler is idempotent, safe on every boot; anything else still
+ * registered - including the legacy research-overnight/midday/us-daytime
+ * schedulers from the pre-slot system - is removed as stale.
  */
 async function registerSchedules() {
   if (!env.SCHEDULER_ENABLED) {
@@ -374,37 +471,9 @@ async function registerSchedules() {
   }
 
   if (env.RESEARCH_CRON) {
-    log.warn(
-      `RESEARCH_CRON="${env.RESEARCH_CRON}" is deprecated and ignored. ` +
-        "Use RESEARCH_CRON_OVERNIGHT / RESEARCH_CRON_MIDDAY / RESEARCH_CRON_US_DAYTIME."
-    );
+    log.warn(`RESEARCH_CRON="${env.RESEARCH_CRON}" is deprecated and ignored - publish slots replaced it.`);
   }
 
-  // BullMQ v5+ replaced the old `{ repeat: {...} }` job option with an
-  // explicit Job Scheduler API - upsert is idempotent, safe on every boot.
-  //
-  // Dashboard edits (PATCH /api/pipeline/schedules/[id]) are persisted to
-  // AppSetting as `schedule:<slotId>`; without reading them back here, every
-  // boot would silently re-upsert the env defaults and revert the user's
-  // edit. Precedence: AppSetting override > RESEARCH_CRON_* env var. A
-  // corrupt stored pattern fails isValidCronPattern and falls back to env
-  // rather than crashing BullMQ's cron parser.
-  for (const slot of RESEARCH_SLOTS) {
-    const stored = await getSetting<string | null>(scheduleSettingKey(slot.id), null);
-    const pattern = isValidCronPattern(stored) ? stored : envPatternForSlot(slot.id);
-    await researchQueue.upsertJobScheduler(
-      slot.id,
-      { pattern, tz: env.TIMEZONE },
-      { name: "scheduled-research", data: { slot: slot.id } }
-    );
-    log.info(
-      `Registered "${slot.label}" schedule "${pattern}" (${env.TIMEZONE})${isValidCronPattern(stored) ? " [dashboard override]" : ""}`
-    );
-  }
-
-  // Daily Target Controller safety net - reuses this queue rather than
-  // standing up a new one, distinguished from the research slots above by
-  // job name (see startResearchWorker's job router below).
   await researchQueue.upsertJobScheduler(
     RECONCILE_SLOT_ID,
     { pattern: env.RECONCILE_CRON, tz: env.TIMEZONE },
@@ -412,10 +481,16 @@ async function registerSchedules() {
   );
   log.info(`Registered daily-target reconcile schedule "${env.RECONCILE_CRON}" (${env.TIMEZONE})`);
 
-  // Schedulers live in Redis independently of this code, so a renamed or
-  // removed slot would otherwise keep firing forever. Reconcile against the
-  // desired set - this is what retires the old "daily-research-schedule".
-  const wanted = new Set<string>([...RESEARCH_SLOTS.map((slot) => slot.id), RECONCILE_SLOT_ID]);
+  const slotCount = await reconcilePublishSlots();
+  const configured = (await getPublishSlotView()).filter((slot) => slot.configured).length;
+  log.info(`Reconciled publish slots: ${configured} configured of ${slotCount} (daily blog goal)`);
+
+  // Retire anything that isn't the reconcile tick or a currently-live slot.
+  const wanted = new Set<string>([RECONCILE_SLOT_ID]);
+  for (let n = 1; n <= slotCount; n += 1) {
+    const parsed = parseSlotTime(await getSetting<string | null>(slotSettingKey(n), null));
+    if (parsed) wanted.add(blogSlotId(n));
+  }
   const existing = await researchQueue.getJobSchedulers();
   for (const scheduler of existing) {
     if (scheduler.key && !wanted.has(scheduler.key)) {
@@ -428,7 +503,11 @@ async function registerSchedules() {
 export function startResearchWorker() {
   const worker = new Worker(
     QUEUE_NAMES.research,
-    (job: Job) => (job.name === "reconcile-daily-target" ? reconcileDailyTarget() : runResearch()),
+    (job: Job) => {
+      if (job.name === "reconcile-daily-target") return reconcileDailyTarget();
+      if (job.name === "scheduled-slot") return runScheduledSlot(Number(job.data.slot));
+      return runResearch();
+    },
     { ...workerOptions(1) }
   );
 
