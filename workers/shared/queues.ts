@@ -1,5 +1,6 @@
 import { Queue } from "bullmq";
 import { createRedisConnection } from "./redis";
+import { currentJobAttempts } from "./retry-config";
 
 /**
  * Queue names. Matches the naming convention in README.md's "Queue
@@ -18,74 +19,59 @@ export const QUEUE_NAMES = {
   publish: "publish_queue",
 } as const;
 
+/**
+ * `attempts` is a GETTER on purpose: BullMQ merges defaultJobOptions into
+ * each job at add time, so every newly enqueued job reads the live value.
+ * That makes the Settings page's Retry Attempts input
+ * (AppSetting "retryAttempts" via workers/shared/retry-config.ts) the single
+ * source of truth - total BullMQ attempts = configured retries + 1 (the
+ * initial try). The cache behind currentJobAttempts() is refreshed per job
+ * in startWorkerAttempt and whenever the settings API saves a new value, so
+ * changing the setting takes effect for future runs with no worker restart
+ * and no code change. Nothing in the pipeline may hard-code a retry count.
+ */
+const dynamicJobOptions = {
+  get attempts() {
+    return currentJobAttempts();
+  },
+  backoff: { type: "recovery" as const },
+  removeOnComplete: { count: 5000 },
+  removeOnFail: { count: 10000 },
+};
+
 export const researchQueue = new Queue(QUEUE_NAMES.research, {
   connection: createRedisConnection(),
-  defaultJobOptions: {
-    attempts: 4,
-    backoff: { type: "recovery" },
-    removeOnComplete: { count: 5000 },
-    removeOnFail: { count: 10000 },
-  },
+  defaultJobOptions: dynamicJobOptions,
 });
 
 export const planningQueue = new Queue(QUEUE_NAMES.planning, {
   connection: createRedisConnection(),
-  defaultJobOptions: {
-    attempts: 4,
-    backoff: { type: "recovery" },
-    removeOnComplete: { count: 5000 },
-    removeOnFail: { count: 10000 },
-  },
+  defaultJobOptions: dynamicJobOptions,
 });
 
 export const outlineQueue = new Queue(QUEUE_NAMES.outline, {
   connection: createRedisConnection(),
-  defaultJobOptions: {
-    attempts: 4,
-    backoff: { type: "recovery" },
-    removeOnComplete: { count: 5000 },
-    removeOnFail: { count: 10000 },
-  },
+  defaultJobOptions: dynamicJobOptions,
 });
 
 export const writingQueue = new Queue(QUEUE_NAMES.writing, {
   connection: createRedisConnection(),
-  defaultJobOptions: {
-    attempts: 4,
-    backoff: { type: "recovery" },
-    removeOnComplete: { count: 5000 },
-    removeOnFail: { count: 10000 },
-  },
+  defaultJobOptions: dynamicJobOptions,
 });
 
 export const imageQueue = new Queue(QUEUE_NAMES.image, {
   connection: createRedisConnection(),
-  defaultJobOptions: {
-    attempts: 4,
-    backoff: { type: "recovery" },
-    removeOnComplete: { count: 5000 },
-    removeOnFail: { count: 10000 },
-  },
+  defaultJobOptions: dynamicJobOptions,
 });
 
 export const qualityQueue = new Queue(QUEUE_NAMES.quality, {
   connection: createRedisConnection(),
-  defaultJobOptions: {
-    attempts: 4,
-    backoff: { type: "recovery" },
-    removeOnComplete: { count: 5000 },
-    removeOnFail: { count: 10000 },
-  },
+  defaultJobOptions: dynamicJobOptions,
 });
 
 export const publishQueue = new Queue(QUEUE_NAMES.publish, {
   connection: createRedisConnection(),
-  defaultJobOptions: {
-    attempts: 4,
-    backoff: { type: "recovery" },
-    removeOnComplete: { count: 5000 },
-    removeOnFail: { count: 10000 },
-  },
+  defaultJobOptions: dynamicJobOptions,
 });
 
 export type PlanningJobPayload = {
