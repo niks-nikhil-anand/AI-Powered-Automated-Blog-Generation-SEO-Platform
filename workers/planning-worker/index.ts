@@ -1,5 +1,5 @@
 import { Worker } from "bullmq";
-import { outlineQueue, QUEUE_NAMES, type PlanningJobPayload } from "../shared/queues";
+import { JOB_IDS, outlineQueue, QUEUE_NAMES, type PlanningJobPayload } from "../shared/queues";
 import { prisma } from "../shared/prisma";
 import { logger } from "../shared/logger";
 import { env } from "../shared/env";
@@ -95,7 +95,13 @@ async function planTopic(payload: PlanningJobPayload) {
       trendId: payload.trendId,
     });
 
-    await outlineQueue.add("outline_blog", { trendId: payload.trendId, planId: saved.id });
+    // Deterministic jobId: a retried planning job can never enqueue a second
+    // outline job for the same trend (duplicate-spend guard).
+    await outlineQueue.add(
+      "outline_blog",
+      { trendId: payload.trendId, planId: saved.id },
+      { jobId: JOB_IDS.outline(payload.trendId) }
+    );
     await prisma.trend.update({ where: { id: payload.trendId }, data: { status: "PLANNED" } });
     await passWorkerAttempt({
       workflowRunId: attempt.workflow.id,
