@@ -1,5 +1,5 @@
 import { Worker } from "bullmq";
-import { qualityQueue, QUEUE_NAMES, type ImageJobPayload } from "../shared/queues";
+import { JOB_IDS, qualityQueue, QUEUE_NAMES, type ImageJobPayload } from "../shared/queues";
 import { prisma } from "../shared/prisma";
 import { logger } from "../shared/logger";
 import { workerOptions } from "../shared/worker-options";
@@ -37,7 +37,9 @@ export async function generateImageForBlog(payload: ImageJobPayload) {
   });
   if (!blog) throw new Error(`Blog ${payload.blogId} not found`);
   if (blog.featuredImageId) {
-    await qualityQueue.add("quality_check_blog", { blogId: blog.id });
+    // Epoch-keyed jobId: every pass-through must trigger a fresh QA scoring
+    // run - entity-keying this would dedupe away legitimate re-scores.
+    await qualityQueue.add("quality_check_blog", { blogId: blog.id }, { jobId: JOB_IDS.quality(blog.id, attempt.attempt.id) });
     const output = { blogId: blog.id, assetId: blog.featuredImageId, skipped: true };
     await passWorkerAttempt({
       workflowRunId: attempt.workflow.id,
@@ -99,7 +101,7 @@ export async function generateImageForBlog(payload: ImageJobPayload) {
       where: { id: blog.id },
       data: { featuredImageId: asset.id },
     });
-    await qualityQueue.add("quality_check_blog", { blogId: blog.id });
+    await qualityQueue.add("quality_check_blog", { blogId: blog.id }, { jobId: JOB_IDS.quality(blog.id, attempt.attempt.id) });
     await passWorkerAttempt({
       workflowRunId: attempt.workflow.id,
       attemptId: attempt.attempt.id,
