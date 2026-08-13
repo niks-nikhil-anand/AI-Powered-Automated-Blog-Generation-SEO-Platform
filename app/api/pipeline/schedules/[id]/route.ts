@@ -1,13 +1,10 @@
 import { NextResponse } from "next/server";
-import { env } from "@/workers/shared/env";
-import { researchQueue } from "@/workers/shared/queues";
-import { deleteSetting, setSetting } from "@/workers/shared/settings";
 import {
-  RESEARCH_SLOT_LABELS,
-  envPatternForSlot,
-  isResearchSlotId,
-  scheduleSettingKey,
-} from "@/workers/shared/research-slots";
+  clearSlotTime,
+  isBlogSlotId,
+  slotNumberFromId,
+  upsertSlotTime,
+} from "@/workers/shared/publish-slots";
 
 export const dynamic = "force-dynamic";
 
@@ -16,22 +13,24 @@ type RouteContext = {
 };
 
 /**
- * Edits one of the three research-worker schedule slots. The live schedule
- * is BullMQ's Job Scheduler in Redis - `upsertJobScheduler` is idempotent
- * and takes effect immediately (no worker restart, next fire time
- * recalculates as soon as it resolves). The chosen pattern is ALSO persisted
- * to AppSetting (`schedule:<slotId>`) because registerSchedules() re-upserts
- * at every worker boot: without the persisted override, a restart silently
- * reverted dashboard edits back to the RESEARCH_CRON_* env defaults. Boot
- * reads AppSetting first, env var as fallback - so Redis is the live truth
- * for reads and AppSetting is only the boot-time override.
+ * Edits one publish slot's TARGET PUBLISH time (blog-slot-<n>, n = 1..20,
+ * one per Daily Blog Goal). The time the user picks is when the blog goes
+ * live - the BullMQ scheduler actually fires generation earlier by
+ * SLOT_GENERATION_LEAD_MINUTES, and quality-worker holds the finished blog
+ * until the publish time (publishes immediately if retries already ran
+ * past it). The publish time persists in AppSetting, so edits survive
+ * worker restarts; Redis stays the live scheduling truth for reads.
+ *
+ * Body: { hour, minute } = publish time, or { reset: true } to clear the
+ * slot (unsets it - the card returns to "--:--" until a new time is set).
  */
 export async function PATCH(request: Request, context: RouteContext) {
   try {
     const { id } = await context.params;
-    if (!isResearchSlotId(id)) {
-      return NextResponse.json({ ok: false, error: `Unknown schedule "${id}".` }, { status: 404 });
+    if (!isBlogSlotId(id)) {
+      return NextResponse.json({ ok: false, error: `Unknown publish slot "${id}".` }, { status: 404 });
     }
+    const n = slotNumberFromId(id);
 
     let body: Record<string, unknown> = {};
     try {
@@ -43,25 +42,17 @@ export async function PATCH(request: Request, context: RouteContext) {
       );
     }
 
-    // Reset path: drop the persisted override and re-upsert the env default.
     if (body.reset === true) {
-      const pattern = envPatternForSlot(id);
-      await deleteSetting(scheduleSettingKey(id));
-      await researchQueue.upsertJobScheduler(
-        id,
-        { pattern, tz: env.TIMEZONE },
-        { name: "scheduled-research", data: { slot: id } }
-      );
-      const schedulers = await researchQueue.getJobSchedulers();
-      const updated = schedulers.find((scheduler) => scheduler.key === id);
+      await clearSlotTime(n);
       return NextResponse.json({
         ok: true,
         id,
-        label: RESEARCH_SLOT_LABELS[id],
-        pattern,
-        tz: env.TIMEZONE,
-        next: updated?.next ?? null,
-        overridden: false,
+        label: `Blog #${n}`,
+        pattern: null,
+        publishTime: null,
+        generationStart: null,
+        next: null,
+        configured: false,
       });
     }
 
@@ -74,27 +65,8 @@ export async function PATCH(request: Request, context: RouteContext) {
       );
     }
 
-    const pattern = `${minute} ${hour} * * *`;
-
-    await researchQueue.upsertJobScheduler(
-      id,
-      { pattern, tz: env.TIMEZONE },
-      { name: "scheduled-research", data: { slot: id } }
-    );
-    await setSetting(scheduleSettingKey(id), pattern);
-
-    const schedulers = await researchQueue.getJobSchedulers();
-    const updated = schedulers.find((scheduler) => scheduler.key === id);
-
-    return NextResponse.json({
-      ok: true,
-      id,
-      label: RESEARCH_SLOT_LABELS[id],
-      pattern,
-      tz: env.TIMEZONE,
-      next: updated?.next ?? null,
-      overridden: true,
-    });
+    const slot = await upsertSlotTime(n, hour, minute);
+    return NextResponse.json({ ok: true, ...slot });
   } catch (error) {
     console.error("Failed to update schedule:", error);
     return NextResponse.json(

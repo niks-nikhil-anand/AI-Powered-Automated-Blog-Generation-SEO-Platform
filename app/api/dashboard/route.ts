@@ -25,6 +25,7 @@ import {
   trendSourceColor,
 } from "@/lib/research-sources";
 import { getDailyTargetStatus } from "@/workers/shared/daily-target";
+import { getRetryAttempts } from "@/workers/shared/retry-config";
 import { env } from "@/workers/shared/env";
 
 export const dynamic = "force-dynamic";
@@ -843,6 +844,9 @@ export async function GET() {
   const dailyTargetStatus = await getDailyTargetStatus();
   const expectedPublishedByNow = expectedByNow(dailyTargetStatus.target, currentHourInTimezone(env.TIMEZONE));
   const behindPace = dailyTargetStatus.publishedToday < expectedPublishedByNow;
+  // Total writing tries (initial + configured retries) - Settings' Retry
+  // Attempts value, shown on the quality page as the regeneration budget.
+  const retryLimit = (await getRetryAttempts()) + 1;
 
   return NextResponse.json({
     metrics: {
@@ -1054,7 +1058,7 @@ export async function GET() {
       distribution: qualityBuckets,
       checkRates: qualityParameters,
       avgAttemptsToPass,
-      retryLimit: 4,
+      retryLimit,
       flow: {
         writing: {
           active: writingCounts.active,
