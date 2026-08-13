@@ -1,5 +1,5 @@
 import { Worker, Job } from "bullmq";
-import { planningQueue, researchQueue, QUEUE_NAMES } from "../shared/queues";
+import { JOB_IDS, planningQueue, researchQueue, QUEUE_NAMES } from "../shared/queues";
 import { prisma } from "../shared/prisma";
 import { logger } from "../shared/logger";
 import { env } from "../shared/env";
@@ -349,7 +349,7 @@ export async function runResearch(options: { maxDispatch?: number; targetPublish
           score: trend.score,
           evidenceSummary: trend.description,
         },
-        { jobId: `plan-${trend.id}` }
+        { jobId: JOB_IDS.plan(trend.id) }
       );
       await prisma.trend.update({ where: { id: trend.id }, data: { status: "PLANNED" } });
     }
@@ -448,7 +448,7 @@ async function runScheduledSlot(slotNumber: number) {
       score: backlog.score,
       evidenceSummary: backlog.evidenceSummary ?? "",
     },
-    { jobId: `plan-${backlog.id}` }
+    { jobId: JOB_IDS.plan(backlog.id) }
   );
   await prisma.trend.update({ where: { id: backlog.id }, data: { status: "PLANNED" } });
   log.info(
