@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { env } from "@/workers/shared/env";
-import { planningQueue } from "@/workers/shared/queues";
+import { JOB_IDS, planningQueue } from "@/workers/shared/queues";
 
 export const dynamic = "force-dynamic";
 
@@ -105,14 +105,20 @@ export async function POST(request: Request, context: RouteContext) {
       });
     }
 
-    // Queue the job after the transaction succeeds
-    const job = await planningQueue.add("plan_blog", {
-      trendId: trend.id,
-      topic: trend.topic,
-      category: trend.category,
-      score: trend.score,
-      evidenceSummary: evidenceSummary(trend, belowThreshold ? reason : null),
-    });
+    // Queue the job after the transaction succeeds. Deterministic jobId
+    // matches the pipeline convention: one planning job per trend, ever -
+    // queue-level backup for the ALREADY_PLANNED transaction guard above.
+    const job = await planningQueue.add(
+      "plan_blog",
+      {
+        trendId: trend.id,
+        topic: trend.topic,
+        category: trend.category,
+        score: trend.score,
+        evidenceSummary: evidenceSummary(trend, belowThreshold ? reason : null),
+      },
+      { jobId: JOB_IDS.plan(trend.id) }
+    );
 
     return NextResponse.json({
       ok: true,
