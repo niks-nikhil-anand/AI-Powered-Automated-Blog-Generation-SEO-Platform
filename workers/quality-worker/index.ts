@@ -1,5 +1,5 @@
 import { Worker } from "bullmq";
-import { publishQueue, QUEUE_NAMES, type QualityJobPayload, writingQueue, type WritingJobPayload } from "../shared/queues";
+import { JOB_IDS, publishQueue, QUEUE_NAMES, type QualityJobPayload, writingQueue, type WritingJobPayload } from "../shared/queues";
 import { prisma } from "../shared/prisma";
 import { logger } from "../shared/logger";
 import { workerOptions } from "../shared/worker-options";
@@ -93,7 +93,7 @@ export async function runQualityCheck(payload: QualityJobPayload) {
     await publishQueue.add(
       "publish_blog",
       { blogId: blog.id, qualityReportId: saved.id },
-      { jobId: `publish-${blog.id}`, delay: holdMs }
+      { jobId: JOB_IDS.publish(blog.id), delay: holdMs }
     );
     if (holdMs > 0) {
       log.info(
@@ -138,17 +138,26 @@ export async function runQualityCheck(payload: QualityJobPayload) {
         .filter((claim) => claim.verdict !== "supported")
         .slice(0, 10)
         .map(({ claim, verdict, note }) => ({ claim, verdict, note }));
-      await writingQueue.add("write_blog", {
-        ...lastWritingInput,
-        recoveryContext: {
-          reason: "final_quality_below_threshold",
-          qualityReport: gate,
-          // Task 4's actionable fixes - Task 5's targeted-repair path turns
-          // these into section-level splices instead of a blind full rewrite.
-          judgeFixes: report.judgeFixes,
-          factCheckIssues,
+      // Epoch-keyed deterministic jobId: unique per QA requeue (so it never
+      // collides with the fresh write or a previous requeue) but stable
+      // across retries of THIS quality job, which recount the same attempt
+      // count - a crash-after-enqueue retry dedupes instead of doubling the
+      // writing spend.
+      await writingQueue.add(
+        "write_blog",
+        {
+          ...lastWritingInput,
+          recoveryContext: {
+            reason: "final_quality_below_threshold",
+            qualityReport: gate,
+            // Task 4's actionable fixes - Task 5's targeted-repair path turns
+            // these into section-level splices instead of a blind full rewrite.
+            judgeFixes: report.judgeFixes,
+            factCheckIssues,
+          },
         },
-      });
+        { jobId: JOB_IDS.writeQaRetry(lastWritingInput.trendId, writingAttemptCount) }
+      );
       await passWorkerAttempt({
         workflowRunId: attempt.workflow.id,
         attemptId: attempt.attempt.id,
