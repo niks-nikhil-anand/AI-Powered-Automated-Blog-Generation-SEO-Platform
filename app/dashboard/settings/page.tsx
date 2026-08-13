@@ -14,17 +14,23 @@ import { ScheduleTimeline, type TimelineSlot } from "@/components/shared/Schedul
 import { ScheduleSlotCard, type ScheduleSlot } from "@/components/shared/ScheduleSlotCard";
 import { formatCountdown } from "@/lib/utils";
 
-/** Colors for the three real research-worker slots - shared between the timeline dots and the slot cards. */
-const SLOT_COLORS: Record<string, string> = {
-  "research-overnight": "var(--indigo)",
-  "research-midday": "var(--amber)",
-  "research-us-daytime": "var(--sky)",
-};
+/** Slot accent colors by position (Blog #1, #2, ...) - cycles for goals > 6. */
+const SLOT_PALETTE = [
+  "var(--indigo)",
+  "var(--amber)",
+  "var(--sky)",
+  "var(--emerald)",
+  "var(--rose)",
+  "var(--mut)",
+];
+function slotColor(index: number) {
+  return SLOT_PALETTE[index % SLOT_PALETTE.length];
+}
 
 /**
- * The six workers that run reactively rather than on a schedule (see
- * workers/shared/settings.ts for why, and workers/shared/research-slots.ts
- * for the one worker - research - that does have real fixed times).
+ * The six workers that run reactively rather than on a schedule - the
+ * scheduled work lives in the Publish Schedule above (one slot per Daily
+ * Blog Goal, see workers/shared/publish-slots.ts).
  */
 const REACTIVE_WORKERS: { key: string; label: string }[] = [
   { key: "planning-worker", label: "Planning" },
@@ -150,6 +156,7 @@ export default function SettingsPage() {
   const now = useLiveNow();
   const [slots, setSlots] = useState<ScheduleSlot[]>([]);
   const [reconcile, setReconcile] = useState<ReconcileInfo>(null);
+  const [slotLeadMinutes, setSlotLeadMinutes] = useState(30);
   const [workersConnected, setWorkersConnected] = useState<number | null>(null);
   const [isLoadingSlots, setIsLoadingSlots] = useState(true);
   const [workerHealth, setWorkerHealth] = useState<WorkerHealthRow[]>([]);
@@ -163,6 +170,8 @@ export default function SettingsPage() {
   const [flags, setFlags] = useState<SettingsFlags | null>(null);
   const [dailyTarget, setDailyTarget] = useState(3);
   const [dailyOverridden, setDailyOverridden] = useState(false);
+  const [retryAttempts, setRetryAttempts] = useState(3);
+  const [retryOverridden, setRetryOverridden] = useState(false);
   const [isLoadingSettings, setIsLoadingSettings] = useState(true);
   const [savingKey, setSavingKey] = useState<string | null>(null);
   // Per-card messages - a Daily-goal save error used to surface under the
@@ -170,29 +179,27 @@ export default function SettingsPage() {
   const [modelMessage, setModelMessage] = useState<Message>(null);
   const [goalMessage, setGoalMessage] = useState<Message>(null);
 
-  useEffect(() => {
-    let mounted = true;
-    const load = () => {
-      fetch("/api/pipeline/run-context", { cache: "no-store" })
-        .then((res) => res.json())
-        .then((data) => {
-          if (!mounted) return;
-          setSlots(data.schedules ?? []);
-          setReconcile(data.reconcile ?? null);
-          setWorkersConnected(typeof data.workersConnected === "number" ? data.workersConnected : null);
-        })
-        .catch(() => {})
-        .finally(() => {
-          if (mounted) setIsLoadingSlots(false);
-        });
-    };
-    load();
-    const timer = window.setInterval(load, 5000);
-    return () => {
-      mounted = false;
-      window.clearInterval(timer);
-    };
+  // Extracted so a Daily Blog Goal save can refresh the schedule cards
+  // immediately (a goal change clears the research schedule server-side)
+  // instead of waiting for the next 5s poll tick.
+  const loadRunContext = React.useCallback(() => {
+    fetch("/api/pipeline/run-context", { cache: "no-store" })
+      .then((res) => res.json())
+      .then((data) => {
+        setSlots(data.schedules ?? []);
+        setReconcile(data.reconcile ?? null);
+        setWorkersConnected(typeof data.workersConnected === "number" ? data.workersConnected : null);
+        if (typeof data.slotLeadMinutes === "number") setSlotLeadMinutes(data.slotLeadMinutes);
+      })
+      .catch(() => {})
+      .finally(() => setIsLoadingSlots(false));
   }, []);
+
+  useEffect(() => {
+    loadRunContext();
+    const timer = window.setInterval(loadRunContext, 5000);
+    return () => window.clearInterval(timer);
+  }, [loadRunContext]);
 
   useEffect(() => {
     let mounted = true;
@@ -237,6 +244,8 @@ export default function SettingsPage() {
         setFlags(data.flags ?? null);
         setDailyTarget(data.dailyBlogTarget ?? 3);
         setDailyOverridden(Boolean(data.dailyBlogTargetOverridden));
+        setRetryAttempts(typeof data.retryAttempts === "number" ? data.retryAttempts : 3);
+        setRetryOverridden(Boolean(data.retryAttemptsOverridden));
       })
       .catch(() => {})
       .finally(() => {
@@ -251,7 +260,8 @@ export default function SettingsPage() {
     key: string,
     value: unknown,
     setMessage: React.Dispatch<React.SetStateAction<Message>>,
-    onSaved?: (data: { value?: unknown }) => void
+    onSaved?: (data: { value?: unknown; publishSlots?: unknown }) => void,
+    successText?: string
   ) => {
     setSavingKey(key);
     setMessage(null);
@@ -263,7 +273,7 @@ export default function SettingsPage() {
       });
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || "Failed to save");
-      setMessage({ text: value === null ? "Reset to default." : "Saved.", tone: "ok" });
+      setMessage({ text: successText ?? (value === null ? "Reset to default." : "Saved."), tone: "ok" });
       onSaved?.(data);
     } catch (err) {
       setMessage({ text: err instanceof Error ? err.message : "Failed to save", tone: "error" });
@@ -272,11 +282,19 @@ export default function SettingsPage() {
     }
   };
 
-  const timelineSlots: TimelineSlot[] = slots.map((slot) => ({
+  /**
+   * A goal change resizes the publish schedule server-side
+   * (reconcilePublishSlots) to exactly N slots - refresh the cards
+   * immediately and say how many slots the day now has.
+   */
+  const goalSlotsMessage = (data: { publishSlots?: unknown }, prefix: string) =>
+    `${prefix} - publish schedule now has ${Number(data.publishSlots ?? 0)} slot(s); set each target time above.`;
+
+  const timelineSlots: TimelineSlot[] = slots.map((slot, index) => ({
     id: slot.id,
     label: slot.label,
     pattern: slot.pattern,
-    color: SLOT_COLORS[slot.id] ?? "var(--indigo)",
+    color: slotColor(index),
   }));
 
   const queueByName = new Map(queues.map((q) => [q.name, q]));
@@ -301,10 +319,10 @@ export default function SettingsPage() {
         </p>
       </div>
 
-      {/* Research Schedule */}
+      {/* Publish Schedule */}
       <div className="bg-[var(--card)] border border-[var(--bd)] rounded-[12px] shadow-[var(--shadow)] overflow-hidden">
         <div className="p-[12px_14px] border-b border-[var(--bd)] flex items-center justify-between flex-wrap gap-[6px]">
-          <span className="text-[13px] font-bold text-[var(--fg)]">Research Schedule</span>
+          <span className="text-[13px] font-bold text-[var(--fg)]">Publish Schedule</span>
           <span className="flex items-center gap-[8px]">
             {workersConnected !== null && (
               <span
@@ -322,7 +340,9 @@ export default function SettingsPage() {
               </span>
             )}
             <span className="text-[11px] text-[var(--mut)]">
-              Editing takes effect immediately and survives worker restarts.
+              One slot per blog in the Daily Blog Goal. The time you set is when the blog goes live - generation
+              starts ~{slotLeadMinutes}m earlier and an early finish is held until the publish time. Edits apply
+              instantly and survive restarts.
             </span>
           </span>
         </div>
@@ -348,11 +368,11 @@ export default function SettingsPage() {
                 <Skeleton key={idx} className="h-[128px] rounded-[12px]" />
               ))
             ) : slots.length > 0 ? (
-              slots.map((slot) => (
+              slots.map((slot, index) => (
                 <ScheduleSlotCard
                   key={slot.id}
                   slot={slot}
-                  color={SLOT_COLORS[slot.id] ?? "var(--indigo)"}
+                  color={slotColor(index)}
                   onUpdated={(updated) =>
                     setSlots((current) => current.map((s) => (s.id === updated.id ? { ...s, ...updated } : s)))
                   }
@@ -544,6 +564,8 @@ export default function SettingsPage() {
                   saveSetting("dailyBlogTarget", null, setGoalMessage, (data) => {
                     setDailyTarget(Number(data.value));
                     setDailyOverridden(false);
+                    loadRunContext();
+                    setGoalMessage({ text: goalSlotsMessage(data, "Reset to default"), tone: "ok" });
                   })
                 }
                 className="text-[10px] font-semibold text-[var(--faint)] hover:text-[var(--indigo)] cursor-pointer bg-transparent border-0 p-0"
@@ -570,10 +592,18 @@ export default function SettingsPage() {
               value={dailyTarget}
               onChange={(e) => setDailyTarget(Number(e.target.value))}
               onMouseUp={() =>
-                saveSetting("dailyBlogTarget", dailyTarget, setGoalMessage, () => setDailyOverridden(true))
+                saveSetting("dailyBlogTarget", dailyTarget, setGoalMessage, (data) => {
+                  setDailyOverridden(true);
+                  loadRunContext();
+                  setGoalMessage({ text: goalSlotsMessage(data, "Saved"), tone: "ok" });
+                })
               }
               onTouchEnd={() =>
-                saveSetting("dailyBlogTarget", dailyTarget, setGoalMessage, () => setDailyOverridden(true))
+                saveSetting("dailyBlogTarget", dailyTarget, setGoalMessage, (data) => {
+                  setDailyOverridden(true);
+                  loadRunContext();
+                  setGoalMessage({ text: goalSlotsMessage(data, "Saved"), tone: "ok" });
+                })
               }
               disabled={isLoadingSettings}
               className="w-full accent-[var(--indigo)] cursor-pointer"
@@ -599,10 +629,71 @@ export default function SettingsPage() {
                 </span>
               </div>
             )}
+            {/* Retry Attempts - drives BullMQ attempts + QA regeneration budget (workers/shared/retry-config.ts) */}
+            <div className="flex items-center justify-between gap-[10px] border-t border-[var(--bd)] pt-[10px] mt-[4px]">
+              <div className="flex-1">
+                <div className="text-[12px] font-semibold text-[var(--fg2)]">Retry attempts per blog</div>
+                <div className="text-[10px] text-[var(--faint)] mt-[1px]">
+                  After the first try, every failed pipeline stage retries this many times (0 = never). A blog
+                  that still fails is backfilled from the backlog - the slot is never abandoned at its publish
+                  time.
+                </div>
+              </div>
+              <div className="flex items-center gap-[6px] flex-none">
+                {retryOverridden && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      saveSetting("retryAttempts", null, setGoalMessage, (data) => {
+                        setRetryAttempts(Number(data.value));
+                        setRetryOverridden(false);
+                      })
+                    }
+                    className="text-[9.5px] font-semibold text-[var(--faint)] hover:text-[var(--indigo)] cursor-pointer bg-transparent border-0 p-0 mr-[2px]"
+                  >
+                    Reset
+                  </button>
+                )}
+                <button
+                  type="button"
+                  aria-label="Fewer retry attempts"
+                  disabled={isLoadingSettings || retryAttempts <= 0 || savingKey === "retryAttempts"}
+                  onClick={() =>
+                    saveSetting("retryAttempts", retryAttempts - 1, setGoalMessage, () => {
+                      setRetryAttempts((current) => Math.max(0, current - 1));
+                      setRetryOverridden(true);
+                    })
+                  }
+                  className="w-[26px] h-[26px] rounded-[7px] border border-[var(--bd)] bg-[var(--card)] text-[var(--fg2)] text-[14px] font-bold leading-none hover:border-[var(--indigo)] hover:text-[var(--indigo)] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  −
+                </button>
+                <span className="font-mono font-bold text-[13px] min-w-[44px] text-center p-[2px_8px] rounded-[7px] bg-[var(--tint)] text-[var(--indigo)]">
+                  ×{retryAttempts}
+                </span>
+                <button
+                  type="button"
+                  aria-label="More retry attempts"
+                  disabled={isLoadingSettings || retryAttempts >= 10 || savingKey === "retryAttempts"}
+                  onClick={() =>
+                    saveSetting("retryAttempts", retryAttempts + 1, setGoalMessage, () => {
+                      setRetryAttempts((current) => Math.min(10, current + 1));
+                      setRetryOverridden(true);
+                    })
+                  }
+                  className="w-[26px] h-[26px] rounded-[7px] border border-[var(--bd)] bg-[var(--card)] text-[var(--fg2)] text-[14px] font-bold leading-none hover:border-[var(--indigo)] hover:text-[var(--indigo)] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  +
+                </button>
+              </div>
+            </div>
             <div className="text-[10.5px] text-[var(--faint)] mt-[4px]">
-              This number both caps what each research run dispatches and drives the reconcile tick (every 30 min,
-              and after any QA/publish failure) that tops today up from qualified backlog trends. Research runs
-              stockpile extra qualified trends as backlog instead of over-producing.
+              Sets how many publish slots the schedule above has - one independent pipeline run per slot
+              (Research → Planning → Outline → Writing → Image → QA → Publish), published at its configured
+              time. A blog only counts once it is PUBLISHED: every stage retries automatically ({retryAttempts}{" "}
+              retr{retryAttempts === 1 ? "y" : "ies"} after the first attempt), QA failures regenerate the draft,
+              and anything permanently failed is backfilled from the trend backlog so the day still reaches the
+              goal.
             </div>
             {goalMessage && (
               <div

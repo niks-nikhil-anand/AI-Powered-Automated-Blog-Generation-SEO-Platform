@@ -2,22 +2,14 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { researchQueue } from "@/workers/shared/queues";
 import { allQueueCounts, STAGE_ORDER } from "@/lib/queues";
-import {
-  RESEARCH_SLOT_IDS,
-  RESEARCH_SLOT_LABELS,
-  RECONCILE_SLOT_ID,
-  scheduleSettingKey,
-} from "@/workers/shared/research-slots";
+import { env } from "@/workers/shared/env";
+import { RECONCILE_SLOT_ID, getPublishSlotView } from "@/workers/shared/publish-slots";
 
 export const dynamic = "force-dynamic";
 
 /** Fallback estimate, measured from the pricing model, used until real runs exist. */
 const FALLBACK_COST_USD = 0.067;
 const FALLBACK_DURATION_MS = 3 * 60 * 1000;
-
-function slotLabel(key: string) {
-  return RESEARCH_SLOT_LABELS[key] ?? key.replace(/^research-/, "").replace(/-/g, " ");
-}
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -29,7 +21,7 @@ export async function GET() {
   try {
     const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
 
-  const [schedulers, queues, workersConnected, lastAttempt, usageRows, passedRuns, overrideRows] =
+  const [schedulers, queues, workersConnected, lastAttempt, usageRows, passedRuns, slotView] =
     await Promise.all([
       researchQueue.getJobSchedulers().catch(() => []),
       allQueueCounts(),
@@ -48,33 +40,14 @@ export async function GET() {
         take: 100,
         orderBy: { createdAt: "desc" },
       }),
-      // Dashboard-edited schedule overrides (see /api/pipeline/schedules/[id]) -
-      // presence of the AppSetting row is what makes a slot "overridden".
-      prisma.appSetting.findMany({
-        where: { key: { in: RESEARCH_SLOT_IDS.map(scheduleSettingKey) } },
-        select: { key: true },
-      }),
+      // Dynamic publish slots: exactly one entry per Daily Blog Goal,
+      // publish times from AppSetting, next-generation fire times from
+      // BullMQ. Unset slots come back with nulls so the UI can render the
+      // empty "configure me" card.
+      getPublishSlotView(),
     ]);
-  const overriddenSlotKeys = new Set(overrideRows.map((row) => row.key));
 
-  // Next fire times come straight from BullMQ rather than re-parsing cron, so
-  // this reflects what is actually registered in Redis. Only the three real
-  // research slots are returned as editable schedules - the reconcile
-  // scheduler ("daily-target-reconcile", a */30 tick) also lives on this
-  // queue and used to leak into the settings UI as a 4th "--:--" card whose
-  // Edit button 404'd; it's surfaced separately below as read-only info.
-  const schedules = schedulers
-    .filter((scheduler) => typeof scheduler.next === "number" && RESEARCH_SLOT_IDS.includes(scheduler.key))
-    .map((scheduler) => ({
-      id: scheduler.key,
-      label: slotLabel(scheduler.key),
-      pattern: scheduler.pattern ?? null,
-      tz: scheduler.tz ?? null,
-      next: scheduler.next as number,
-      overridden: overriddenSlotKeys.has(scheduleSettingKey(scheduler.key)),
-    }))
-    .sort((a, b) => a.next - b.next);
-
+  const schedules = slotView;
   const reconcileScheduler = schedulers.find((scheduler) => scheduler.key === RECONCILE_SLOT_ID);
   const reconcile = reconcileScheduler
     ? {
@@ -130,6 +103,9 @@ export async function GET() {
     lastRun,
     queues,
     stageOrder: STAGE_ORDER,
+    // Minutes generation starts before a slot's publish time - the settings
+    // page shows this as the "starts ~Xm earlier" note on each slot card.
+    slotLeadMinutes: env.SLOT_GENERATION_LEAD_MINUTES,
     // `delayed` deliberately excluded: BullMQ's job scheduler always keeps one
     // delayed placeholder job per registered cron schedule (one per entry in
     // `schedules` above) representing its next future fire time - that's not
