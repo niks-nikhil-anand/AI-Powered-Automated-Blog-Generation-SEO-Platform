@@ -2,7 +2,7 @@ import { Worker } from "bullmq";
 import { prisma } from "../shared/prisma";
 import { logger } from "../shared/logger";
 import { env } from "../shared/env";
-import { QUEUE_NAMES, type OutlineJobPayload, writingQueue } from "../shared/queues";
+import { JOB_IDS, QUEUE_NAMES, type OutlineJobPayload, writingQueue } from "../shared/queues";
 import { generateContentOutline } from "./vertex";
 import { workerOptions } from "../shared/worker-options";
 import { recordAIUsage } from "../shared/pricing";
@@ -93,12 +93,19 @@ async function outlineTopic(payload: OutlineJobPayload) {
       trendId: payload.trendId,
     });
 
-    await writingQueue.add("write_blog", {
-      trendId: payload.trendId,
-      outlineId: saved.id,
-      topic: saved.title,
-      description: plan.angle,
-    });
+    // Deterministic jobId: a retried outline job can never enqueue a second
+    // fresh write for the same trend. QA requeues use their own epoch-keyed
+    // IDs (JOB_IDS.writeQaRetry), so this guard never blocks recovery.
+    await writingQueue.add(
+      "write_blog",
+      {
+        trendId: payload.trendId,
+        outlineId: saved.id,
+        topic: saved.title,
+        description: plan.angle,
+      },
+      { jobId: JOB_IDS.write(payload.trendId) }
+    );
     await passWorkerAttempt({
       workflowRunId: attempt.workflow.id,
       attemptId: attempt.attempt.id,
