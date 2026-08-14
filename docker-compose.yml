@@ -42,106 +42,13 @@ services:
     command: ["node_modules/.bin/tsx", "workers/research-worker/index.ts"]
     volumes:
       - ${GOOGLE_APPLICATION_CREDENTIALS}:/app/gcp-credentials.json:ro
+    env_file:
+      - .env
     environment:
       - NODE_ENV=production
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/blog_agent?schema=public
       - REDIS_URL=redis://redis:6379
-      - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT:-}
       - GOOGLE_APPLICATION_CREDENTIALS=/app/gcp-credentials.json
-      - VERTEX_LOCATION=${VERTEX_LOCATION:-us-central1}
-      - GOOGLE_TRENDS_GEO=${GOOGLE_TRENDS_GEO:-US}
-      - RESEARCH_CRON_OVERNIGHT=${RESEARCH_CRON_OVERNIGHT:-30 6 * * *}
-      - RESEARCH_CRON_MIDDAY=${RESEARCH_CRON_MIDDAY:-0 14 * * *}
-      - RESEARCH_CRON_US_DAYTIME=${RESEARCH_CRON_US_DAYTIME:-30 23 * * *}
-      - TIMEZONE=${TIMEZONE:-Asia/Kolkata}
-      # Step 6 demand reduction (docs/VERTEX_429_RESOLUTION_PLAN.md): 5 -> 3,
-      # fewer downstream planning/writing/QA chains per research run.
-      - TRENDS_TO_WRITE_PER_RUN=${TRENDS_TO_WRITE_PER_RUN:-3}
-      - RESEARCH_MAX_SIGNALS_PER_SOURCE=${RESEARCH_MAX_SIGNALS_PER_SOURCE:-25}
-      - RESEARCH_MIN_SCORE_TO_PROMOTE=${RESEARCH_MIN_SCORE_TO_PROMOTE:-70}
-      - RESEARCH_MIN_SCORE_TO_WRITE=${RESEARCH_MIN_SCORE_TO_WRITE:-90}
-      - RESEARCH_SEMANTIC_ENABLED=${RESEARCH_SEMANTIC_ENABLED:-true}
-      # Step 6 demand reduction: 15 -> 25, fewer/bigger Flash calls per run.
-      - RESEARCH_SEMANTIC_BATCH_SIZE=${RESEARCH_SEMANTIC_BATCH_SIZE:-25}
-      - RESEARCH_RECENT_DUPLICATE_DAYS=${RESEARCH_RECENT_DUPLICATE_DAYS:-30}
-      - RESEARCH_GOOGLE_NEWS_QUERY=${RESEARCH_GOOGLE_NEWS_QUERY:-developer tools OR javascript OR typescript OR ai coding OR open source}
-      - RESEARCH_GITHUB_QUERIES=${RESEARCH_GITHUB_QUERIES:-created:>2026-07-01 stars:>100 language:TypeScript,created:>2026-07-01 stars:>100 language:JavaScript,created:>2026-07-01 stars:>100 language:Python}
-      - GOOGLE_NEWS_LANGUAGE=${GOOGLE_NEWS_LANGUAGE:-en}
-      - GOOGLE_NEWS_COUNTRY=${GOOGLE_NEWS_COUNTRY:-US}
-      - RESEARCH_TIMEOUT_MS=${RESEARCH_TIMEOUT_MS:-15000}
-      - RESEARCH_RETRY_COUNT=${RESEARCH_RETRY_COUNT:-2}
-      - RESEARCH_USER_AGENT=${RESEARCH_USER_AGENT:-Mozilla/5.0 (compatible; AutoBlogResearchBot/1.0)}
-      - GOOGLE_AI_BLOG_RSS=${GOOGLE_AI_BLOG_RSS:-}
-      - MICROSOFT_AI_BLOG_RSS=${MICROSOFT_AI_BLOG_RSS:-}
-      - OPENAI_NEWS_RSS=${OPENAI_NEWS_RSS:-}
-      - ANTHROPIC_NEWS_RSS=${ANTHROPIC_NEWS_RSS:-}
-      - TECHCRUNCH_AI_RSS=${TECHCRUNCH_AI_RSS:-}
-      - TECHCRUNCH_STARTUPS_RSS=${TECHCRUNCH_STARTUPS_RSS:-}
-      - THE_VERGE_AI_RSS=${THE_VERGE_AI_RSS:-}
-      - NVIDIA_BLOG_RSS=${NVIDIA_BLOG_RSS:-}
-      - HACKERNEWS_RSS=${HACKERNEWS_RSS:-}
-      - ENABLE_GOOGLE_TRENDS=${ENABLE_GOOGLE_TRENDS:-true}
-      - ENABLE_GOOGLE_NEWS=${ENABLE_GOOGLE_NEWS:-true}
-      - ENABLE_GITHUB_TRENDING=${ENABLE_GITHUB_TRENDING:-true}
-      - ENABLE_TECHCRUNCH=${ENABLE_TECHCRUNCH:-true}
-      - ENABLE_THE_VERGE=${ENABLE_THE_VERGE:-true}
-      - ENABLE_GOOGLE_AI_BLOG=${ENABLE_GOOGLE_AI_BLOG:-true}
-      - ENABLE_OPENAI_NEWS=${ENABLE_OPENAI_NEWS:-true}
-      - ENABLE_ANTHROPIC_NEWS=${ENABLE_ANTHROPIC_NEWS:-true}
-      - ENABLE_MICROSOFT_AI_BLOG=${ENABLE_MICROSOFT_AI_BLOG:-true}
-      - ENABLE_NVIDIA_BLOG=${ENABLE_NVIDIA_BLOG:-true}
-      - ENABLE_HACKERNEWS=${ENABLE_HACKERNEWS:-true}
-      # SearXNG self-hosted SERP discovery + validation layer (optional, OFF by
-      # default - docs/RESEARCH_ENGINE_UPGRADE.md). SEARXNG_BASE_URL points at
-      # the `searxng` service below when that service is enabled.
-      - SEARXNG_ENABLED=${SEARXNG_ENABLED:-false}
-      - ENABLE_SEARXNG=${ENABLE_SEARXNG:-false}
-      - SEARXNG_BASE_URL=${SEARXNG_BASE_URL:-http://searxng:8080}
-      - SEARXNG_TIMEOUT_MS=${SEARXNG_TIMEOUT_MS:-8000}
-      - SEARXNG_RESULTS_PER_QUERY=${SEARXNG_RESULTS_PER_QUERY:-10}
-      - SEARXNG_MAX_QUERIES=${SEARXNG_MAX_QUERIES:-60}
-      - SEARXNG_LANGUAGE=${SEARXNG_LANGUAGE:-en}
-      - SEARXNG_CATEGORIES=${SEARXNG_CATEGORIES:-general}
-      - SEARXNG_ENGINES=${SEARXNG_ENGINES:-}
-      - SEARXNG_SAFESEARCH=${SEARXNG_SAFESEARCH:-1}
-      - SEARXNG_TIME_RANGE=${SEARXNG_TIME_RANGE:-}
-      - SEARXNG_DISCOVERY_QUERIES=${SEARXNG_DISCOVERY_QUERIES:-new developer tools this week,AI coding agent announcement,open source LLM release,new JavaScript framework,developer productivity tool launch}
-      # Research engine (novelty-driven topic selection) - OFF by default.
-      - RESEARCH_ENGINE_ENABLED=${RESEARCH_ENGINE_ENABLED:-false}
-      - RESEARCH_CANDIDATE_POOL_SIZE=${RESEARCH_CANDIDATE_POOL_SIZE:-40}
-      - RESEARCH_MAX_QUERIES_PER_CANDIDATE=${RESEARCH_MAX_QUERIES_PER_CANDIDATE:-5}
-      - RESEARCH_LLM_QUERY_EXPANSION_ENABLED=${RESEARCH_LLM_QUERY_EXPANSION_ENABLED:-false}
-      - RESEARCH_LLM_TOPIC_QUALITY_ENABLED=${RESEARCH_LLM_TOPIC_QUALITY_ENABLED:-false}
-      - RESEARCH_LLM_NOVELTY_ENABLED=${RESEARCH_LLM_NOVELTY_ENABLED:-false}
-      - RESEARCH_EMBEDDING_ENABLED=${RESEARCH_EMBEDDING_ENABLED:-true}
-      - RESEARCH_NOVELTY_LOOKBACK_DAYS=${RESEARCH_NOVELTY_LOOKBACK_DAYS:-90}
-      - RESEARCH_NOVELTY_MAX_HISTORY=${RESEARCH_NOVELTY_MAX_HISTORY:-400}
-      - RESEARCH_SEMANTIC_SIMILARITY_THRESHOLD=${RESEARCH_SEMANTIC_SIMILARITY_THRESHOLD:-0.9}
-      - RESEARCH_KEYWORD_SIMILARITY_THRESHOLD=${RESEARCH_KEYWORD_SIMILARITY_THRESHOLD:-0.6}
-      - RESEARCH_FRESHNESS_VERY_SIMILAR_DAYS=${RESEARCH_FRESHNESS_VERY_SIMILAR_DAYS:-7}
-      - RESEARCH_FRESHNESS_HIGHLY_SIMILAR_DAYS=${RESEARCH_FRESHNESS_HIGHLY_SIMILAR_DAYS:-30}
-      - RESEARCH_FRESHNESS_SIMILAR_DAYS=${RESEARCH_FRESHNESS_SIMILAR_DAYS:-90}
-      - RESEARCH_TIER_EXCELLENT_SCORE=${RESEARCH_TIER_EXCELLENT_SCORE:-90}
-      - RESEARCH_TIER_STRONG_SCORE=${RESEARCH_TIER_STRONG_SCORE:-80}
-      - RESEARCH_DISPATCH_MIN_SCORE=${RESEARCH_DISPATCH_MIN_SCORE:-90}
-      - RESEARCH_MIN_EVIDENCE_SCORE=${RESEARCH_MIN_EVIDENCE_SCORE:-55}
-      - RESEARCH_MIN_NOVELTY_SCORE=${RESEARCH_MIN_NOVELTY_SCORE:-60}
-      - RESEARCH_MAX_PER_FAMILY=${RESEARCH_MAX_PER_FAMILY:-2}
-      - RESEARCH_EXPLORATION_RATIO=${RESEARCH_EXPLORATION_RATIO:-0.2}
-      # Vertex 429 resilience (docs/VERTEX_429_RESOLUTION_PLAN.md Step 2)
-      - VERTEX_RETRY_MAX_ATTEMPTS=${VERTEX_RETRY_MAX_ATTEMPTS:-4}
-      - VERTEX_RETRY_BASE_MS=${VERTEX_RETRY_BASE_MS:-5000}
-      - VERTEX_RETRY_MAX_MS=${VERTEX_RETRY_MAX_MS:-90000}
-      - VERTEX_RETRY_BUDGET_MS=${VERTEX_RETRY_BUDGET_MS:-300000}
-      - VERTEX_MAX_CONCURRENT_CALLS=${VERTEX_MAX_CONCURRENT_CALLS:-6}
-      - VERTEX_FLASH_RPM=${VERTEX_FLASH_RPM:-20}
-      - VERTEX_PRO_RPM=${VERTEX_PRO_RPM:-4}
-      - VERTEX_IMAGE_RPM=${VERTEX_IMAGE_RPM:-10}
-      - VERTEX_BREAKER_COOLDOWN_MS=${VERTEX_BREAKER_COOLDOWN_MS:-120000}
-      # Full-text evidence ingestion (Task 1)
-      - EVIDENCE_FETCH_ENABLED=${EVIDENCE_FETCH_ENABLED:-true}
-      - EVIDENCE_MAX_ARTICLES=${EVIDENCE_MAX_ARTICLES:-4}
-      - EVIDENCE_MAX_CHARS=${EVIDENCE_MAX_CHARS:-6000}
     depends_on:
       - postgres
       - redis
@@ -155,24 +62,13 @@ services:
     command: ["node_modules/.bin/tsx", "workers/planning-worker/index.ts"]
     volumes:
       - ${GOOGLE_APPLICATION_CREDENTIALS}:/app/gcp-credentials.json:ro
+    env_file:
+      - .env
     environment:
       - NODE_ENV=production
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/blog_agent?schema=public
       - REDIS_URL=redis://redis:6379
-      - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT:-}
       - GOOGLE_APPLICATION_CREDENTIALS=/app/gcp-credentials.json
-      - VERTEX_LOCATION=${VERTEX_LOCATION:-us-central1}
-      - VERTEX_FLASH=${VERTEX_FLASH:-gemini-2.5-flash}
-      # Vertex 429 resilience (docs/VERTEX_429_RESOLUTION_PLAN.md Step 2)
-      - VERTEX_RETRY_MAX_ATTEMPTS=${VERTEX_RETRY_MAX_ATTEMPTS:-4}
-      - VERTEX_RETRY_BASE_MS=${VERTEX_RETRY_BASE_MS:-5000}
-      - VERTEX_RETRY_MAX_MS=${VERTEX_RETRY_MAX_MS:-90000}
-      - VERTEX_RETRY_BUDGET_MS=${VERTEX_RETRY_BUDGET_MS:-300000}
-      - VERTEX_MAX_CONCURRENT_CALLS=${VERTEX_MAX_CONCURRENT_CALLS:-6}
-      - VERTEX_FLASH_RPM=${VERTEX_FLASH_RPM:-20}
-      - VERTEX_PRO_RPM=${VERTEX_PRO_RPM:-4}
-      - VERTEX_IMAGE_RPM=${VERTEX_IMAGE_RPM:-10}
-      - VERTEX_BREAKER_COOLDOWN_MS=${VERTEX_BREAKER_COOLDOWN_MS:-120000}
     depends_on:
       - postgres
       - redis
@@ -186,24 +82,13 @@ services:
     command: ["node_modules/.bin/tsx", "workers/outline-worker/index.ts"]
     volumes:
       - ${GOOGLE_APPLICATION_CREDENTIALS}:/app/gcp-credentials.json:ro
+    env_file:
+      - .env
     environment:
       - NODE_ENV=production
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/blog_agent?schema=public
       - REDIS_URL=redis://redis:6379
-      - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT:-}
       - GOOGLE_APPLICATION_CREDENTIALS=/app/gcp-credentials.json
-      - VERTEX_LOCATION=${VERTEX_LOCATION:-us-central1}
-      - VERTEX_FLASH=${VERTEX_FLASH:-gemini-2.5-flash}
-      # Vertex 429 resilience (docs/VERTEX_429_RESOLUTION_PLAN.md Step 2)
-      - VERTEX_RETRY_MAX_ATTEMPTS=${VERTEX_RETRY_MAX_ATTEMPTS:-4}
-      - VERTEX_RETRY_BASE_MS=${VERTEX_RETRY_BASE_MS:-5000}
-      - VERTEX_RETRY_MAX_MS=${VERTEX_RETRY_MAX_MS:-90000}
-      - VERTEX_RETRY_BUDGET_MS=${VERTEX_RETRY_BUDGET_MS:-300000}
-      - VERTEX_MAX_CONCURRENT_CALLS=${VERTEX_MAX_CONCURRENT_CALLS:-6}
-      - VERTEX_FLASH_RPM=${VERTEX_FLASH_RPM:-20}
-      - VERTEX_PRO_RPM=${VERTEX_PRO_RPM:-4}
-      - VERTEX_IMAGE_RPM=${VERTEX_IMAGE_RPM:-10}
-      - VERTEX_BREAKER_COOLDOWN_MS=${VERTEX_BREAKER_COOLDOWN_MS:-120000}
     depends_on:
       - postgres
       - redis
@@ -217,38 +102,13 @@ services:
     command: ["node_modules/.bin/tsx", "workers/writing-worker/index.ts"]
     volumes:
       - ${GOOGLE_APPLICATION_CREDENTIALS}:/app/gcp-credentials.json:ro
+    env_file:
+      - .env
     environment:
       - NODE_ENV=production
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/blog_agent?schema=public
       - REDIS_URL=redis://redis:6379
-      - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT:-}
       - GOOGLE_APPLICATION_CREDENTIALS=/app/gcp-credentials.json
-      - VERTEX_LOCATION=${VERTEX_LOCATION:-us-central1}
-      - VERTEX_MODEL=${VERTEX_MODEL:-gemini-2.5-pro}
-      - VERTEX_FLASH=${VERTEX_FLASH:-gemini-2.5-flash}
-      - BLOG_MIN_WORDS=${BLOG_MIN_WORDS:-1200}
-      - BLOG_MAX_WORDS=${BLOG_MAX_WORDS:-2000}
-      - WRITING_TIMEOUT_MS=${WRITING_TIMEOUT_MS:-120000}
-      # Vertex 429 resilience (docs/VERTEX_429_RESOLUTION_PLAN.md Step 2)
-      - VERTEX_RETRY_MAX_ATTEMPTS=${VERTEX_RETRY_MAX_ATTEMPTS:-4}
-      - VERTEX_RETRY_BASE_MS=${VERTEX_RETRY_BASE_MS:-5000}
-      - VERTEX_RETRY_MAX_MS=${VERTEX_RETRY_MAX_MS:-90000}
-      - VERTEX_RETRY_BUDGET_MS=${VERTEX_RETRY_BUDGET_MS:-300000}
-      - VERTEX_MAX_CONCURRENT_CALLS=${VERTEX_MAX_CONCURRENT_CALLS:-6}
-      - VERTEX_FLASH_RPM=${VERTEX_FLASH_RPM:-20}
-      - VERTEX_PRO_RPM=${VERTEX_PRO_RPM:-4}
-      - VERTEX_IMAGE_RPM=${VERTEX_IMAGE_RPM:-10}
-      - VERTEX_BREAKER_COOLDOWN_MS=${VERTEX_BREAKER_COOLDOWN_MS:-120000}
-      - VERTEX_MODEL_FALLBACK_ENABLED=${VERTEX_MODEL_FALLBACK_ENABLED:-false}
-      # Grounded writing (Task 2) + sectioned writing/repair (Task 5) + fact-safe writing (Task 6)
-      - GROUNDED_WRITING_ENABLED=${GROUNDED_WRITING_ENABLED:-true}
-      - SECTIONED_WRITING_ENABLED=${SECTIONED_WRITING_ENABLED:-true}
-      # Step 6 demand reduction: 4 -> 2 when sectioned writing is on (inert otherwise).
-      - WRITING_SECTION_CONCURRENCY=${WRITING_SECTION_CONCURRENCY:-3}
-      - TARGETED_REPAIR_ENABLED=${TARGETED_REPAIR_ENABLED:-true}
-      - WRITING_SELFCHECK_ENABLED=${WRITING_SELFCHECK_ENABLED:-true}
-      - WRITING_SELFCHECK_MAX_REPAIR_PASSES=${WRITING_SELFCHECK_MAX_REPAIR_PASSES:-2}
-      - WRITING_CLAIM_MARKER_ENFORCEMENT=${WRITING_CLAIM_MARKER_ENFORCEMENT:-true}
     depends_on:
       - postgres
       - redis
@@ -271,30 +131,13 @@ services:
     command: ["node_modules/.bin/tsx", "workers/image-worker/index.ts"]
     volumes:
       - ${GOOGLE_APPLICATION_CREDENTIALS}:/app/gcp-credentials.json:ro
+    env_file:
+      - .env
     environment:
       - NODE_ENV=production
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/blog_agent?schema=public
       - REDIS_URL=redis://redis:6379
-      - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT:-}
       - GOOGLE_APPLICATION_CREDENTIALS=/app/gcp-credentials.json
-      - VERTEX_LOCATION=${VERTEX_LOCATION:-us-central1}
-      - VERTEX_IMAGE_MODEL=${VERTEX_IMAGE_MODEL:-gemini-2.5-flash-image}
-      - IMAGE_AI_GENERATION_ENABLED=${IMAGE_AI_GENERATION_ENABLED:-true}
-      - AWS_REGION=${AWS_REGION:-us-east-1}
-      - AWS_ACCESS_KEY=${AWS_ACCESS_KEY:-}
-      - AWS_SECRET_KEY=${AWS_SECRET_KEY:-}
-      - AWS_BUCKET_NAME=${AWS_BUCKET_NAME:-}
-      - AWS_CLOUDFRONT_URL=${AWS_CLOUDFRONT_URL:-}
-      # Vertex 429 resilience (docs/VERTEX_429_RESOLUTION_PLAN.md Step 2)
-      - VERTEX_RETRY_MAX_ATTEMPTS=${VERTEX_RETRY_MAX_ATTEMPTS:-4}
-      - VERTEX_RETRY_BASE_MS=${VERTEX_RETRY_BASE_MS:-5000}
-      - VERTEX_RETRY_MAX_MS=${VERTEX_RETRY_MAX_MS:-90000}
-      - VERTEX_RETRY_BUDGET_MS=${VERTEX_RETRY_BUDGET_MS:-300000}
-      - VERTEX_MAX_CONCURRENT_CALLS=${VERTEX_MAX_CONCURRENT_CALLS:-6}
-      - VERTEX_FLASH_RPM=${VERTEX_FLASH_RPM:-20}
-      - VERTEX_PRO_RPM=${VERTEX_PRO_RPM:-4}
-      - VERTEX_IMAGE_RPM=${VERTEX_IMAGE_RPM:-10}
-      - VERTEX_BREAKER_COOLDOWN_MS=${VERTEX_BREAKER_COOLDOWN_MS:-120000}
     depends_on:
       - postgres
       - redis
@@ -312,28 +155,13 @@ services:
     command: ["node_modules/.bin/tsx", "workers/quality-worker/index.ts"]
     volumes:
       - ${GOOGLE_APPLICATION_CREDENTIALS}:/app/gcp-credentials.json:ro
+    env_file:
+      - .env
     environment:
       - NODE_ENV=production
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/blog_agent?schema=public
       - REDIS_URL=redis://redis:6379
-      - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT:-}
       - GOOGLE_APPLICATION_CREDENTIALS=/app/gcp-credentials.json
-      - VERTEX_LOCATION=${VERTEX_LOCATION:-us-central1}
-      - VERTEX_FLASH=${VERTEX_FLASH:-gemini-2.5-flash}
-      # Vertex 429 resilience (docs/VERTEX_429_RESOLUTION_PLAN.md Step 2)
-      - VERTEX_RETRY_MAX_ATTEMPTS=${VERTEX_RETRY_MAX_ATTEMPTS:-4}
-      - VERTEX_RETRY_BASE_MS=${VERTEX_RETRY_BASE_MS:-5000}
-      - VERTEX_RETRY_MAX_MS=${VERTEX_RETRY_MAX_MS:-90000}
-      - VERTEX_RETRY_BUDGET_MS=${VERTEX_RETRY_BUDGET_MS:-300000}
-      - VERTEX_MAX_CONCURRENT_CALLS=${VERTEX_MAX_CONCURRENT_CALLS:-6}
-      - VERTEX_FLASH_RPM=${VERTEX_FLASH_RPM:-20}
-      - VERTEX_PRO_RPM=${VERTEX_PRO_RPM:-4}
-      - VERTEX_IMAGE_RPM=${VERTEX_IMAGE_RPM:-10}
-      - VERTEX_BREAKER_COOLDOWN_MS=${VERTEX_BREAKER_COOLDOWN_MS:-120000}
-      # Full fact-check (Task 3) + LLM judge (Task 4)
-      - FULL_FACTCHECK_ENABLED=${FULL_FACTCHECK_ENABLED:-true}
-      - JUDGE_ENABLED=${JUDGE_ENABLED:-false}
-      - JUDGE_SHADOW_MODE=${JUDGE_SHADOW_MODE:-true}
     depends_on:
       - postgres
       - redis
@@ -345,6 +173,8 @@ services:
       dockerfile: docker/Dockerfile.worker
     container_name: blog-agent-publish-worker
     command: ["node_modules/.bin/tsx", "workers/publish-worker/index.ts"]
+    env_file:
+      - .env
     environment:
       - NODE_ENV=production
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/blog_agent?schema=public
