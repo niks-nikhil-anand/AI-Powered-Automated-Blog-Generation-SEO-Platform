@@ -38,6 +38,7 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.worker
+    image: auto-blog-worker:latest
     container_name: blog-agent-research-worker
     command: ["node_modules/.bin/tsx", "workers/research-worker/index.ts"]
     volumes:
@@ -55,9 +56,7 @@ services:
     restart: always
 
   planning-worker:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile.worker
+    image: auto-blog-worker:latest
     container_name: blog-agent-planning-worker
     command: ["node_modules/.bin/tsx", "workers/planning-worker/index.ts"]
     volumes:
@@ -75,9 +74,7 @@ services:
     restart: always
 
   outline-worker:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile.worker
+    image: auto-blog-worker:latest
     container_name: blog-agent-outline-worker
     command: ["node_modules/.bin/tsx", "workers/outline-worker/index.ts"]
     volumes:
@@ -95,9 +92,7 @@ services:
     restart: always
 
   writing-worker:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile.worker
+    image: auto-blog-worker:latest
     container_name: blog-agent-writing-worker
     command: ["node_modules/.bin/tsx", "workers/writing-worker/index.ts"]
     volumes:
@@ -124,9 +119,7 @@ services:
   # (AWS_ACCESS_KEY_ID falls back to AWS_ACCESS_KEY, etc.) - use whichever
   # pair your .env actually has, this just has to match it.
   image-worker:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile.worker
+    image: auto-blog-worker:latest
     container_name: blog-agent-image-worker
     command: ["node_modules/.bin/tsx", "workers/image-worker/index.ts"]
     volumes:
@@ -148,9 +141,7 @@ services:
   # to skipping just that check (not failing the job) if Vertex is
   # unreachable. publish-worker still calls no external API.
   quality-worker:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile.worker
+    image: auto-blog-worker:latest
     container_name: blog-agent-quality-worker
     command: ["node_modules/.bin/tsx", "workers/quality-worker/index.ts"]
     volumes:
@@ -168,9 +159,7 @@ services:
     restart: always
 
   publish-worker:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile.worker
+    image: auto-blog-worker:latest
     container_name: blog-agent-publish-worker
     command: ["node_modules/.bin/tsx", "workers/publish-worker/index.ts"]
     env_file:
