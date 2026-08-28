@@ -332,6 +332,7 @@ async function generateSectionedDraft(topic: string, description: string, contex
     plan: context.plan,
     outline: context.outline ? { sections: context.outline.sections, faqs: context.outline.faqs } : undefined,
     sources: context.evidenceSources,
+    evidenceSummary: context.evidenceSummary,
     keywords,
   };
 
