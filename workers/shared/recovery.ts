@@ -1,5 +1,6 @@
 import { prisma } from "./prisma";
 import { refreshRetryAttempts } from "./retry-config";
+import { updateVertexTelemetryContext } from "./vertex-telemetry-context";
 
 export const QUALITY_THRESHOLD = 90;
 
@@ -92,6 +93,12 @@ export async function startWorkerAttempt(input: AttemptInput) {
       attempt: previousAttempts + 1,
       input: jsonValue(input.input),
     },
+  });
+
+  updateVertexTelemetryContext({
+    workflowId: workflow.id,
+    worker: input.worker,
+    stage: input.worker,
   });
 
   return { workflow, attempt };
