@@ -13,6 +13,8 @@ import {
 } from "../shared/recovery";
 import { reconcileDailyTarget } from "../shared/daily-target";
 import { logVertexRuntimeConfig } from "../shared/vertex";
+import { withPipelineRetryPolicy } from "../shared/pipeline-retry-policy";
+import { withVertexTelemetryContext } from "../shared/vertex-telemetry-context";
 
 const log = logger.child({ worker: "publish-worker" });
 
@@ -103,7 +105,10 @@ export async function publishBlog(payload: PublishJobPayload) {
 export function startPublishWorker() {
   const worker = new Worker(
     QUEUE_NAMES.publish,
-    async (job) => publishBlog(job.data as PublishJobPayload),
+    async (job) => withVertexTelemetryContext(
+      { jobId: String(job.id), queue: QUEUE_NAMES.publish, worker: "publish-worker", pipeline: "content", stage: "publish" },
+      () => withPipelineRetryPolicy(() => publishBlog(job.data as PublishJobPayload))
+    ),
     workerOptions(1)
   );
 
