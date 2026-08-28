@@ -17,6 +17,11 @@ function required(name: string): string | undefined {
   return value && value.length > 0 ? value : undefined;
 }
 
+function numberInRange(name: string, fallback: number, min: number, max: number): number {
+  const value = Number(optional(name, String(fallback)));
+  return Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback;
+}
+
 export const env = {
   DATABASE_URL: process.env.DATABASE_URL ?? "",
 
@@ -45,9 +50,9 @@ export const env = {
    * on VERTEX_FLASH when the Pro-class model is persistently
    * quota-exhausted (logged loudly, never silently).
    */
-  VERTEX_RETRY_MAX_ATTEMPTS: Number(optional("VERTEX_RETRY_MAX_ATTEMPTS", "4")),
-  VERTEX_RETRY_BASE_MS: Number(optional("VERTEX_RETRY_BASE_MS", "5000")),
-  VERTEX_RETRY_MAX_MS: Number(optional("VERTEX_RETRY_MAX_MS", "90000")),
+  VERTEX_RETRY_MAX_ATTEMPTS: Number(optional("VERTEX_RETRY_MAX_ATTEMPTS", "5")),
+  VERTEX_RETRY_BASE_MS: Number(optional("VERTEX_RETRY_BASE_MS", "30000")),
+  VERTEX_RETRY_MAX_MS: Number(optional("VERTEX_RETRY_MAX_MS", "240000")),
   VERTEX_MAX_CONCURRENT_CALLS: Number(optional("VERTEX_MAX_CONCURRENT_CALLS", "6")),
   VERTEX_MODEL_FALLBACK_ENABLED: optional("VERTEX_MODEL_FALLBACK_ENABLED", "false") !== "false",
 
@@ -63,11 +68,24 @@ export const env = {
    * semantics. VERTEX_BREAKER_COOLDOWN_MS is how long deferrable calls
    * fail fast after a call exhausts all retries on quota.
    */
-  VERTEX_FLASH_RPM: Number(optional("VERTEX_FLASH_RPM", "20")),
+  VERTEX_FLASH_RPM: Number(optional("VERTEX_FLASH_RPM", "5")),
   VERTEX_PRO_RPM: Number(optional("VERTEX_PRO_RPM", "4")),
   VERTEX_IMAGE_RPM: Number(optional("VERTEX_IMAGE_RPM", "10")),
-  VERTEX_RETRY_BUDGET_MS: Number(optional("VERTEX_RETRY_BUDGET_MS", "300000")),
+  VERTEX_RETRY_BUDGET_MS: Number(optional("VERTEX_RETRY_BUDGET_MS", "600000")),
   VERTEX_BREAKER_COOLDOWN_MS: Number(optional("VERTEX_BREAKER_COOLDOWN_MS", "120000")),
+  VERTEX_BREAKER_MAX_COOLDOWN_MS: Number(optional("VERTEX_BREAKER_MAX_COOLDOWN_MS", "900000")),
+
+  // Langfuse is initialized only by workers/vertex-gateway. These values are
+  // kept server-side and must never be exposed through NEXT_PUBLIC_* vars.
+  LANGFUSE_ENABLED: optional("LANGFUSE_ENABLED", "false") === "true",
+  LANGFUSE_PUBLIC_KEY: required("LANGFUSE_PUBLIC_KEY"),
+  LANGFUSE_SECRET_KEY: required("LANGFUSE_SECRET_KEY"),
+  LANGFUSE_BASE_URL: optional("LANGFUSE_BASE_URL", "https://cloud.langfuse.com"),
+  LANGFUSE_ENVIRONMENT: optional("LANGFUSE_ENVIRONMENT", optional("NODE_ENV", "development")),
+  LANGFUSE_RELEASE: required("LANGFUSE_RELEASE"),
+  LANGFUSE_SAMPLE_RATE: numberInRange("LANGFUSE_SAMPLE_RATE", 1, 0, 1),
+  LANGFUSE_CAPTURE_PROMPTS: optional("LANGFUSE_CAPTURE_PROMPTS", "false") === "true",
+  LANGFUSE_CAPTURE_OUTPUTS: optional("LANGFUSE_CAPTURE_OUTPUTS", "false") === "true",
 
   /**
    * Kill switch for real AI hero-image generation in image-worker (see
@@ -437,18 +455,19 @@ export const env = {
 };
 
 /**
- * Whether Vertex AI has the required routing config. Requires
- * GOOGLE_APPLICATION_CREDENTIALS explicitly rather than just
- * project+location, so a deployment that forgot to mount the service-account
- * key fails the "is Vertex usable" check instead of silently falling back to
- * every worker's mock/procedural path. Known gap (see
- * IMPLEMENTATION_PLAN.md Phase 1.3): this still can't detect
- * `gcloud auth application-default login`-style ADC, where there's no env
- * var at all and credentials live in a well-known local file. A fully
- * correct check would attempt a lightweight authenticated call at startup
- * and cache the result - that's real work and stays a backlog follow-up.
+ * Whether a worker can route Vertex work to the gateway. Workers have no
+ * Google SDK client and intentionally do not receive a credential file.
+ * Gateway credential readiness is checked separately below.
  */
-export const isVertexConfigured = Boolean(
+/**
+ * Workers only need enough configuration to route a request to the gateway.
+ * They deliberately do not require Google credentials: those credentials must
+ * exist only in the vertex-gateway container.
+ */
+export const isVertexConfigured = Boolean(env.GOOGLE_CLOUD_PROJECT && env.VERTEX_LOCATION);
+
+/** The gateway is the sole process that needs local Google credentials. */
+export const isVertexGatewayConfigured = Boolean(
   env.GOOGLE_CLOUD_PROJECT && env.VERTEX_LOCATION && env.GOOGLE_APPLICATION_CREDENTIALS
 );
 
