@@ -1,6 +1,8 @@
 import { Worker } from "bullmq";
 import { prisma } from "../shared/prisma";
 import { logger } from "../shared/logger";
+import { withPipelineRetryPolicy } from "../shared/pipeline-retry-policy";
+import { withVertexTelemetryContext } from "../shared/vertex-telemetry-context";
 import { env } from "../shared/env";
 import { JOB_IDS, QUEUE_NAMES, type OutlineJobPayload, writingQueue } from "../shared/queues";
 import { generateContentOutline } from "./vertex";
@@ -133,7 +135,10 @@ async function outlineTopic(payload: OutlineJobPayload) {
 export function startOutlineWorker() {
   const worker = new Worker(
     QUEUE_NAMES.outline,
-    async (job) => outlineTopic(job.data as OutlineJobPayload),
+    async (job) => withVertexTelemetryContext(
+      { jobId: String(job.id), queue: QUEUE_NAMES.outline, worker: "outline-worker", pipeline: "content", stage: "outline" },
+      () => withPipelineRetryPolicy(() => outlineTopic(job.data as OutlineJobPayload))
+    ),
     workerOptions(1)
   );
 
