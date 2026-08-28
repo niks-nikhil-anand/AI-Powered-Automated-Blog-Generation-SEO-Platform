@@ -58,6 +58,10 @@ export type SectionArticleContext = {
   };
   outline?: { sections: unknown; faqs: unknown };
   sources?: GroundedSource[];
+  /** Legacy evidence for trends that predate full-text evidence ingestion. */
+  evidenceSummary?: string;
+  /** Rotated per section so legacy articles cite more than one source. */
+  preferredEvidenceUrl?: string;
   keywords: string[];
 };
 
@@ -192,7 +196,7 @@ function kindInstruction(kind: SectionKind, heading: string | null): string {
     case "subsections":
       return `Start with "## ${heading}", then 2-4 "### " subsections each with at least one useful paragraph.`;
     case "steps":
-      return `Start with "## ${heading}", then 3-4 "### Step N: Name" subsections explaining the mechanism.`;
+      return `Start with "## ${heading}", then 3-4 "### Step N: Name" subsections explaining the mechanism. Include one short fenced code block with a practical command, configuration snippet, or API example.`;
     case "table":
       return `Start with "## ${heading}", one short framing paragraph, then a Markdown comparison table (| columns |).`;
     case "numbered":
@@ -217,6 +221,16 @@ SOURCES (ground truth for any specific fact - cite with markers, never URLs):
 ${sources.map((source) => `${source.marker} ${source.title}\n    "${source.excerpt}"`).join("\n")}
 Marker rules: every number, percentage, date, version, or benchmark you write MUST end with its source marker (e.g. [S1]). Only ${sources.map((s) => s.marker).join(", ")} exist - never invent markers. If no source covers a specific, write it qualitatively instead of inventing a figure. When the SOURCES are thin on the subject's actual product/mechanics, write this section about the general category/technology instead of presenting invented specifics as confirmed facts about the named subject. Vagueness on uncovered specifics is fine; invented precision is not.`
       : "";
+  const legacyUrls = Array.from(
+    new Set((context.evidenceSummary?.match(/https?:\/\/[^\s)]+/g) ?? []).map((url) => url.replace(/[.,)]+$/, "")))
+  );
+  const legacyEvidenceBlock =
+    sources.length === 0 && legacyUrls.length > 0
+      ? `
+EVIDENCE URLS (use these exact URLs for factual attribution):
+${legacyUrls.map((url) => `- ${url}`).join("\n")}
+Citation rules: when this section makes a factual claim about the topic, attach an inline Markdown link to one of the URLs above. Never invent URLs. ${context.preferredEvidenceUrl ? `Use ${context.preferredEvidenceUrl} for at least one supported claim in this section when it fits.` : ""}`
+      : "";
 
   const keywordsBlock = context.keywords.length > 0 ? `\nWeave in these keywords if natural to THIS section (never force): ${context.keywords.join(", ")}.` : "";
   const bulletsBlock = spec.bullets.length > 0 ? `\nCover these points:\n${spec.bullets.map((bullet) => `- ${bullet}`).join("\n")}` : "";
@@ -230,8 +244,8 @@ ${context.plan ? `Audience: ${context.plan.audience}\nAngle: ${context.plan.angl
 
 Section to write: ${spec.heading ? `"## ${spec.heading}"` : "the introduction"}
 Section intent: ${spec.intent}
-Target length: ~${spec.wordTarget} words. Paragraphs under 100 words each; sentences average 15-20 words.
-${kindInstruction(spec.kind, spec.heading)}${bulletsBlock}${keywordsBlock}${sourcesBlock}${repairBlock}
+Target length: at least ${spec.wordTarget} words. Paragraphs under 100 words each; sentences average 15-20 words.
+${kindInstruction(spec.kind, spec.heading)}${bulletsBlock}${keywordsBlock}${sourcesBlock}${legacyEvidenceBlock}${repairBlock}
 
 Rules: GitHub Flavored Markdown. Technical, practical, zero fluff. Output ONLY this section's Markdown - no H1, no article title, no commentary, no code fence around the whole section.`;
 }
@@ -290,14 +304,14 @@ export function buildTableOfContents(plan: SectionSpec[]): SectionDraft {
 /* Parallel execution + retry + Redis cache                            */
 /* ------------------------------------------------------------------ */
 
-async function mapWithConcurrency<T, R>(items: T[], concurrency: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+async function mapWithConcurrency<T, R>(items: T[], concurrency: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
   const results: R[] = new Array(items.length);
   let cursor = 0;
   async function next(): Promise<void> {
     const index = cursor;
     cursor += 1;
     if (index >= items.length) return;
-    results[index] = await fn(items[index]);
+    results[index] = await fn(items[index], index);
     return next();
   }
   await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, next));
@@ -316,6 +330,7 @@ function inputsHash(plan: SectionSpec[], context: SectionArticleContext): string
         headings: plan.map((spec) => spec.heading),
         title: context.title,
         sources: (context.sources ?? []).map((source) => source.marker),
+        evidenceUrls: Array.from(new Set((context.evidenceSummary?.match(/https?:\/\/[^\s)]+/g) ?? []).map((url) => url.replace(/[.,)]+$/, "")))),
         min: env.BLOG_MIN_WORDS,
         max: env.BLOG_MAX_WORDS,
       })
@@ -355,7 +370,10 @@ export async function generateAllSections(
   const models = new Set<string>();
   const newCache: CachedSections = { inputsHash: hash, sections: {} };
 
-  const drafts = await mapWithConcurrency(plan, env.WRITING_SECTION_CONCURRENCY, async (spec): Promise<SectionDraft> => {
+  const legacyUrls = Array.from(
+    new Set((context.evidenceSummary?.match(/https?:\/\/[^\s)]+/g) ?? []).map((url) => url.replace(/[.,)]+$/, "")))
+  );
+  const drafts = await mapWithConcurrency(plan, env.WRITING_SECTION_CONCURRENCY, async (spec, index): Promise<SectionDraft> => {
     if (spec.kind === "toc") return buildTableOfContents(plan);
 
     const cacheId = spec.heading ?? "__intro__";
@@ -368,7 +386,10 @@ export async function generateAllSections(
     let lastError: unknown;
     for (let attempt = 1; attempt <= 2; attempt += 1) {
       try {
-        const draft = await generateSection(spec, context);
+        const draft = await generateSection(spec, {
+          ...context,
+          preferredEvidenceUrl: legacyUrls.length > 0 ? legacyUrls[index % legacyUrls.length] : undefined,
+        });
         usage.promptTokens += draft.usage.promptTokens;
         usage.completionTokens += draft.usage.completionTokens;
         models.add(draft.model);
