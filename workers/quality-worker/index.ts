@@ -14,6 +14,8 @@ import { logVertexRuntimeConfig } from "../shared/vertex";
 import { reconcileDailyTarget } from "../shared/daily-target";
 import { getPublishTarget } from "../shared/publish-slots";
 import { getRetryAttempts } from "../shared/retry-config";
+import { withPipelineRetryPolicy } from "../shared/pipeline-retry-policy";
+import { withVertexTelemetryContext } from "../shared/vertex-telemetry-context";
 
 const log = logger.child({ worker: "quality-worker" });
 
@@ -201,7 +203,10 @@ export async function runQualityCheck(payload: QualityJobPayload) {
 export function startQualityWorker() {
   const worker = new Worker(
     QUEUE_NAMES.quality,
-    async (job) => runQualityCheck(job.data as QualityJobPayload),
+    async (job) => withVertexTelemetryContext(
+      { jobId: String(job.id), queue: QUEUE_NAMES.quality, worker: "quality-worker", pipeline: "content", stage: "quality" },
+      () => withPipelineRetryPolicy(() => runQualityCheck(job.data as QualityJobPayload))
+    ),
     workerOptions(1)
   );
 
