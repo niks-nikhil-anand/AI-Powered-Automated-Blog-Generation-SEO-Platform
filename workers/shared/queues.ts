@@ -17,6 +17,7 @@ export const QUEUE_NAMES = {
   image: "image_queue",
   quality: "quality_queue",
   publish: "publish_queue",
+  vertex: "vertex_queue",
 } as const;
 
 /**
@@ -72,6 +73,16 @@ export const qualityQueue = new Queue(QUEUE_NAMES.quality, {
 export const publishQueue = new Queue(QUEUE_NAMES.publish, {
   connection: createRedisConnection(),
   defaultJobOptions: dynamicJobOptions,
+});
+
+/** The only queue permitted to execute Vertex AI requests. */
+export const vertexQueue = new Queue(QUEUE_NAMES.vertex, {
+  connection: createRedisConnection(),
+  defaultJobOptions: {
+    attempts: 1,
+    removeOnComplete: { count: 5000 },
+    removeOnFail: { count: 10000 },
+  },
 });
 
 /**
