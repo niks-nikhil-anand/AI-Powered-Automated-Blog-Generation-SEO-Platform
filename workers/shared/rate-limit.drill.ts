@@ -3,10 +3,9 @@
  * Redis-backed RPM pacer in workers/shared/rate-limit.ts against a REAL
  * Redis, proving the two behaviors the 429 fix relies on:
  *
- *   pacing    - with the flash limit at 5 RPM, the first 5 acquires return
- *               immediately and every further acquire waits for the next
- *               60s window edge instead of bursting through (this is what
- *               keeps 7 separate worker containers under one project quota).
+ *   pacing    - with the flash limit at 5 RPM, each acquire is released at
+ *               roughly 12-second intervals. This avoids minute-boundary
+ *               bursts while keeping every worker container under one quota.
  *   fail-open - with Redis unreachable, acquires still proceed (each after
  *               the ~2s limiter timeout) instead of hanging the pipeline on
  *               a limiter outage (edge case EC11).
@@ -15,12 +14,11 @@
  *
  *   npm run worker:drill:rate-limit            # pacing + breaker + fail-open
  *   VERTEX_FLASH_RPM=5 npx tsx workers/shared/rate-limit.drill.ts pacing
- *   npx tsx workers/shared/rate-limit.drill.ts fail-open   # uses a dead Redis
+ *   REDIS_URL=redis://127.0.0.1:6390 npx tsx workers/shared/rate-limit.drill.ts fail-open
  *
- * "pacing" waits out one real 60s window by design. Knobs: DRILL_LIMIT sets
+ * "pacing" waits out evenly-spaced slots by design. Knobs: DRILL_LIMIT sets
  * the RPM limit for the spawned drills (default 5); DRILL_CALLS sets the
- * acquire count (default limit+3) - the plan's full version is
- * DRILL_CALLS=20 (~3 windows, ~3 minutes).
+ * acquire count (default limit+3).
  *
  * The leaf modes read the limit from VERTEX_FLASH_RPM (the value the
  * limiter itself uses, bound at process start), so assertions always match
@@ -48,7 +46,12 @@ async function pacingDrill(): Promise<void> {
   ]);
 
   // Clean slate: a previous run's window would make early acquires wait.
-  await redis.del("vertex:rpm:flash", "vertex:rpm:pro", "vertex:rpm:image", "vertex:breaker:openUntil");
+  await redis.del(
+    "vertex:pace:flash:nextAt", "vertex:pace:pro:nextAt", "vertex:pace:image:nextAt",
+    "vertex:breaker:flash:openUntil", "vertex:breaker:pro:openUntil", "vertex:breaker:image:openUntil",
+    "vertex:breaker:flash:failures", "vertex:breaker:pro:failures", "vertex:breaker:image:failures",
+    "vertex:breaker:flash:probe", "vertex:breaker:pro:probe", "vertex:breaker:image:probe"
+  );
 
   const startedAt = Date.now();
   const timings: number[] = [];
@@ -58,23 +61,17 @@ async function pacingDrill(): Promise<void> {
     console.log(`[pacing] acquire ${i}/${calls} at +${Date.now() - startedAt}ms`);
   }
 
-  const fastAcquires = timings.slice(0, limit);
-  const slowAcquires = timings.slice(limit);
-  const fastOk = fastAcquires.every((t) => t < 10_000);
-  // Over-limit acquires give their permit back and sleep pttl + <=500ms
-  // jitter, so each lands within the next 60s window (+ timeout grace).
-  const slowOk = slowAcquires.every((t) => t > 0 && t <= 60_000 + REDIS_TIMEOUT_GRACE_MS);
+  const intervalMs = Math.ceil(60_000 / limit);
+  const toleranceMs = 2_000 + REDIS_TIMEOUT_GRACE_MS;
+  const spacingOk = timings.every((timing, index) => Math.abs(timing - index * intervalMs) <= toleranceMs);
+  if (!spacingOk) throw new Error(`acquires should be spaced about ${intervalMs}ms, got ${JSON.stringify(timings)}`);
+  console.log(`[pacing] PASS: ${timings.length} acquires evenly paced at about ${intervalMs}ms (limit ${limit} RPM)`);
 
-  if (!fastOk) throw new Error(`first ${limit} acquires should be immediate, got ${JSON.stringify(fastAcquires)}`);
-  if (!slowOk) throw new Error(`over-limit acquires should wait for a window edge, got ${JSON.stringify(slowAcquires)}`);
-  console.log(
-    `[pacing] PASS: first ${fastAcquires.length} acquires immediate, ${slowAcquires.length} over-limit acquires held for a window edge (limit ${limit} RPM)`
-  );
-
-  // Breaker round-trip: tripped => open; deferrable calls would fail fast.
-  await tripBreaker();
-  if (!(await isBreakerOpen())) throw new Error("breaker should be open right after tripBreaker()");
-  console.log("[pacing] PASS: circuit breaker trips open and reads back open");
+  // Breaker round-trip: tripped => open; gateway calls wait before probing.
+  await tripBreaker("flash");
+  if (!(await isBreakerOpen("flash"))) throw new Error("flash breaker should be open right after tripBreaker()");
+  if (await isBreakerOpen("pro")) throw new Error("pro breaker must stay closed when flash trips");
+  console.log("[pacing] PASS: circuit breaker is scoped to the Flash quota lane");
 }
 
 async function failOpenDrill(): Promise<void> {
