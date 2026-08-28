@@ -2,6 +2,8 @@ import { Worker } from "bullmq";
 import { JOB_IDS, outlineQueue, QUEUE_NAMES, type PlanningJobPayload } from "../shared/queues";
 import { prisma } from "../shared/prisma";
 import { logger } from "../shared/logger";
+import { withPipelineRetryPolicy } from "../shared/pipeline-retry-policy";
+import { withVertexTelemetryContext } from "../shared/vertex-telemetry-context";
 import { env } from "../shared/env";
 import { generateContentPlan } from "./vertex";
 import { workerOptions } from "../shared/worker-options";
@@ -127,7 +129,10 @@ async function planTopic(payload: PlanningJobPayload) {
 export function startPlanningWorker() {
   const worker = new Worker(
     QUEUE_NAMES.planning,
-    async (job) => planTopic(job.data as PlanningJobPayload),
+    async (job) => withVertexTelemetryContext(
+      { jobId: String(job.id), queue: QUEUE_NAMES.planning, worker: "planning-worker", pipeline: "content", stage: "planning" },
+      () => withPipelineRetryPolicy(() => planTopic(job.data as PlanningJobPayload))
+    ),
     workerOptions(1)
   );
 
