@@ -4,6 +4,8 @@ import { imageQueue, JOB_IDS, QUEUE_NAMES, type WritingJobPayload } from "../sha
 import { prisma } from "../shared/prisma";
 import { generateBlogDraft } from "./vertex";
 import { logger } from "../shared/logger";
+import { withPipelineRetryPolicy } from "../shared/pipeline-retry-policy";
+import { withVertexTelemetryContext } from "../shared/vertex-telemetry-context";
 import { env, isVertexConfigured } from "../shared/env";
 import { workerOptions } from "../shared/worker-options";
 import { attachUsageToBlog, recordAIUsage } from "../shared/pricing";
@@ -211,6 +213,7 @@ async function attemptTargetedRepair(args: {
     description,
     plan: outline?.plan,
     sources: groundedSources,
+    evidenceSummary: trend.evidenceSummary ?? undefined,
     keywords: [],
   };
 
@@ -444,6 +447,7 @@ async function attemptClaimRepair(args: {
     description,
     plan: outline?.plan,
     sources: groundedSources,
+    evidenceSummary: trend.evidenceSummary ?? undefined,
     keywords: [],
   };
   const repair = await repairSectionsWithClaims({ markdown: blog.content, issues, unmarkedClaims: [], context });
@@ -666,6 +670,7 @@ async function generateBlogForTrend(
         description,
         plan: outline?.plan,
         sources: groundedSources,
+        evidenceSummary: trend.evidenceSummary ?? undefined,
         keywords: draft.keywords,
       };
 
@@ -908,10 +913,13 @@ async function generateBlogForTrend(
 export function startWritingWorker() {
   const worker = new Worker(
     QUEUE_NAMES.writing,
-    async (job) => {
+    async (job) => withVertexTelemetryContext(
+      { jobId: String(job.id), queue: QUEUE_NAMES.writing, worker: "writing-worker", pipeline: "content", stage: "writing" },
+      () => withPipelineRetryPolicy(async () => {
       const { trendId, topic, description, outlineId, recoveryContext } = job.data as WritingJobPayload;
       return generateBlogForTrend(trendId, topic, description, outlineId, recoveryContext);
-    },
+      })
+    ),
     workerOptions(1)
   );
 
