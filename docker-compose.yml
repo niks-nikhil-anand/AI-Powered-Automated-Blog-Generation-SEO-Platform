@@ -1,17 +1,4 @@
 services:
-  postgres:
-    image: postgres:16-alpine
-    container_name: blog-agent-postgres
-    ports:
-      - "5432:5432"
-    environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=blog_agent
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    restart: always
-
   redis:
     image: redis:7-alpine
     container_name: blog-agent-redis
@@ -21,19 +8,28 @@ services:
       - redis_data:/data
     restart: always
 
-  # GOOGLE_APPLICATION_CREDENTIALS below is a *host* path from .env - it has
-  # to be bind-mounted into each container at a fixed path, and the env var
-  # here points at that container path instead, not templated from the host
-  # value. An env var alone doesn't make a host file visible inside the
-  # container: every Vertex-calling worker was pointing at
-  # /Users/.../<file>.json, which doesn't exist in any container, and
-  # writing-worker's first real blog-generation call surfaced it as a 30s
-  # timeout (google-auth-library's ADC chain hanging on the missing file)
-  # followed by three fast "credential file not found" retries. Fixed here
-  # rather than relying on the Dockerfile's `COPY . .` accidentally baking
-  # the credentials file into the image at a different path - that also
-  # means a live service-account key doesn't end up sitting in an image
-  # layer, once it's added to .dockerignore.
+  # The sole process that executes Google Vertex SDK calls. Every pipeline
+  # worker submits requests to vertex_queue and waits for this gateway.
+  vertex-gateway:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.worker
+    image: auto-blog-worker:latest
+    container_name: blog-agent-vertex-gateway
+    entrypoint: ["/app/docker/worker-entrypoint.sh"]
+    command: ["node_modules/.bin/tsx", "workers/vertex-gateway/index.ts"]
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - redis
+    restart: always
+
+  # Vertex credentials are supplied as GCP_* environment variables. The
+  # worker entrypoint writes them to an ephemeral in-container JSON file for
+  # Google auth; no host credential file is mounted or baked into the image.
   research-worker:
     build:
       context: .
@@ -41,17 +37,12 @@ services:
     image: auto-blog-worker:latest
     container_name: blog-agent-research-worker
     command: ["node_modules/.bin/tsx", "workers/research-worker/index.ts"]
-    volumes:
-      - ${GOOGLE_APPLICATION_CREDENTIALS}:/app/gcp-credentials.json:ro
     env_file:
       - .env
     environment:
       - NODE_ENV=production
-      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/blog_agent?schema=public
       - REDIS_URL=redis://redis:6379
-      - GOOGLE_APPLICATION_CREDENTIALS=/app/gcp-credentials.json
     depends_on:
-      - postgres
       - redis
     restart: always
 
@@ -59,17 +50,12 @@ services:
     image: auto-blog-worker:latest
     container_name: blog-agent-planning-worker
     command: ["node_modules/.bin/tsx", "workers/planning-worker/index.ts"]
-    volumes:
-      - ${GOOGLE_APPLICATION_CREDENTIALS}:/app/gcp-credentials.json:ro
     env_file:
       - .env
     environment:
       - NODE_ENV=production
-      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/blog_agent?schema=public
       - REDIS_URL=redis://redis:6379
-      - GOOGLE_APPLICATION_CREDENTIALS=/app/gcp-credentials.json
     depends_on:
-      - postgres
       - redis
     restart: always
 
@@ -77,17 +63,12 @@ services:
     image: auto-blog-worker:latest
     container_name: blog-agent-outline-worker
     command: ["node_modules/.bin/tsx", "workers/outline-worker/index.ts"]
-    volumes:
-      - ${GOOGLE_APPLICATION_CREDENTIALS}:/app/gcp-credentials.json:ro
     env_file:
       - .env
     environment:
       - NODE_ENV=production
-      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/blog_agent?schema=public
       - REDIS_URL=redis://redis:6379
-      - GOOGLE_APPLICATION_CREDENTIALS=/app/gcp-credentials.json
     depends_on:
-      - postgres
       - redis
     restart: always
 
@@ -95,17 +76,12 @@ services:
     image: auto-blog-worker:latest
     container_name: blog-agent-writing-worker
     command: ["node_modules/.bin/tsx", "workers/writing-worker/index.ts"]
-    volumes:
-      - ${GOOGLE_APPLICATION_CREDENTIALS}:/app/gcp-credentials.json:ro
     env_file:
       - .env
     environment:
       - NODE_ENV=production
-      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/blog_agent?schema=public
       - REDIS_URL=redis://redis:6379
-      - GOOGLE_APPLICATION_CREDENTIALS=/app/gcp-credentials.json
     depends_on:
-      - postgres
       - redis
     restart: always
 
@@ -122,17 +98,12 @@ services:
     image: auto-blog-worker:latest
     container_name: blog-agent-image-worker
     command: ["node_modules/.bin/tsx", "workers/image-worker/index.ts"]
-    volumes:
-      - ${GOOGLE_APPLICATION_CREDENTIALS}:/app/gcp-credentials.json:ro
     env_file:
       - .env
     environment:
       - NODE_ENV=production
-      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/blog_agent?schema=public
       - REDIS_URL=redis://redis:6379
-      - GOOGLE_APPLICATION_CREDENTIALS=/app/gcp-credentials.json
     depends_on:
-      - postgres
       - redis
     restart: always
 
@@ -144,17 +115,12 @@ services:
     image: auto-blog-worker:latest
     container_name: blog-agent-quality-worker
     command: ["node_modules/.bin/tsx", "workers/quality-worker/index.ts"]
-    volumes:
-      - ${GOOGLE_APPLICATION_CREDENTIALS}:/app/gcp-credentials.json:ro
     env_file:
       - .env
     environment:
       - NODE_ENV=production
-      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/blog_agent?schema=public
       - REDIS_URL=redis://redis:6379
-      - GOOGLE_APPLICATION_CREDENTIALS=/app/gcp-credentials.json
     depends_on:
-      - postgres
       - redis
     restart: always
 
@@ -166,10 +132,8 @@ services:
       - .env
     environment:
       - NODE_ENV=production
-      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/blog_agent?schema=public
       - REDIS_URL=redis://redis:6379
     depends_on:
-      - postgres
       - redis
     restart: always
 
@@ -194,5 +158,4 @@ services:
     restart: unless-stopped
 
 volumes:
-  postgres_data:
   redis_data:
