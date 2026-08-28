@@ -14,6 +14,8 @@ import {
   QualityGateError,
 } from "../shared/recovery";
 import { logVertexRuntimeConfig } from "../shared/vertex";
+import { withPipelineRetryPolicy } from "../shared/pipeline-retry-policy";
+import { withVertexTelemetryContext } from "../shared/vertex-telemetry-context";
 
 const log = logger.child({ worker: "image-worker" });
 
@@ -131,7 +133,10 @@ export async function generateImageForBlog(payload: ImageJobPayload) {
 export function startImageWorker() {
   const worker = new Worker(
     QUEUE_NAMES.image,
-    async (job) => generateImageForBlog(job.data as ImageJobPayload),
+    async (job) => withVertexTelemetryContext(
+      { jobId: String(job.id), queue: QUEUE_NAMES.image, worker: "image-worker", pipeline: "content", stage: "image" },
+      () => withPipelineRetryPolicy(() => generateImageForBlog(job.data as ImageJobPayload))
+    ),
     workerOptions(1)
   );
 
