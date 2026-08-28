@@ -15,12 +15,18 @@
     "worker:image": "tsx workers/image-worker/index.ts",
     "worker:quality": "tsx workers/quality-worker/index.ts",
     "worker:publish": "tsx workers/publish-worker/index.ts",
+    "worker:vertex-gateway": "tsx workers/vertex-gateway/index.ts",
     "worker:dev": "tsx workers/start.ts",
     "worker:drill:rate-limit": "tsx workers/shared/rate-limit.drill.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
     "@google/genai": "^1.45.0",
+    "@langfuse/client": "^5.10.1",
+    "@langfuse/otel": "^5.10.1",
+    "@langfuse/tracing": "^5.10.1",
+    "@opentelemetry/sdk-node": "^0.221.0",
+    "@opentelemetry/sdk-trace-base": "^2.10.0",
     "@prisma/adapter-pg": "^7.9.1",
     "@prisma/client": "^7.9.1",
     "bullmq": "^6.0.5",
