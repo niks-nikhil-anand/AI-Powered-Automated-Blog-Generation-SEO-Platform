@@ -2,6 +2,8 @@ import { Worker, Job } from "bullmq";
 import { JOB_IDS, planningQueue, researchQueue, QUEUE_NAMES } from "../shared/queues";
 import { prisma } from "../shared/prisma";
 import { logger } from "../shared/logger";
+import { withPipelineRetryPolicy } from "../shared/pipeline-retry-policy";
+import { withVertexTelemetryContext } from "../shared/vertex-telemetry-context";
 import { env } from "../shared/env";
 import { workerOptions } from "../shared/worker-options";
 import { getDailyTargetStatus, reconcileDailyTarget } from "../shared/daily-target";
@@ -503,11 +505,13 @@ async function registerSchedules() {
 export function startResearchWorker() {
   const worker = new Worker(
     QUEUE_NAMES.research,
-    (job: Job) => {
-      if (job.name === "reconcile-daily-target") return reconcileDailyTarget();
-      if (job.name === "scheduled-slot") return runScheduledSlot(Number(job.data.slot));
-      return runResearch();
-    },
+    (job: Job) => withVertexTelemetryContext({
+      jobId: String(job.id), queue: QUEUE_NAMES.research, worker: "research-worker", pipeline: "content", stage: "research",
+    }, () => withPipelineRetryPolicy(async () => {
+      if (job.name === "reconcile-daily-target") return await reconcileDailyTarget();
+      if (job.name === "scheduled-slot") return await runScheduledSlot(Number(job.data.slot));
+      return await runResearch();
+    })),
     { ...workerOptions(1) }
   );
 
