@@ -1,8 +1,7 @@
-import { GoogleGenAI } from "@google/genai";
-import { env, isVertexConfigured } from "./env";
+import { isVertexConfigured } from "./env";
 import { logger } from "./logger";
 import { recordAIUsage, timed } from "./pricing";
-import { withVertexRetry } from "./vertex";
+import { requestVertex } from "./vertex-request";
 
 const log = logger.child({ worker: "research-worker", stage: "embeddings" });
 
@@ -24,17 +23,6 @@ const log = logger.child({ worker: "research-worker", stage: "embeddings" });
  * novelty layer then just falls back to its free deterministic layers.
  */
 const EMBEDDING_MODEL = "text-embedding-004";
-
-function client(): GoogleGenAI {
-  if (!isVertexConfigured) {
-    throw new Error("Vertex AI is not configured - cannot compute embeddings");
-  }
-  return new GoogleGenAI({
-    vertexai: true,
-    project: env.GOOGLE_CLOUD_PROJECT,
-    location: env.VERTEX_LOCATION,
-  });
-}
 
 /** Cosine similarity in [-1, 1]. Returns 0 for empty/mismatched/zero vectors. */
 export function cosineSimilarity(a: number[], b: number[]): number {
@@ -65,12 +53,9 @@ export async function embedText(text: string, trendId?: string): Promise<number[
     // killed the call with no retry and no RPM pacing. Deferrable: novelty
     // falls back to free deterministic layers when it's shed.
     const { result, latencyMs } = await timed(() =>
-      withVertexRetry(() => client().models.embedContent({ model: EMBEDDING_MODEL, contents: trimmed }), {
-        model: EMBEDDING_MODEL,
-        priority: "deferrable",
-      })
+      requestVertex({ operation: "embedding", model: EMBEDDING_MODEL, prompt: trimmed, priority: "deferrable" })
     );
-    const values = result.embeddings?.[0]?.values;
+    const values = result.embeddings?.[0];
     if (!values || values.length === 0) return null;
 
     // embedContent doesn't return token usage on every SDK version; estimate
