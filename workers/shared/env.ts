@@ -6,6 +6,46 @@
  * same values Next.js loads automatically for the web app.
  */
 import "dotenv/config";
+import * as fs from "fs";
+import * as path from "path";
+
+// Materialize Google Application Credentials JSON from individual env vars if the file is missing.
+const credentialsPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+if (credentialsPath && !fs.existsSync(credentialsPath)) {
+  const hasFields =
+    process.env.GCP_TYPE &&
+    process.env.GCP_PROJECT_ID &&
+    process.env.GCP_PRIVATE_KEY_ID &&
+    process.env.GCP_PRIVATE_KEY &&
+    process.env.GCP_CLIENT_EMAIL &&
+    process.env.GCP_CLIENT_ID;
+
+  if (hasFields) {
+    try {
+      const parentDir = path.dirname(credentialsPath);
+      if (!fs.existsSync(parentDir)) {
+        fs.mkdirSync(parentDir, { recursive: true });
+      }
+      const saObject = {
+        type: process.env.GCP_TYPE,
+        project_id: process.env.GCP_PROJECT_ID,
+        private_key_id: process.env.GCP_PRIVATE_KEY_ID,
+        private_key: process.env.GCP_PRIVATE_KEY.replace(/\\n/g, "\n"),
+        client_email: process.env.GCP_CLIENT_EMAIL,
+        client_id: process.env.GCP_CLIENT_ID,
+        auth_uri: process.env.GCP_AUTH_URI,
+        token_uri: process.env.GCP_TOKEN_URI,
+        auth_provider_x509_cert_url: process.env.GCP_AUTH_PROVIDER_X509_CERT_URL,
+        client_x509_cert_url: process.env.GCP_CLIENT_X509_CERT_URL,
+        universe_domain: process.env.GCP_UNIVERSE_DOMAIN,
+      };
+      fs.writeFileSync(credentialsPath, JSON.stringify(saObject, null, 2));
+      console.log(`[Auto-Auth] Materialized service account JSON to ${credentialsPath}`);
+    } catch (err) {
+      console.error(`[Auto-Auth] Failed to write credentials file to ${credentialsPath}:`, err);
+    }
+  }
+}
 
 function optional(name: string, fallback: string): string {
   const value = process.env[name];
