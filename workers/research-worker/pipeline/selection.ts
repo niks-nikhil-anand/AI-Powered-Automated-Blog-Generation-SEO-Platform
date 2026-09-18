@@ -1,6 +1,7 @@
 import { researchConfig } from "../config";
 import {
   EngineCandidate,
+  ResearchGateResult,
   ScoreTier,
   TopicFamily,
 } from "../types";
@@ -63,21 +64,42 @@ export function isExploratory(candidate: EngineCandidate): boolean {
 }
 
 /** The hard gates a candidate must clear to be dispatch-eligible (Phase 16). */
-function passesGates(candidate: EngineCandidate): { ok: boolean; reason?: string } {
+export function evaluateGates(candidate: EngineCandidate): ResearchGateResult[] {
   const cfg = researchConfig.engine;
-  if (candidate.novelty.decision === "reject") {
-    return { ok: false, reason: "novelty_reject" };
-  }
-  if (candidate.finalScore.final < cfg.dispatchMinScore) {
-    return { ok: false, reason: "below_dispatch_score" };
-  }
-  if (candidate.evidenceProfile.evidenceQuality.total < cfg.minEvidenceScore) {
-    return { ok: false, reason: "insufficient_evidence" };
-  }
-  if (candidate.novelty.noveltyScore < cfg.minNoveltyScore) {
-    return { ok: false, reason: "insufficient_novelty" };
-  }
-  return { ok: true };
+  return [
+    {
+      id: "novelty_verdict",
+      label: "Novelty verdict",
+      status: candidate.novelty.decision === "reject" ? "FAIL" : "PASS",
+      observed: candidate.novelty.decision,
+      threshold: "not reject",
+      reason: candidate.novelty.decision === "reject" ? candidate.novelty.reason : "No hard novelty rejection",
+    },
+    {
+      id: "dispatch_score",
+      label: "Dispatch score",
+      status: candidate.finalScore.final >= cfg.dispatchMinScore ? "PASS" : "FAIL",
+      observed: candidate.finalScore.final,
+      threshold: cfg.dispatchMinScore,
+      reason: candidate.finalScore.final >= cfg.dispatchMinScore ? "Overall score clears dispatch threshold" : "Overall score is below dispatch threshold",
+    },
+    {
+      id: "evidence_quality",
+      label: "Evidence quality",
+      status: candidate.evidenceProfile.evidenceQuality.total >= cfg.minEvidenceScore ? "PASS" : "FAIL",
+      observed: candidate.evidenceProfile.evidenceQuality.total,
+      threshold: cfg.minEvidenceScore,
+      reason: candidate.evidenceProfile.evidenceQuality.total >= cfg.minEvidenceScore ? "Evidence quality clears minimum" : "Evidence quality is below minimum",
+    },
+    {
+      id: "novelty_score",
+      label: "Novelty score",
+      status: candidate.novelty.noveltyScore >= cfg.minNoveltyScore ? "PASS" : "FAIL",
+      observed: candidate.novelty.noveltyScore,
+      threshold: cfg.minNoveltyScore,
+      reason: candidate.novelty.noveltyScore >= cfg.minNoveltyScore ? "Novelty score clears minimum" : "Novelty score is below minimum",
+    },
+  ];
 }
 
 export type SelectionResult = {
@@ -116,14 +138,15 @@ export function selectFinalCandidates(
   const qualified: EngineCandidate[] = [];
 
   for (const candidate of candidates) {
-    const gate = passesGates(candidate);
-    if (gate.ok) {
+    const gates = evaluateGates(candidate);
+    const failed = gates.find((gate) => gate.status === "FAIL");
+    if (!failed) {
       qualified.push(candidate);
       continue;
     }
-    if (gate.reason === "novelty_reject") rejectedAsDuplicate += 1;
-    else if (gate.reason === "insufficient_evidence") rejectedForEvidence += 1;
-    else if (gate.reason === "insufficient_novelty") rejectedForNovelty += 1;
+    if (failed.id === "novelty_verdict") rejectedAsDuplicate += 1;
+    else if (failed.id === "evidence_quality") rejectedForEvidence += 1;
+    else if (failed.id === "novelty_score") rejectedForNovelty += 1;
     else rejectedForScore += 1;
   }
 
