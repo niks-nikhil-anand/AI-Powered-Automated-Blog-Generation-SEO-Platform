@@ -7,8 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "worker:research": "tsx workers/research-worker/index.ts",
-    "worker:research:once": "tsx workers/research-worker/trigger-once.ts",
+    "worker:scheduler": "tsx workers/scheduler-worker/index.ts",
     "worker:planning": "tsx workers/planning-worker/index.ts",
     "worker:outline": "tsx workers/outline-worker/index.ts",
     "worker:writing": "tsx workers/writing-worker/index.ts",
@@ -17,6 +16,8 @@
     "worker:publish": "tsx workers/publish-worker/index.ts",
     "worker:vertex-gateway": "tsx workers/vertex-gateway/index.ts",
     "test:evidence": "node --import tsx tests/evidence-pipeline.test.ts",
+    "test:blog-input": "node --import tsx tests/manual-blog-input.test.ts",
+    "migrate:manual-input": "tsx scripts/migrate-to-manual-input.ts",
     "worker:dev": "tsx workers/start.ts",
     "worker:drill:rate-limit": "tsx workers/shared/rate-limit.drill.ts"
   },

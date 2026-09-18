@@ -50,13 +50,13 @@ services:
   # Vertex credentials are supplied as GCP_* environment variables. The
   # worker entrypoint writes them to an ephemeral in-container JSON file for
   # Google auth; no host credential file is mounted or baked into the image.
-  research-worker:
+  scheduler-worker:
     build:
       context: .
       dockerfile: docker/Dockerfile.worker
     image: auto-blog-worker:latest
-    container_name: blog-agent-research-worker
-    command: ["node_modules/.bin/tsx", "workers/research-worker/index.ts"]
+    container_name: blog-agent-scheduler-worker
+    command: ["node_modules/.bin/tsx", "workers/scheduler-worker/index.ts"]
     env_file:
       - .env
     environment:
@@ -170,26 +170,6 @@ services:
       - redis
       - postgres
     restart: always
-
-  # Optional self-hosted SearXNG instance for the research engine's SERP
-  # discovery + validation layer (docs/RESEARCH_ENGINE_UPGRADE.md). It runs
-  # under the "searxng" compose profile so it does NOT start with a plain
-  # `docker compose up` - start it explicitly with:
-  #   docker compose --profile searxng up -d searxng
-  # then set SEARXNG_ENABLED=true / ENABLE_SEARXNG=true on the research-worker.
-  # The mounted settings.yml enables SearXNG's JSON API (format=json), which
-  # stock SearXNG images disable by default - the worker's client needs it.
-  searxng:
-    image: searxng/searxng:latest
-    container_name: blog-agent-searxng
-    profiles: ["searxng"]
-    ports:
-      - "8080:8080"
-    volumes:
-      - ./docker/searxng:/etc/searxng:ro
-    environment:
-      - SEARXNG_BASE_URL=${SEARXNG_PUBLIC_URL:-http://localhost:8080/}
-    restart: unless-stopped
 
   # Local Langfuse v4. This is the sole AI telemetry store for the project;
   # its databases are intentionally separate from the application postgres
