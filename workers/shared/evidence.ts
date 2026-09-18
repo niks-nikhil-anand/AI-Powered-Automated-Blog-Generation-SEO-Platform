@@ -9,8 +9,16 @@ import { z } from "zod";
  * and the consumers.
  */
 export const EvidenceArticleSchema = z.object({
+  id: z.string().min(1).optional(),
   url: z.string().min(1),
   title: z.string(),
+  publisher: z.string().optional(),
+  publishedAt: z.string().optional(),
+  sourceType: z.string().optional(),
+  reliabilityScore: z.number().optional(),
+  /** Atomic, source-grounded facts. Never treat title/URL alone as evidence. */
+  evidence: z.array(z.string().min(1)).default([]),
+  unsupported: z.array(z.string()).optional(),
   excerpt: z.string().min(1),
   fetchedAt: z.string(),
   extractor: z.string(),
@@ -18,6 +26,10 @@ export const EvidenceArticleSchema = z.object({
 });
 
 export type EvidenceArticle = z.infer<typeof EvidenceArticleSchema>;
+
+export type EvidenceStrength = "direct" | "supported" | "weak" | "inferred" | "unsupported";
+
+export type EvidenceSource = EvidenceArticle & { id: string; evidence: string[] };
 
 /**
  * Parse the untyped Prisma Json column. Returns [] for anything that isn't
@@ -28,4 +40,13 @@ export function parseEvidenceArticles(value: unknown): EvidenceArticle[] {
   if (!Array.isArray(value)) return [];
   const parsed = z.array(EvidenceArticleSchema).safeParse(value);
   return parsed.success ? parsed.data : [];
+}
+
+/** Give legacy rows deterministic IDs while preserving their stored shape. */
+export function canonicalEvidenceSources(value: unknown): EvidenceSource[] {
+  return parseEvidenceArticles(value).map((article, index) => ({
+    ...article,
+    id: article.id ?? `S${index + 1}`,
+    evidence: article.evidence,
+  }));
 }

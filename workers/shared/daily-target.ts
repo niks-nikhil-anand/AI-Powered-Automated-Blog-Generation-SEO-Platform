@@ -78,6 +78,7 @@ export async function reconcileDailyTarget() {
         category: trend.category,
         score: trend.score,
         evidenceSummary: trend.evidenceSummary,
+        evidenceSources: Array.isArray(trend.evidenceArticles) ? trend.evidenceArticles : undefined,
       },
       { jobId: JOB_IDS.plan(trend.id) }
     );
