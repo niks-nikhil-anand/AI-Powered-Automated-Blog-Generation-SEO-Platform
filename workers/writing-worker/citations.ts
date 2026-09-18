@@ -11,12 +11,16 @@ import type { EvidenceArticle } from "../shared/evidence";
  */
 
 export type GroundedSource = {
+  id: string;
   /** Prompt-facing marker, e.g. "[S1]". */
   marker: string;
   url: string;
   title: string;
   excerpt: string;
+  evidence: string[];
 };
+
+export type ArticleClaim = { text: string; sourceIds: string[] };
 
 export type CitationResult = {
   /** Markdown with markers replaced by real links. */
@@ -36,11 +40,26 @@ export type CitationResult = {
 /** Index-ordered [S1]..[Sn] binding for a trend's fetched evidence articles. */
 export function toGroundedSources(articles: EvidenceArticle[]): GroundedSource[] {
   return articles.map((article, index) => ({
-    marker: `[S${index + 1}]`,
+    id: article.id ?? `S${index + 1}`,
+    marker: `[${article.id ?? `S${index + 1}`}]`,
     url: article.url,
     title: article.title,
     excerpt: article.excerpt,
+    evidence: article.evidence,
   }));
+}
+
+/** Structured claim-to-source mapping captured before marker materialization. */
+export function extractArticleClaimMappings(markdown: string, sources: GroundedSource[]): ArticleClaim[] {
+  return markdown
+    .split(/(?<=[.!?])\s+/)
+    .map((text) => text.replace(/\s+/g, " ").trim())
+    .filter((text) => text.length >= 20)
+    .map((text) => ({
+      text: text.replace(/\s*\[S\d+\]\s*$/, ""),
+      sourceIds: sources.filter((source) => text.includes(source.marker)).map((source) => source.id),
+    }))
+    .filter((claim) => claim.sourceIds.length > 0);
 }
 
 function escapeRegExp(value: string): string {
@@ -103,16 +122,15 @@ export function materializeCitations(markdown: string, sources: GroundedSource[]
 }
 
 /**
- * Grounded citation gate: at least min(2, available) sources cited, from at
- * least 2 distinct URLs when 2+ sources exist. Mirrors the thresholds of
- * the legacy citationCheck so the two modes gate at the same strictness.
+ * Grounded citation gate: every supplied evidence source must be cited once.
+ * This is deliberately source-ID based; unrelated links cannot satisfy it.
  */
 export function groundedCitationCheck(
   citedMarkers: string[],
   sources: GroundedSource[]
 ): { ok: boolean; found: number; required: number } {
   if (sources.length === 0) return { ok: true, found: 0, required: 0 };
-  const required = Math.min(2, sources.length);
+  const required = sources.length;
   const distinctUrls = new Set(
     citedMarkers
       .map((marker) => sources.find((source) => source.marker === marker)?.url)
