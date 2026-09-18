@@ -13,6 +13,7 @@ type PlanInput = {
   primaryKeyword: string;
   secondaryKeywords: unknown;
   competitorNotes: unknown;
+  plannedClaims?: unknown;
 };
 
 function asStringArray(value: unknown): string[] {
@@ -30,6 +31,7 @@ Angle: ${plan.angle}
 Primary keyword: ${plan.primaryKeyword}
 Secondary keywords: ${asStringArray(plan.secondaryKeywords).join(", ")}
 Competitor notes: ${asStringArray(plan.competitorNotes).join("; ")}
+Evidence-backed planned claims: ${JSON.stringify(plan.plannedClaims ?? [])}
 
 Return ONLY a JSON object with these keys:
 {
@@ -38,14 +40,14 @@ Return ONLY a JSON object with these keys:
   "metaTitle": "under 60 characters",
   "metaDescription": "under 160 characters",
   "sections": [
-    { "heading": "H2 heading", "intent": "what this section achieves", "bullets": ["3-5 detailed bullet points"] }
+    { "heading": "H2 heading", "intent": "what this section achieves", "bullets": ["3-5 evidence-bounded bullet points"], "claims": [{"text":"exact factual claim","evidenceSourceIds":["S1"]}] }
   ],
   "faqs": [
     { "question": "reader question", "answerIntent": "what the answer should cover" }
   ]
 }
 
-Create 5-8 sections and 3-5 FAQs. Make the outline practical, specific, and not a rewritten news headline.`;
+Create 5-8 sections and 3-5 FAQs. Every factual section must include sourceMarkers from the supplied planned claims. Never invent benefits, common problems, recommendations, commands, APIs, or implementation details. If evidence is narrow, make the section narrower.`;
 }
 
 function fallbackOutline(topic: string, plan: PlanInput): OutlineResult {
@@ -60,21 +62,25 @@ function fallbackOutline(topic: string, plan: PlanInput): OutlineResult {
         heading: "Why This Matters",
         intent: "Explain the practical relevance of the topic.",
         bullets: ["Summarize the signal", "Identify who is affected", "Clarify the technical stakes"],
+        claims: [],
       },
       {
         heading: "Technical Background",
         intent: "Give readers the context needed to understand the topic.",
         bullets: ["Define the core concepts", "Explain recent changes", "Connect to developer workflows"],
+        claims: [],
       },
       {
         heading: "Implementation Considerations",
         intent: "Turn the topic into practical engineering guidance.",
         bullets: ["List tradeoffs", "Call out risks", "Suggest evaluation steps"],
+        claims: [],
       },
       {
         heading: "Recommended Next Steps",
         intent: "Help readers act on the information.",
         bullets: ["Audit current usage", "Prototype safely", "Monitor ecosystem updates"],
+        claims: [],
       },
     ],
     faqs: [

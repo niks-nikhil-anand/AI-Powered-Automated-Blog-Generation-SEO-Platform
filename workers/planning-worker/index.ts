@@ -17,6 +17,8 @@ import {
   QualityGateError,
 } from "../shared/recovery";
 import { logVertexRuntimeConfig } from "../shared/vertex";
+import { canonicalEvidenceSources } from "../shared/evidence";
+import { validatePlannedClaims, validateEvidencePackage } from "../shared/evidence-validator";
 
 const log = logger.child({ worker: "planning-worker" });
 
@@ -48,13 +50,31 @@ async function planTopic(payload: PlanningJobPayload) {
   }
 
   try {
+    const evidenceSources = canonicalEvidenceSources(trend.evidenceArticles);
+    const evidenceGate = validateEvidencePackage(evidenceSources);
+    if (!evidenceGate.ok) {
+      throw new QualityGateError({ stage: "evidence-validator", score: 0, passed: false, reasons: evidenceGate.diagnostics });
+    }
     const startedAt = Date.now();
     const { plan, usage, model } = await generateContentPlan(
       payload.topic,
       payload.category,
       payload.score,
-      payload.evidenceSummary
+      payload.evidenceSummary,
+      evidenceSources
     );
+    const plannedClaims = plan.plannedClaims;
+    const claimGate = validatePlannedClaims(plannedClaims, evidenceSources);
+    if (!claimGate.ok) {
+      throw new QualityGateError({ stage: "evidence-validator", score: 0, passed: false, reasons: claimGate.diagnostics });
+    }
+    log.info("Planning evidence contract passed", {
+      trendId: payload.trendId,
+      plannedClaims: plannedClaims.length,
+      claimsWithEvidence: claimGate.supportedClaims.length,
+      researchSufficiencyScore: claimGate.researchSufficiencyScore,
+    });
+    const plannedClaimsJson = JSON.parse(JSON.stringify(plannedClaims));
     const latencyMs = Date.now() - startedAt;
     const gate = scoreRequiredFields("planning-worker", [
       { label: "search intent", ok: Boolean(plan.searchIntent) },
@@ -77,6 +97,7 @@ async function planTopic(payload: PlanningJobPayload) {
         secondaryKeywords: plan.secondaryKeywords,
         competitorNotes: plan.competitorNotes,
         internalNotes: plan.internalNotes,
+        plannedClaims: plannedClaimsJson,
       },
       update: {
         searchIntent: plan.searchIntent,
@@ -86,6 +107,7 @@ async function planTopic(payload: PlanningJobPayload) {
         secondaryKeywords: plan.secondaryKeywords,
         competitorNotes: plan.competitorNotes,
         internalNotes: plan.internalNotes,
+        plannedClaims: plannedClaimsJson,
       },
     });
 

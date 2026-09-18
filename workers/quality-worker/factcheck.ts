@@ -141,7 +141,7 @@ const UNVERIFIABLE_SCORE_CAP = 60;
 
 function buildVerifyPrompt(claims: string[], articles: EvidenceArticle[]): string {
   const sourcesBlock = articles
-    .map((article, index) => `[S${index + 1}] ${article.title} - ${article.url}\n    "${article.excerpt}"`)
+    .map((article, index) => `[${article.id ?? `S${index + 1}`}] ${article.title} - ${article.url}\nFACTS:\n${article.evidence.map((fact) => `- ${fact}`).join("\n")}`)
     .join("\n");
   return `You are a fact-checking editor for a technical blog. Verify each CLAIM below against the SOURCES (full-text excerpts of the research evidence the article was grounded in).
 

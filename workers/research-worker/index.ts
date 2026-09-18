@@ -26,6 +26,7 @@ import { scoreClusters } from "./pipeline/score";
 import { promotableCandidates } from "./pipeline/promote";
 import { fetchEvidenceArticles } from "./pipeline/evidence";
 import { runResearchEngine } from "./pipeline/engine";
+import { claimManualTopics, completeManualTopic, markManualTopicUsed } from "./pipeline/pool-fallback";
 import { RawSignal, ResearchCandidate } from "./types";
 import {
   failWorkerAttempt,
@@ -86,7 +87,7 @@ function candidateDescription(candidate: ResearchCandidate): string {
  *    until" timestamp recorded (workers/shared/publish-slots.ts) so
  *    quality-worker delays the publish job until the slot's publish time.
  */
-export async function runResearch(options: { maxDispatch?: number; targetPublishAt?: number } = {}) {
+export async function runResearch(options: { maxDispatch?: number; targetPublishAt?: number; manualTopicId?: string } = {}) {
   const attempt = await startWorkerAttempt({
     worker: "research-worker",
     input: {
@@ -96,6 +97,7 @@ export async function runResearch(options: { maxDispatch?: number; targetPublish
       ...(options.targetPublishAt !== undefined
         ? { targetPublishAt: new Date(options.targetPublishAt).toISOString() }
         : {}),
+      ...(options.manualTopicId ? { manualTopicId: options.manualTopicId } : {}),
     },
   });
   const sources = getEnabledSources();
@@ -110,7 +112,7 @@ export async function runResearch(options: { maxDispatch?: number; targetPublish
     // legacy path below is skipped entirely. The audit wrapper (startWorkerAttempt
     // / passWorkerAttempt / failWorkerAttempt) is identical either way.
     if (env.RESEARCH_ENGINE_ENABLED) {
-      const engineOutput = await runResearchEngine(attempt.workflow.id);
+      const engineOutput = await runResearchEngine(attempt.workflow.id, { manualTopicId: options.manualTopicId });
       await passWorkerAttempt({
         workflowRunId: attempt.workflow.id,
         attemptId: attempt.attempt.id,
@@ -152,7 +154,7 @@ export async function runResearch(options: { maxDispatch?: number; targetPublish
     const clusters = dedupeSignals(normalized);
     const enriched = await semanticEnrich(clusters);
     const scored = scoreClusters(enriched);
-    const promotable = promotableCandidates(scored);
+    let promotable = promotableCandidates(scored);
     log.info("Research scoring complete", {
       rawSignals: rawSignals.length,
       normalized: normalized.length,
@@ -162,9 +164,44 @@ export async function runResearch(options: { maxDispatch?: number; targetPublish
       failedSources,
     });
 
+    // Legacy mode has no separate evidence-profile stage, but manual topics
+    // still pass through the same normalize -> dedupe -> semantic -> score
+    // funnel before they can become Trends. The upgraded engine adds the full
+    // SearXNG/novelty/gate path when RESEARCH_ENGINE_ENABLED is on.
+    const dailyStatusBeforeFallback = await getDailyTargetStatus();
+    const manualCapacity = Math.min(
+      Math.max(0, (options.maxDispatch ?? env.TRENDS_TO_WRITE_PER_RUN) - promotable.length),
+      Math.max(0, dailyStatusBeforeFallback.remaining),
+      Math.max(0, env.RESEARCH_MANUAL_MAX_TOPICS),
+    );
+    const manualTopics = env.RESEARCH_MANUAL_FALLBACK && (manualCapacity > 0 || options.manualTopicId)
+      ? await claimManualTopics(options.manualTopicId ? 1 : manualCapacity, options.manualTopicId)
+      : [];
+    if (manualTopics.length > 0) {
+      const manualSignals: RawSignal[] = manualTopics.map((topic) => ({
+        source: "manual_pool",
+        title: topic.title,
+        description: topic.description ?? undefined,
+        tags: [...topic.keywords, topic.category ?? ""].filter(Boolean),
+        raw: { manualTopicId: topic.id, priority: topic.priority },
+      }));
+      const manualCandidates = scoreClusters(await semanticEnrich(dedupeSignals(normalizeSignals(manualSignals))));
+      promotable = [...promotable, ...manualCandidates.filter((candidate) => candidate.score >= env.RESEARCH_MIN_SCORE_TO_PROMOTE)];
+      for (const topic of manualTopics) {
+        const candidate = manualCandidates.find((item) => (item.evidence[0]?.raw as { manualTopicId?: string } | undefined)?.manualTopicId === topic.id);
+        if (candidate && candidate.score >= env.RESEARCH_MIN_SCORE_TO_PROMOTE) await completeManualTopic(topic.id, "QUALIFIED", candidate.score);
+        else await completeManualTopic(topic.id, "REJECTED", candidate?.score ?? 0, "Did not clear research promotion score");
+      }
+      log.info("Manual topics fallback complete", {
+        automatedQualified: promotable.length - manualCandidates.length,
+        manualTopicsResearched: manualTopics.length,
+        manualTopicsQualified: manualCandidates.filter((candidate) => candidate.score >= env.RESEARCH_MIN_SCORE_TO_PROMOTE).length,
+      });
+    }
+
     const since = startOfToday();
     const duplicateCutoff = recentDuplicateCutoff();
-    const created: { id: string; topic: string; category: string; description: string; score: number }[] = [];
+    const created: { id: string; topic: string; category: string; description: string; score: number; evidenceSources: unknown[]; manualTopicId?: string }[] = [];
     let duplicateSkippedCount = 0;
 
     for (const item of promotable) {
@@ -220,6 +257,8 @@ export async function runResearch(options: { maxDispatch?: number; targetPublish
         category: trend.category,
         description,
         score: item.score,
+        evidenceSources: evidenceArticles,
+        manualTopicId: (item.evidence.find((signal) => signal.source === "manual_pool")?.raw as { manualTopicId?: string } | undefined)?.manualTopicId,
       });
     }
 
@@ -350,10 +389,12 @@ export async function runResearch(options: { maxDispatch?: number; targetPublish
           category: trend.category,
           score: trend.score,
           evidenceSummary: trend.description,
+          evidenceSources: trend.evidenceSources,
         },
         { jobId: JOB_IDS.plan(trend.id) }
       );
       await prisma.trend.update({ where: { id: trend.id }, data: { status: "PLANNED" } });
+      if (trend.manualTopicId) await markManualTopicUsed(trend.manualTopicId);
     }
 
     log.info(
@@ -510,6 +551,7 @@ export function startResearchWorker() {
     }, () => withPipelineRetryPolicy(async () => {
       if (job.name === "reconcile-daily-target") return await reconcileDailyTarget();
       if (job.name === "scheduled-slot") return await runScheduledSlot(Number(job.data.slot));
+      if (job.name === "manual-topic-research") return await runResearch({ manualTopicId: String(job.data.manualTopicId) });
       return await runResearch();
     })),
     { ...workerOptions(1) }

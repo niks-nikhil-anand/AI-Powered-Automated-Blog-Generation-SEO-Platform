@@ -99,6 +99,16 @@ export function Sidebar({ collapsed: externalCollapsed, onToggleCollapse }: Side
             </svg>
           ),
         },
+        {
+          label: "Topics Pool",
+          href: "/dashboard/topics/pool",
+          badge: null,
+          icon: (
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M4 5h16M4 12h16M4 19h10" /><circle cx="18" cy="19" r="2" />
+            </svg>
+          ),
+        },
       ],
     },
     {

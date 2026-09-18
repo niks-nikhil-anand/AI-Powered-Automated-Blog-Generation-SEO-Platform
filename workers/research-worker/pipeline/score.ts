@@ -14,6 +14,7 @@ const SOURCE_REASON = {
   microsoft_ai_blog: "Featured on Microsoft AI Blog",
   nvidia_blog: "Featured on NVIDIA Developer Blog",
   searxng: "Surfaced by web search (SearXNG)",
+  manual_pool: "Added to the Manual Topics Pool",
 } as const;
 
 function clampScore(value: number): number {

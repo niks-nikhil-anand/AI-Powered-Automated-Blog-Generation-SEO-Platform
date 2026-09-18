@@ -2,7 +2,7 @@ import { env, isVertexConfigured } from "../shared/env";
 import { generateVertexVisionJson } from "../shared/vertex";
 import { logger } from "../shared/logger";
 import { recordAIUsage } from "../shared/pricing";
-import { parseEvidenceArticles } from "../shared/evidence";
+import { canonicalEvidenceSources } from "../shared/evidence";
 import { runFactCheck, runFullFactCheck, type FactCheckResult, type FullFactCheckDetail, type FullFactCheckResult } from "./factcheck";
 import { judgeBlog, type JudgeResult } from "./judge";
 
@@ -33,6 +33,14 @@ type Check = {
   score: number;
   maxScore: 10;
   notes: string[];
+};
+
+export type QualityFailure = {
+  type: "missing_citation" | "unsupported_claim" | "weak_evidence" | "invented_detail" | "unsupported_advice" | "citation_mismatch";
+  claim: string;
+  sourceIds: string[];
+  reason: string;
+  suggestedAction: "rewrite" | "remove" | "research_more";
 };
 
 const requiredSections = [
@@ -133,7 +141,7 @@ async function factCheckContent(
   blog: BlogForQuality
 ): Promise<{ result: FactCheckResult | FullFactCheckResult; detail: FullFactCheckDetail | null } | null> {
   const startedAt = Date.now();
-  const articles = parseEvidenceArticles(blog.trend?.evidenceArticles);
+  const articles = canonicalEvidenceSources(blog.trend?.evidenceArticles);
 
   if (env.FULL_FACTCHECK_ENABLED && articles.length > 0) {
     const full = await runFullFactCheck(blog.content, articles);
@@ -193,6 +201,16 @@ export async function scoreBlogQuality(blog: BlogForQuality) {
   const imageAssessment = await assessFeaturedImage(blog);
   const factCheckOutcome = await factCheckContent(blog);
   const factCheck = factCheckOutcome?.result ?? null;
+  const evidenceSources = canonicalEvidenceSources(blog.trend?.evidenceArticles);
+  const qualityFailures: QualityFailure[] = (factCheckOutcome?.detail?.claims ?? [])
+    .filter((claim) => claim.verdict !== "supported")
+    .map((claim) => ({
+      type: claim.verdict === "uncertain" ? "weak_evidence" : "unsupported_claim",
+      claim: claim.claim,
+      sourceIds: claim.sourceUrl ? evidenceSources.filter((source) => source.url === claim.sourceUrl).map((source) => source.id) : [],
+      reason: claim.note ?? `Evidence verdict: ${claim.verdict}`,
+      suggestedAction: claim.verdict === "uncertain" ? "rewrite" : "remove",
+    }));
 
   // Task 4: holistic LLM editorial judgment. Runs alongside the heuristics;
   // in JUDGE_SHADOW_MODE (the default) it is computed and persisted but does
@@ -388,6 +406,7 @@ export async function scoreBlogQuality(blog: BlogForQuality) {
       : null,
     /** Task 5 consumes these for targeted repair on QA failure. */
     judgeFixes: judge?.fixes ?? [],
+    failures: qualityFailures,
     scores: {
       seoStructure: checks[0].score,
       contentCompleteness: checks[1].score,

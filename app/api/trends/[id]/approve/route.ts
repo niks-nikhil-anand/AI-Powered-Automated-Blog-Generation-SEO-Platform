@@ -116,6 +116,7 @@ export async function POST(request: Request, context: RouteContext) {
         category: trend.category,
         score: trend.score,
         evidenceSummary: evidenceSummary(trend, belowThreshold ? reason : null),
+        evidenceSources: Array.isArray(trend.evidenceArticles) ? trend.evidenceArticles : undefined,
       },
       { jobId: JOB_IDS.plan(trend.id) }
     );

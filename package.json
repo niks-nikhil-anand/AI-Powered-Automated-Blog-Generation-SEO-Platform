@@ -16,6 +16,7 @@
     "worker:quality": "tsx workers/quality-worker/index.ts",
     "worker:publish": "tsx workers/publish-worker/index.ts",
     "worker:vertex-gateway": "tsx workers/vertex-gateway/index.ts",
+    "test:evidence": "node --import tsx tests/evidence-pipeline.test.ts",
     "worker:dev": "tsx workers/start.ts",
     "worker:drill:rate-limit": "tsx workers/shared/rate-limit.drill.ts"
   },

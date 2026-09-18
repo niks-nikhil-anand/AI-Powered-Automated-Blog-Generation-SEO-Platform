@@ -91,3 +91,18 @@ export function computeFinalScore(input: {
 
   return { ...dimensions, final };
 }
+
+/** Confidence is data-quality confidence, not another score bonus. */
+export function computeScoreConfidence(input: {
+  candidate: ResearchCandidate;
+  evidenceProfile: EvidenceProfile;
+}): number {
+  const { candidate, evidenceProfile } = input;
+  const evidence = clamp(evidenceProfile.evidenceQuality.total) / 100;
+  const coverage = Math.min(1, evidenceProfile.totalSources / 8);
+  const diversity = Math.min(1, evidenceProfile.independentDomains / 4);
+  const authority = Math.min(1, evidenceProfile.primarySources / 2);
+  const freshness = Math.max(0, Math.min(1, evidenceProfile.freshSourceRatio));
+  const semantic = candidate.scoreBreakdown.semanticRelevance > 0 ? 1 : 0.5;
+  return Math.round((evidence * 0.35 + coverage * 0.2 + diversity * 0.2 + authority * 0.15 + freshness * 0.05 + semantic * 0.05) * 100) / 100;
+}

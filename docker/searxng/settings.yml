@@ -9,7 +9,15 @@
 # limiting / bot protection on. Tune `engines` to taste - every engine you
 # enable is one more upstream source SearXNG fans a query out to.
 
-use_default_settings: true
+# Keep the upstream engine set explicit and predictable. Without this
+# restriction, SearXNG inherits its large default engine catalog, which can
+# trigger CAPTCHA/rate-limit failures across many providers.
+use_default_settings:
+  engines:
+    keep_only:
+      - wikipedia
+      - github
+      - stackoverflow
 
 server:
   # Bind inside the container; docker-compose maps this to the host.
@@ -18,7 +26,9 @@ server:
   # A secret key is required for the web UI; the JSON API the worker uses does
   # not need it, but SearXNG refuses to boot without one set.
   secret_key: "change-me-in-production-please"
-  limiter: true
+  # The Compose stack does not provide the Valkey service required by
+  # SearXNG's limiter. Keep the API usable without a misleading limiter error.
+  limiter: false
   image_proxy: false
 
 search:
@@ -30,15 +40,12 @@ search:
   safe_search: 1
   default_lang: "en"
 
-# A small, reliable default engine set. Add/remove engines here as needed.
+# A small, reliable engine set. Add/remove engines here as needed, keeping it
+# aligned with use_default_settings.engines.keep_only above.
 engines:
-  - name: duckduckgo
-    disabled: false
-  - name: brave
+  - name: wikipedia
     disabled: false
   - name: github
     disabled: false
   - name: stackoverflow
-    disabled: false
-  - name: hackernews
     disabled: false

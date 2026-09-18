@@ -10,7 +10,8 @@ export type ResearchSourceName =
   | "microsoft_ai_blog"
   | "nvidia_blog"
   | "hackernews"
-  | "searxng";
+  | "searxng"
+  | "manual_pool";
 
 export type RawSignal = {
   source: ResearchSourceName;
@@ -223,6 +224,18 @@ export type FinalScoreBreakdown = {
   final: number;
 };
 
+export type ResearchGateId = "novelty_verdict" | "dispatch_score" | "evidence_quality" | "novelty_score";
+export type ResearchGateStatus = "PASS" | "FAIL" | "SKIPPED";
+
+export type ResearchGateResult = {
+  id: ResearchGateId;
+  label: string;
+  status: ResearchGateStatus;
+  observed: number | string;
+  threshold: number | string;
+  reason: string;
+};
+
 /** Quality tier from the honest tiering system (Phase 12). */
 export type ScoreTier = "excellent" | "strong" | "weak" | "reject";
 
@@ -245,6 +258,11 @@ export type EngineCandidate = {
 /** Persisted onto Trend.researchDetail (JSON) for engine-produced trends. */
 export type ResearchDetail = {
   engine: true;
+  /** Explainable aliases kept alongside finalScore for a stable UI contract. */
+  overall: number;
+  dimensions: Omit<FinalScoreBreakdown, "final">;
+  confidence: number;
+  gates: ResearchGateResult[];
   finalScore: FinalScoreBreakdown;
   tier: ScoreTier;
   family: TopicFamily;

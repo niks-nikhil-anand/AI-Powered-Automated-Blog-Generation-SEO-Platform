@@ -39,6 +39,20 @@ export interface TrendEvidenceArticle {
  */
 export interface TrendResearchDetail {
   engine?: boolean;
+  overall?: number;
+  dimensions?: Partial<{
+    trendDemand: number;
+    freshness: number;
+    searchDemand: number;
+    githubMomentum: number;
+    sourceDiversity: number;
+    evidenceQuality: number;
+    topicQuality: number;
+    novelty: number;
+    audienceValue: number;
+  }>;
+  confidence?: number;
+  gates?: { id: string; label: string; status: "PASS" | "FAIL" | "SKIPPED"; observed: number | string; threshold: number | string; reason: string }[];
   tier?: "excellent" | "strong" | "weak" | "reject";
   family?: string;
   exploratory?: boolean;
@@ -472,7 +486,8 @@ export function TrendDetailModal({
                 </div>
 
                 {ENGINE_ROWS.map((row) => {
-                  const value = clampPct(Number(engineScore[row.key] ?? 0));
+                  const dimensionValue = row.key === "final" ? undefined : rd.dimensions?.[row.key];
+                  const value = clampPct(Number((dimensionValue ?? engineScore[row.key]) ?? 0));
                   return (
                     <div key={row.key} className="flex items-center gap-[10px]">
                       <span className="text-[11px] font-medium text-[var(--fg2)] w-[138px] flex-none">
@@ -492,14 +507,34 @@ export function TrendDetailModal({
                 })}
 
                 <div className="border-t border-[var(--bd)] pt-[9px] mt-[2px] flex items-center justify-between">
-                  <span className="text-[11px] font-bold text-[var(--fg)]">Final Score</span>
+                  <span className="text-[11px] font-bold text-[var(--fg)]">Overall Score</span>
                   <span
                     className="font-mono text-[11px] font-bold px-[8px] py-[2px] rounded-[6px]"
                     style={{ background: trend.scoreBg, color: trend.scoreFg }}
                   >
-                    {Math.round(Number(engineScore.final ?? 0))}/100
+                    {Math.round(Number(rd.overall ?? engineScore.final ?? 0))}/100
                   </span>
                 </div>
+
+                {typeof rd.confidence === "number" && (
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="font-bold text-[var(--fg)]">Confidence</span>
+                    <span className="font-mono font-bold text-[var(--fg2)]">{Math.round(rd.confidence * 100)}%</span>
+                  </div>
+                )}
+
+                {rd.gates && rd.gates.length > 0 && (
+                  <div className="border-t border-[var(--bd)] pt-[9px] mt-[2px] flex flex-col gap-[6px]">
+                    <span className="text-[10px] uppercase font-bold tracking-wider text-[var(--mut)]">Quality gates</span>
+                    {rd.gates.map((gate) => (
+                      <div key={gate.id} className="flex items-start gap-[6px] text-[10.5px]">
+                        {gate.status === "PASS" ? <CheckCircle size={12} className="text-[var(--emerald)] mt-[1px] flex-none" /> : <AlertTriangle size={12} className="text-[var(--rose)] mt-[1px] flex-none" />}
+                        <span className="font-bold w-[110px] flex-none" style={{ color: gate.status === "PASS" ? "var(--emerald)" : "var(--rose)" }}>{gate.status}</span>
+                        <span className="text-[var(--fg2)]"><b>{gate.label}</b> · {String(gate.observed)} / {String(gate.threshold)} — {gate.reason}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
 
                 {rd.novelty?.reason && (
                   <div className="text-[9.5px] text-[var(--faint)] leading-snug">

@@ -101,6 +101,14 @@ function extractBody(html: string, maxChars: number): string {
   return paragraphs.join("\n\n");
 }
 
+function extractFacts(body: string): string[] {
+  return body
+    .split(/\n{2,}|(?<=[.!?])\s+(?=[A-Z])/)
+    .map((fact) => fact.replace(/\s+/g, " ").trim())
+    .filter((fact) => fact.length >= 25 && fact.length <= 500)
+    .slice(0, 40);
+}
+
 /** Naive registrable domain (last two labels) - good enough for diversity selection, not a PSL implementation. */
 function registrableDomain(url: string): string {
   try {
@@ -150,8 +158,11 @@ async function fetchOne(url: string, fallbackTitle: string): Promise<EvidenceArt
     }
 
     return {
+      id: "",
       url,
       title: extractTitle(html) || fallbackTitle,
+      publisher: (() => { try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return undefined; } })(),
+      evidence: extractFacts(body),
       excerpt: body,
       fetchedAt: new Date().toISOString(),
       extractor: "density",
@@ -179,7 +190,8 @@ export async function fetchEvidenceArticles(candidate: ResearchCandidate): Promi
   const results = await Promise.allSettled(targets.map((target) => fetchOne(target.url, target.title)));
   const articles = results
     .map((result) => (result.status === "fulfilled" ? result.value : null))
-    .filter((article): article is EvidenceArticle => article !== null);
+    .filter((article): article is EvidenceArticle => article !== null)
+    .map((article, index) => ({ ...article, id: `S${index + 1}` }));
 
   log.info("Evidence articles fetched", {
     topic: candidate.title,

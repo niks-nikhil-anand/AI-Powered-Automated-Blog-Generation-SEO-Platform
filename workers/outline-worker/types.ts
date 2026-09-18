@@ -1,5 +1,10 @@
 import { z } from "zod";
 
+export const OutlineClaimSchema = z.object({
+  text: z.string().min(1),
+  evidenceSourceIds: z.array(z.string().min(1)).min(1),
+});
+
 /**
  * Schema-validates generateContentOutline's Vertex response - see
  * IMPLEMENTATION_PLAN.md Phase 2.6. `slug` has no `.min(1)`: vertex.ts
@@ -18,7 +23,8 @@ export const OutlineSectionSchema = z.object({
    * validate - the writing worker derives defaults when they're absent.
    */
   wordTarget: z.number().optional(),
-  sourceMarkers: z.array(z.string()).optional(),
+  sourceMarkers: z.array(z.string().regex(/^S\d+$/)).optional(),
+  claims: z.array(OutlineClaimSchema).min(1),
 });
 
 export const OutlineFaqSchema = z.object({

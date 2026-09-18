@@ -17,6 +17,8 @@ import {
   QualityGateError,
 } from "../shared/recovery";
 import { logVertexRuntimeConfig } from "../shared/vertex";
+import { canonicalEvidenceSources } from "../shared/evidence";
+import { validatePlannedClaims } from "../shared/evidence-validator";
 
 const log = logger.child({ worker: "outline-worker" });
 
@@ -55,6 +57,23 @@ async function outlineTopic(payload: OutlineJobPayload) {
     const latencyMs = Date.now() - startedAt;
     const sections = Array.isArray(outline.sections) ? outline.sections : [];
     const faqs = Array.isArray(outline.faqs) ? outline.faqs : [];
+    const plannedClaims = Array.isArray((plan as { plannedClaims?: unknown }).plannedClaims)
+      ? ((plan as { plannedClaims: unknown[] }).plannedClaims)
+      : [];
+    const evidenceSources = canonicalEvidenceSources(plan.trend.evidenceArticles);
+    const outlineClaims = sections.flatMap((section) => Array.isArray((section as { claims?: unknown }).claims) ? (section as { claims: unknown[] }).claims : []);
+    // Outline claims use the presentation-facing `text` field; the shared
+    // evidence validator uses `claim`. Normalize at this boundary so the
+    // semantic evidence check is applied to the actual outline claims.
+    const outlineClaimsForValidation = outlineClaims.map((claim) => {
+      const value = claim as { text?: unknown; evidenceSourceIds?: unknown };
+      return { claim: value.text, evidenceSourceIds: value.evidenceSourceIds, supportLevel: "direct" as const };
+    });
+    const outlineGate = validatePlannedClaims(outlineClaimsForValidation, evidenceSources);
+    const plannedGate = validatePlannedClaims(plannedClaims, evidenceSources);
+    if (!plannedGate.ok || !outlineGate.ok) {
+      throw new QualityGateError({ stage: "outline-validator", score: 0, passed: false, reasons: [...plannedGate.diagnostics, ...outlineGate.diagnostics, "OUTLINE_REJECTED: outline claims must be directly supported by evidence"] });
+    }
     const gate = scoreRequiredFields("outline-worker", [
       { label: "title", ok: Boolean(outline.title) },
       { label: "slug", ok: Boolean(outline.slug) },
@@ -62,8 +81,15 @@ async function outlineTopic(payload: OutlineJobPayload) {
       { label: "meta description", ok: Boolean(outline.metaDescription) },
       { label: "H2/H3 sections", ok: sections.length >= 6 },
       { label: "FAQs", ok: faqs.length >= 3 },
+      { label: "claim-level evidence metadata", ok: outlineClaims.length > 0 },
     ]);
     assertGate(gate);
+
+    const validatedOutline = {
+      ...outline,
+      claims: outlineClaims,
+      validation: { passed: true },
+    };
 
     const saved = await prisma.contentOutline.upsert({
       where: { trendId: payload.trendId },
@@ -98,6 +124,19 @@ async function outlineTopic(payload: OutlineJobPayload) {
     // Deterministic jobId: a retried outline job can never enqueue a second
     // fresh write for the same trend. QA requeues use their own epoch-keyed
     // IDs (JOB_IDS.writeQaRetry), so this guard never blocks recovery.
+    if (!validatedOutline.validation?.passed) {
+      throw new Error("WRITING_ENQUEUE_BLOCKED: outline has not passed evidence validation");
+    }
+    if (!Array.isArray(validatedOutline.claims)) {
+      throw new Error("WRITING_ENQUEUE_BLOCKED: outline claims are invalid");
+    }
+    for (const claim of validatedOutline.claims) {
+      const value = claim as { text?: unknown; evidenceSourceIds?: unknown };
+      if (!Array.isArray(value.evidenceSourceIds) || value.evidenceSourceIds.length === 0) {
+        throw new Error(`WRITING_ENQUEUE_BLOCKED: claim has no evidence: ${String(value.text ?? "")}`);
+      }
+    }
+
     await writingQueue.add(
       "write_blog",
       {

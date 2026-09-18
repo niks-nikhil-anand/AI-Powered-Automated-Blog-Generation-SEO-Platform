@@ -33,6 +33,23 @@ enum JobStatus {
   FAILED
 }
 
+enum ManualTopicStatus {
+  PENDING
+  RESEARCHING
+  QUALIFIED
+  SELECTED
+  USED
+  REJECTED
+  ARCHIVED
+}
+
+enum ManualTopicPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
 model Job {
   id        String    @id @default(cuid())
   queue     String
@@ -118,6 +135,7 @@ model ContentPlan {
   secondaryKeywords Json
   competitorNotes   Json
   internalNotes     String?
+  plannedClaims     Json?
   outline           ContentOutline?
   createdAt         DateTime        @default(now())
   updatedAt         DateTime        @updatedAt
@@ -262,6 +280,29 @@ model Trend {
   @@index([status])
   @@index([topicFingerprint])
   @@index([canonicalUrl])
+}
+
+model ManualTopic {
+  id                String             @id @default(cuid())
+  title             String
+  description       String?
+  keywords          String[]
+  category          String?
+  priority          ManualTopicPriority @default(NORMAL)
+  status            ManualTopicStatus   @default(PENDING)
+  notes             String?
+  usedAt            DateTime?
+  lastResearchedAt  DateTime?
+  lastResearchScore Float?
+  lastFailureReason String?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  @@index([status])
+  @@index([priority])
+  @@index([createdAt])
+  @@index([usedAt])
+  @@index([lastResearchedAt])
 }
 
 /// One row per research-engine run (docs/RESEARCH_ENGINE_UPGRADE.md Phase 17),

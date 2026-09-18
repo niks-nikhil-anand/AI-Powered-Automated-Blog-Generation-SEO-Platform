@@ -69,7 +69,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           isOpen={manualTopicOpen}
           onClose={() => setManualTopicOpen(false)}
           onSubmit={(topic) => {
-            alert(`Topic added to research queue: ${topic.title}`);
+            fetch("/api/topics-pool", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(topic),
+            }).catch(() => {});
           }}
         />
         {runPipelineOpen && <RunPipelineModal onClose={() => setRunPipelineOpen(false)} />}

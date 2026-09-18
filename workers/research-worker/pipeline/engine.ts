@@ -15,11 +15,12 @@ import { expandQueriesForCandidates } from "./query-expansion";
 import { assessNovelty, loadTopicMemory } from "./novelty";
 import { heuristicTopicQuality, llmTopicQuality, blendTopicQuality } from "./topic-quality";
 import { buildEvidenceProfile, buildOfflineEvidenceProfile } from "./evidence-research";
-import { computeFinalScore } from "./final-score";
-import { classifyFamily, isExploratory, selectFinalCandidates, tierForScore } from "./selection";
+import { computeFinalScore, computeScoreConfidence } from "./final-score";
+import { classifyFamily, evaluateGates, isExploratory, selectFinalCandidates, tierForScore } from "./selection";
 import { buildRunReport, formatRunReport, persistRunReport } from "./report";
 import { createSearxngClient, fetchSearxngDiscoverySignals } from "../searxng";
 import { canonicalizeUrl, topicFingerprint } from "../utils/similarity";
+import { claimManualTopics, completeManualTopic, markManualTopicUsed } from "./pool-fallback";
 import {
   EngineCandidate,
   RawSignal,
@@ -84,8 +85,13 @@ function buildEvidenceSummary(candidate: EngineCandidate): string {
 }
 
 function toResearchDetail(candidate: EngineCandidate): ResearchDetail {
+  const { final: overall, ...dimensions } = candidate.finalScore;
   return {
     engine: true,
+    overall,
+    dimensions,
+    confidence: computeScoreConfidence({ candidate: candidate.candidate, evidenceProfile: candidate.evidenceProfile }),
+    gates: evaluateGates(candidate),
     finalScore: candidate.finalScore,
     tier: candidate.tier,
     family: candidate.family,
@@ -112,7 +118,7 @@ export type EngineRunOutput = {
   failedSources: string[];
 };
 
-export async function runResearchEngine(workflowRunId?: string): Promise<EngineRunOutput> {
+export async function runResearchEngine(workflowRunId?: string, options: { manualTopicId?: string } = {}): Promise<EngineRunOutput> {
   const startedAt = Date.now();
   const searxng = createSearxngClient();
   const searxngDiscoveryEnabled = researchConfig.enabledSources.includes("searxng");
@@ -226,7 +232,82 @@ export async function runResearchEngine(workflowRunId?: string): Promise<EngineR
 
   // --- 8. Selection (Phases 12-16) ------------------------------------------
   const dispatchTarget = Math.max(1, env.TRENDS_TO_WRITE_PER_RUN);
-  const selection = selectFinalCandidates(engineCandidates, dispatchTarget);
+  let selection = selectFinalCandidates(engineCandidates, dispatchTarget);
+
+  // Manual topics are a secondary source. Only claim them when automated
+  // candidates cannot fill the run target; they still receive the same
+  // evidence, novelty, quality, score, and gate evaluation below.
+  const dailyStatus = await getDailyTargetStatus();
+  const fallbackCapacity = Math.min(
+    Math.max(0, dispatchTarget - selection.selected.length),
+    Math.max(0, dailyStatus.remaining - selection.selected.length),
+    Math.max(0, env.RESEARCH_MANUAL_MAX_TOPICS),
+  );
+  const manualTopics = env.RESEARCH_MANUAL_FALLBACK && (fallbackCapacity > 0 || options.manualTopicId)
+    ? await claimManualTopics(options.manualTopicId ? 1 : fallbackCapacity, options.manualTopicId)
+    : [];
+  if (manualTopics.length > 0) {
+    log.info("Activating manual topics fallback", {
+      automatedQualified: selection.selected.length,
+      target: dispatchTarget,
+      manualPoolCandidates: manualTopics.length,
+    });
+    const manualRaw: RawSignal[] = manualTopics.map((topic) => ({
+      source: "manual_pool",
+      title: topic.title,
+      description: topic.description ?? undefined,
+      tags: [...topic.keywords, topic.category ?? ""].filter(Boolean),
+      // A manual topic is an explicit editorial signal, not an invented trend
+      // metric. This only keeps it in the enrichment pool; final score remains
+      // evidence- and quality-driven.
+      volume: 1,
+      raw: { manualTopicId: topic.id, priority: topic.priority },
+    }));
+    const manualNormalized = normalizeSignals(manualRaw);
+    const manualClusters = dedupeSignals(manualNormalized);
+    const manualEnriched = await semanticEnrich(manualClusters);
+    const manualScored = scoreClusters(manualEnriched);
+    const manualMemory = memory;
+    const manualExpanded = await expandQueriesForCandidates(manualScored);
+    const manualQuality = await llmTopicQuality(manualScored);
+    const manualCandidates: EngineCandidate[] = [];
+    for (let i = 0; i < manualScored.length; i += 1) {
+      const candidate = manualScored[i];
+      const evidenceProfile = env.SEARXNG_ENABLED && searxng.hasBudget
+        ? await buildEvidenceProfile(searxng, candidate, manualExpanded[i])
+        : buildOfflineEvidenceProfile(candidate);
+      const topicQuality = blendTopicQuality(heuristicTopicQuality(candidate), manualQuality.get(i) ?? 0);
+      const canonicalUrl = canonicalizeUrl(bestUrl(candidate)) || undefined;
+      const fingerprint = topicFingerprint(candidate.title, candidate.evidence[0]?.description);
+      const novelty = await assessNovelty(manualMemory, candidate, { canonicalUrl, topicFingerprint: fingerprint });
+      const finalScore = computeFinalScore({ candidate, evidenceProfile, topicQuality, novelty });
+      const engineCandidate: EngineCandidate = {
+        candidate,
+        canonicalUrl,
+        topicFingerprint: fingerprint,
+        queries: manualExpanded[i],
+        evidenceProfile,
+        topicQuality,
+        novelty,
+        family: classifyFamily(candidate),
+        exploratory: false,
+        finalScore,
+        tier: tierForScore(finalScore.final),
+      };
+      engineCandidate.exploratory = isExploratory(engineCandidate);
+      manualCandidates.push(engineCandidate);
+    }
+    engineCandidates.push(...manualCandidates);
+    selection = selectFinalCandidates(engineCandidates, dispatchTarget);
+    const selectedManualIds = new Set(selection.selected.filter((c) => c.candidate.evidence.some((s) => s.source === "manual_pool")).map((c) => String((c.candidate.evidence[0]?.raw as { manualTopicId?: string } | undefined)?.manualTopicId ?? "")));
+    for (const topic of manualTopics) {
+      const candidate = manualCandidates.find((c) => (c.candidate.evidence[0]?.raw as { manualTopicId?: string } | undefined)?.manualTopicId === topic.id);
+      if (!candidate) continue;
+      if (selectedManualIds.has(topic.id)) await completeManualTopic(topic.id, "QUALIFIED", candidate.finalScore.final);
+      else await completeManualTopic(topic.id, "REJECTED", candidate.finalScore.final, "Did not clear final selection gates");
+    }
+    log.info("Manual topics fallback complete", { manualTopicsResearched: manualTopics.length, manualTopicsSelected: selectedManualIds.size, finalSelected: selection.selected.length });
+  }
 
   // --- 9. Run report (Phase 17) ---------------------------------------------
   const serpStats = searxng.stats;
@@ -252,7 +333,7 @@ export async function runResearchEngine(workflowRunId?: string): Promise<EngineR
   // --- 10. Persist trends + dispatch ----------------------------------------
   const since = startOfToday();
   const savedFingerprints = new Set<string>();
-  const saved: { candidate: EngineCandidate; trendId: string }[] = [];
+  const saved: { candidate: EngineCandidate; trendId: string; evidenceSources: unknown[] }[] = [];
 
   // Save the strong-and-up novel candidates (excellent + strong tiers) as the
   // dispatchable backlog. Rejected-duplicate topics are already in history, and
@@ -302,7 +383,7 @@ export async function runResearchEngine(workflowRunId?: string): Promise<EngineR
       },
     });
     savedFingerprints.add(candidate.topicFingerprint);
-    saved.push({ candidate, trendId: trend.id });
+    saved.push({ candidate, trendId: trend.id, evidenceSources: evidenceArticles });
   }
 
   // Dispatch the selected topics (excellent tier, gate-passing) to planning.
@@ -331,10 +412,13 @@ export async function runResearchEngine(workflowRunId?: string): Promise<EngineR
         category: entry.candidate.candidate.category,
         score: entry.candidate.finalScore.final,
         evidenceSummary: buildEvidenceSummary(entry.candidate),
+        evidenceSources: entry.evidenceSources,
       },
       { jobId: JOB_IDS.plan(entry.trendId) }
     );
     await prisma.trend.update({ where: { id: entry.trendId }, data: { status: "PLANNED" } });
+    const manualTopicId = (entry.candidate.candidate.evidence.find((s) => s.source === "manual_pool")?.raw as { manualTopicId?: string } | undefined)?.manualTopicId;
+    if (manualTopicId) await markManualTopicUsed(manualTopicId);
     dispatchBudget -= 1;
     dispatchedCount += 1;
   }

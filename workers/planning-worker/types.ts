@@ -1,5 +1,11 @@
 import { z } from "zod";
 
+export const PlannedClaimSchema = z.object({
+  claim: z.string().min(1),
+  evidenceSourceIds: z.array(z.string().min(1)).min(1),
+  supportLevel: z.enum(["direct", "supported"]),
+});
+
 /**
  * Schema-validates generateContentPlan's Vertex response instead of trusting
  * whatever extractJson's JSON.parse returns as `any` - see
@@ -14,6 +20,7 @@ export const PlanningResultSchema = z.object({
   secondaryKeywords: z.array(z.string()).min(1),
   competitorNotes: z.array(z.string()).min(1),
   internalNotes: z.string().optional(),
+  plannedClaims: z.array(PlannedClaimSchema).default([]),
 });
 
 export type PlanningResult = z.infer<typeof PlanningResultSchema>;
