@@ -73,7 +73,7 @@ export type SectionDraft = {
   fromCache: boolean;
 };
 
-type OutlineSectionLike = { heading?: unknown; intent?: unknown; bullets?: unknown; wordTarget?: unknown };
+type OutlineSectionLike = { heading?: unknown; intent?: unknown; bullets?: unknown; wordTarget?: unknown; claims?: unknown };
 type OutlineFaqLike = { question?: unknown; answerIntent?: unknown };
 
 /* ------------------------------------------------------------------ */
@@ -218,7 +218,7 @@ function buildSectionPrompt(spec: SectionSpec, context: SectionArticleContext, r
     sources.length > 0
       ? `
 SOURCES (ground truth for any specific fact - cite with markers, never URLs):
-${sources.map((source) => `${source.marker} ${source.title}\n    "${source.excerpt}"`).join("\n")}
+${sources.map((source) => `${source.marker} ${source.title}\nFACTS:\n${source.evidence.map((fact) => `- ${fact}`).join("\n")}`).join("\n")}
 Marker rules: every number, percentage, date, version, or benchmark you write MUST end with its source marker (e.g. [S1]). Only ${sources.map((s) => s.marker).join(", ")} exist - never invent markers. If no source covers a specific, write it qualitatively instead of inventing a figure. When the SOURCES are thin on the subject's actual product/mechanics, write this section about the general category/technology instead of presenting invented specifics as confirmed facts about the named subject. Vagueness on uncovered specifics is fine; invented precision is not.`
       : "";
   const legacyUrls = Array.from(
@@ -247,7 +247,7 @@ Section intent: ${spec.intent}
 Target length: at least ${spec.wordTarget} words. Paragraphs under 100 words each; sentences average 15-20 words.
 ${kindInstruction(spec.kind, spec.heading)}${bulletsBlock}${keywordsBlock}${sourcesBlock}${legacyEvidenceBlock}${repairBlock}
 
-Rules: GitHub Flavored Markdown. Technical, practical, zero fluff. Output ONLY this section's Markdown - no H1, no article title, no commentary, no code fence around the whole section.`;
+Rules: GitHub Flavored Markdown. Technical, practical, zero fluff. Never turn a feature into an unsupported benefit. Never invent commands, APIs, configuration, architecture, use cases, common problems, or developer behavior. If technical details are absent from FACTS, write a factual overview or clearly label general editorial guidance. Output ONLY this section's Markdown - no H1, no article title, no commentary, no code fence around the whole section.`;
 }
 
 export type GenerateSectionOptions = {
@@ -319,7 +319,9 @@ async function mapWithConcurrency<T, R>(items: T[], concurrency: number, fn: (it
 }
 
 function cacheKey(trendId: string): string {
-  return `sections:${trendId}`;
+  // Versioned after the citation protocol changed. Existing cached sections
+  // may contain raw/foreign links and must not be replayed into a retry.
+  return `sections:v2:${trendId}`;
 }
 
 /** Inputs that must match for a cached section to be reused on retry. */

@@ -133,6 +133,7 @@ export const JOB_IDS = {
   publish: (blogId: string) => `publish-${blogId}`,
   /** dashboard "Run research": double-click within the same minute dedupes. */
   manualResearch: () => `manual-research-${Math.floor(Date.now() / 60_000)}`,
+  manualTopicResearch: (manualTopicId: string) => `manual-topic-research-${manualTopicId}-${Date.now()}`,
 } as const;
 
 export type PlanningJobPayload = {
@@ -141,6 +142,7 @@ export type PlanningJobPayload = {
   category: string;
   score: number;
   evidenceSummary: string;
+  evidenceSources?: unknown[];
 };
 
 export type OutlineJobPayload = {
