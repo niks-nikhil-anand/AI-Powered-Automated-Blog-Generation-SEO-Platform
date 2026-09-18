@@ -30,7 +30,7 @@ if (credentialsPath && !fs.existsSync(credentialsPath)) {
         type: process.env.GCP_TYPE,
         project_id: process.env.GCP_PROJECT_ID,
         private_key_id: process.env.GCP_PRIVATE_KEY_ID,
-        private_key: process.env.GCP_PRIVATE_KEY.replace(/\\n/g, "\n"),
+        private_key: process.env.GCP_PRIVATE_KEY!.replace(/\\n/g, "\n"),
         client_email: process.env.GCP_CLIENT_EMAIL,
         client_id: process.env.GCP_CLIENT_ID,
         auth_uri: process.env.GCP_AUTH_URI,
@@ -264,6 +264,10 @@ export const env = {
 
   /** Blogs/day the dashboard measures against - and the number of publish slots (see workers/shared/publish-slots.ts). */
   DAILY_BLOG_TARGET: Number(optional("DAILY_BLOG_TARGET", "3")),
+
+  /** Manual topic pool is a secondary fallback when automated research misses the target. */
+  RESEARCH_MANUAL_FALLBACK: optional("RESEARCH_MANUAL_FALLBACK", "true") !== "false",
+  RESEARCH_MANUAL_MAX_TOPICS: Number(optional("RESEARCH_MANUAL_MAX_TOPICS", "5")),
 
   /**
    * Minutes before a publish slot's target time that its pipeline fires
