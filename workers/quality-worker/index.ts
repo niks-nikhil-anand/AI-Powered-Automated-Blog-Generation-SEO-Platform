@@ -18,6 +18,7 @@ import { withPipelineRetryPolicy } from "../shared/pipeline-retry-policy";
 import { withVertexTelemetryContext } from "../shared/vertex-telemetry-context";
 
 const log = logger.child({ worker: "quality-worker" });
+export const MAX_WRITING_REPAIR_ATTEMPTS = 2;
 
 export async function runQualityCheck(payload: QualityJobPayload) {
   const attempt = await startWorkerAttempt({
@@ -51,7 +52,7 @@ export async function runQualityCheck(payload: QualityJobPayload) {
       ...report.scores,
       passed: report.passed,
       recommendation: report.recommendation,
-      checks: report.checks,
+      checks: [...report.checks, ...(report.failures.length > 0 ? [{ label: "Structured Failures", score: 0, maxScore: 10, notes: report.failures.map((failure) => JSON.stringify(failure)) }] : [])],
       ...detailColumns,
     },
     update: {
@@ -59,7 +60,7 @@ export async function runQualityCheck(payload: QualityJobPayload) {
       ...report.scores,
       passed: report.passed,
       recommendation: report.recommendation,
-      checks: report.checks,
+      checks: [...report.checks, ...(report.failures.length > 0 ? [{ label: "Structured Failures", score: 0, maxScore: 10, notes: report.failures.map((failure) => JSON.stringify(failure)) }] : [])],
       ...detailColumns,
     },
   });
@@ -79,6 +80,9 @@ export async function runQualityCheck(payload: QualityJobPayload) {
       .filter((check) => check.score < 9)
       .map((check) => `${check.label}: ${check.score}/${check.maxScore}`),
   };
+  if (report.failures.length > 0) {
+    gate.reasons.push(...report.failures.slice(0, 10).map((failure) => `${failure.type}: ${failure.claim} - ${failure.reason}`));
+  }
 
   if (report.passed) {
     // Deterministic jobId - BullMQ refuses a second enqueue for the same
@@ -127,7 +131,9 @@ export async function runQualityCheck(payload: QualityJobPayload) {
     // Dynamic budget from Settings' Retry Attempts (workers/shared/retry-config.ts):
     // N configured retries -> at most N+1 writing attempts before the blog is
     // a permanent QA failure. No hard-coded retry count anywhere.
-    const maxWritingAttempts = (await getRetryAttempts()) + 1;
+    // At most two QA-triggered repair attempts; further failure means the
+    // evidence package is insufficient and must go back to research.
+    const maxWritingAttempts = Math.min((await getRetryAttempts()) + 1, MAX_WRITING_REPAIR_ATTEMPTS + 1);
 
     if (lastWritingInput && writingAttemptCount < maxWritingAttempts) {
       // Task 6.1: the concrete claims the fact check could not verify.
@@ -171,7 +177,9 @@ export async function runQualityCheck(payload: QualityJobPayload) {
       await failWorkerAttempt({
         workflowRunId: attempt.workflow.id,
         attemptId: attempt.attempt.id,
-        error: `Quality score ${report.overallScore} below 90 after writing retries`,
+        error: report.failures.length > 0
+          ? `NEEDS_RESEARCH: evidence insufficient after ${maxWritingAttempts - 1} repair attempts`
+          : `Quality score ${report.overallScore} below 90 after writing retries`,
         qualityReport: gate,
       });
     }

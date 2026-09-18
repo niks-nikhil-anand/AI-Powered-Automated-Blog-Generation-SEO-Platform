@@ -23,6 +23,9 @@ const SOURCE_ENABLED: Record<ResearchSourceName, boolean> = {
   // per-source flag are on (see env.ts) - so it can never silently become a
   // discovery source, and it stays additive to the existing sources.
   searxng: env.SEARXNG_ENABLED && env.ENABLE_SEARXNG,
+  // Manual topics are loaded explicitly as a fallback, never as an always-on
+  // discovery source.
+  manual_pool: false,
 };
 
 export const researchConfig = {
