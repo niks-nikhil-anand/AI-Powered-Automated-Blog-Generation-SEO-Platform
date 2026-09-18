@@ -78,6 +78,7 @@ export type WritingContext = {
     metaDescription: string;
     sections: unknown;
     faqs: unknown;
+    claims?: unknown;
   };
   /** Trend.evidenceSummary - the research source material this article should cite. See IMPLEMENTATION_PLAN.md Phase 2.2. */
   evidenceSummary?: string;
@@ -109,8 +110,8 @@ function buildPrompt(topic: string, description: string, context: WritingContext
   const grounded = sources.length > 0;
   const markerList = sources.map((source) => source.marker).join(", ");
   const evidenceBlock = grounded
-    ? `SOURCES (the ONLY ground truth for specific facts - full-text excerpts of the research evidence):
-${sources.map((source) => `${source.marker} ${source.title} - ${source.url}\n    "${source.excerpt}"`).join("\n")}`
+    ? `SOURCES (the ONLY ground truth for specific facts; use only the FACTS listed under each source):
+${sources.map((source) => `${source.marker} ${source.title} - ${source.url}\nFACTS:\n${source.evidence.map((fact) => `- ${fact}`).join("\n")}`).join("\n")}`
     : `Evidence (the research source material this article is grounded in - cite specific facts/statistics/claims to these sources rather than treating the URLs as background color):
 ${context.evidenceSummary || "No evidence summary provided."}`;
   const citationProtocol = grounded
@@ -164,6 +165,12 @@ Guidelines:
 5. Use proper GitHub Flavored Markdown.
 6. Do not invent unsupported facts. Use cautious wording when evidence is incomplete.
 7. The Call To Action should be short, practical, and related to DevKit Market.
+EVIDENCE-FIRST WRITING POLICY:
+- Never make a factual claim unless it is supported by the supplied FACTS.
+- Never infer benefits from features; do not claim improved performance, productivity, UX, efficiency, security, scalability, or easier/faster development unless explicitly supported.
+- Do not use promotional adjectives as factual evidence.
+- Do not invent commands, APIs, configuration, architecture, workflows, use cases, common mistakes, or developer behavior.
+- If evidence is insufficient, remove the claim or write a narrower factual overview. Recommendations must be labeled general editorial guidance.
 ${rule8}
 9. Weave every phrase in "Target keywords" naturally into the body at least once each - in a heading, a sentence, or an FAQ question. Never dump keywords as a list, sentence, or aside (e.g. do NOT write "Keywords: X, Y, Z" or a sentence that just strings the phrases together). If a keyword doesn't fit naturally in a sentence, use it as a subsection heading instead (e.g. under Key Features, Real World Use Cases, or an FAQ question).
 ${rule10}

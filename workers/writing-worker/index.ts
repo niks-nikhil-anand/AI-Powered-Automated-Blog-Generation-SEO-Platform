@@ -10,11 +10,13 @@ import { env, isVertexConfigured } from "../shared/env";
 import { workerOptions } from "../shared/worker-options";
 import { attachUsageToBlog, recordAIUsage } from "../shared/pricing";
 import { AI_BYLINE } from "../shared/branding";
-import { parseEvidenceArticles } from "../shared/evidence";
+import { canonicalEvidenceSources } from "../shared/evidence";
+import { validatePlannedClaims } from "../shared/evidence-validator";
 import {
   groundedCitationCheck,
   materializeCitations,
   toGroundedSources,
+  extractArticleClaimMappings,
   type GroundedSource,
 } from "./citations";
 import {
@@ -43,6 +45,7 @@ import {
   QualityGateError,
 } from "../shared/recovery";
 import { logVertexRuntimeConfig } from "../shared/vertex";
+import { extractClaimsDeterministic } from "../shared/claims";
 
 const log = logger.child({ worker: "writing-worker" });
 
@@ -94,6 +97,22 @@ function extractEvidenceUrls(evidenceSummary?: string | null): string[] {
   return Array.from(new Set(matches.map((url) => url.replace(/[.,)]+$/, ""))));
 }
 
+function canonicalUrl(value: string): string {
+  try {
+    const url = new URL(value.trim().replace(/[.,)]+$/, ""));
+    url.hash = "";
+    url.hostname = url.hostname.toLowerCase();
+    url.pathname = url.pathname.replace(/\/+$/, "") || "/";
+    return url.toString();
+  } catch {
+    return value.trim().replace(/[.,)]+$/, "");
+  }
+}
+
+function markdownUrls(markdown: string): string[] {
+  return Array.from(markdown.matchAll(/\[[^\]]*\]\((https?:\/\/[^)\s]+)\)/g), (match) => canonicalUrl(match[1]));
+}
+
 /**
  * At least N citations to the trend's actual evidence URLs, not just any
  * external link (see IMPLEMENTATION_PLAN.md Phase 2.3). Skips the check
@@ -103,9 +122,18 @@ function extractEvidenceUrls(evidenceSummary?: string | null): string[] {
 function citationCheck(markdown: string, evidenceSummary?: string | null): { ok: boolean; found: number; required: number } {
   const evidenceUrls = extractEvidenceUrls(evidenceSummary);
   if (evidenceUrls.length === 0) return { ok: true, found: 0, required: 0 };
-  const required = Math.min(2, evidenceUrls.length);
-  const found = evidenceUrls.filter((url) => markdown.includes(url)).length;
+  const required = evidenceUrls.length;
+  const cited = new Set(markdownUrls(markdown));
+  const found = evidenceUrls.filter((url) => cited.has(canonicalUrl(url))).length;
   return { ok: found >= required, found, required };
+}
+
+function groundedCitations(markdown: string, sources: GroundedSource[]) {
+  const citedUrls = new Set(markdownUrls(markdown));
+  return {
+    citedMarkers: sources.filter((source) => citedUrls.has(canonicalUrl(source.url))).map((source) => source.marker),
+    sources,
+  };
 }
 
 function writingGate(
@@ -257,10 +285,11 @@ async function attemptTargetedRepair(args: {
     if (!usageRecordId) usageRecordId = saved.id;
   }
 
-  // Legacy URL citation check (not the marker check): repaired articles
-  // carry already-materialized links, so verbatim-URL matching is the
-  // correct verification here.
-  const gate = writingGate(markdown, trend.evidenceSummary);
+  const gate = writingGate(
+    markdown,
+    trend.evidenceSummary,
+    groundedSources.length > 0 ? groundedCitations(markdown, groundedSources) : undefined
+  );
   assertGate(gate);
 
   const html = await marked.parse(markdown);
@@ -469,9 +498,12 @@ async function attemptClaimRepair(args: {
     if (!usageRecordId) usageRecordId = saved.id;
   }
 
-  // Legacy URL citation check (not the marker check): the spliced article
-  // carries already-materialized links, same as attemptTargetedRepair.
-  const gate = writingGate(markdown, trend.evidenceSummary, undefined, { selfCheck, unmarkedClaims: [] });
+  const gate = writingGate(
+    markdown,
+    trend.evidenceSummary,
+    groundedSources.length > 0 ? groundedCitations(markdown, groundedSources) : undefined,
+    { selfCheck, unmarkedClaims: [] }
+  );
   assertGate(gate);
 
   const html = await marked.parse(markdown);
@@ -561,6 +593,17 @@ async function generateBlogForTrend(
         include: { plan: true },
       });
 
+  const evidenceSourcesForContract = canonicalEvidenceSources(trend.evidenceArticles);
+  const plannedClaimsForContract = outline?.plan ? (outline.plan as { plannedClaims?: unknown }).plannedClaims : undefined;
+  const outlineClaimsForContract = Array.isArray(outline?.sections)
+    ? (outline.sections as Array<{ claims?: unknown }>).flatMap((section) => Array.isArray(section.claims) ? section.claims : [])
+    : [];
+  const planningContract = validatePlannedClaims(plannedClaimsForContract, evidenceSourcesForContract);
+  const outlineContract = validatePlannedClaims(outlineClaimsForContract, evidenceSourcesForContract);
+  if (!planningContract.ok || !outlineContract.ok) {
+    throw new QualityGateError({ stage: "writing-validator", score: 0, passed: false, reasons: ["WRITING_REJECTED: outline contains claims without valid evidence mappings", ...planningContract.diagnostics, ...outlineContract.diagnostics] });
+  }
+
   log.info(`Generating blog for trend "${topic}"`, {
     trendId,
     outlineId: outline?.id,
@@ -589,7 +632,7 @@ async function generateBlogForTrend(
   // is on, the draft grounds on [S1]-marked sources and citations are
   // materialized by code below. Trends without evidenceArticles keep the
   // legacy evidenceSummary path untouched.
-  const evidenceArticles = parseEvidenceArticles(trend.evidenceArticles);
+  const evidenceArticles = canonicalEvidenceSources(trend.evidenceArticles);
   const groundedSources: GroundedSource[] =
     env.GROUNDED_WRITING_ENABLED && evidenceArticles.length > 0 ? toGroundedSources(evidenceArticles) : [];
 
@@ -801,6 +844,19 @@ async function generateBlogForTrend(
         : undefined,
       env.WRITING_SELFCHECK_ENABLED ? { selfCheck, unmarkedClaims } : undefined
     );
+    log.info("Evidence-constrained writing audit", {
+      jobId: attempt.attempt.id,
+      trendId,
+      researchSources: groundedSources.map((source) => source.id),
+      evidenceCount: groundedSources.reduce((count, source) => count + source.evidence.length, 0),
+      plannedClaims: outline?.plan && Array.isArray((outline.plan as { plannedClaims?: unknown }).plannedClaims)
+        ? ((outline.plan as { plannedClaims: unknown[] }).plannedClaims.length)
+        : 0,
+      articleClaims: extractClaimsDeterministic(draft.markdown).map((claim) => claim.text),
+      claimSourceMapping: groundedSources.length > 0 ? extractArticleClaimMappings(draft.markdown, groundedSources) : [],
+      citationMapping: groundedSources.map((source) => ({ sourceId: source.id, url: source.url, cited: citationMeta?.citedMarkers.includes(source.marker) ?? false })),
+      qualityResult: gate.passed ? "PASS" : "FAIL",
+    });
     assertGate(gate);
     const html = await marked.parse(draft.markdown);
     // Upsert on trendId instead of always create - a retried write_blog job
