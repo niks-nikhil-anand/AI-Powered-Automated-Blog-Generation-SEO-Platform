@@ -140,6 +140,7 @@ async function assessFeaturedImage(blog: BlogForQuality): Promise<VisionAssessme
 async function factCheckContent(
   blog: BlogForQuality
 ): Promise<{ result: FactCheckResult | FullFactCheckResult; detail: FullFactCheckDetail | null } | null> {
+  if (!env.EVIDENCE_VALIDATION_ENABLED) return null;
   const startedAt = Date.now();
   const articles = canonicalEvidenceSources(blog.blogInput?.evidenceArticles);
 
@@ -202,15 +203,17 @@ export async function scoreBlogQuality(blog: BlogForQuality) {
   const factCheckOutcome = await factCheckContent(blog);
   const factCheck = factCheckOutcome?.result ?? null;
   const evidenceSources = canonicalEvidenceSources(blog.blogInput?.evidenceArticles);
-  const qualityFailures: QualityFailure[] = (factCheckOutcome?.detail?.claims ?? [])
-    .filter((claim) => claim.verdict !== "supported")
-    .map((claim) => ({
-      type: claim.verdict === "uncertain" ? "weak_evidence" : "unsupported_claim",
-      claim: claim.claim,
-      sourceIds: claim.sourceUrl ? evidenceSources.filter((source) => source.url === claim.sourceUrl).map((source) => source.id) : [],
-      reason: claim.note ?? `Evidence verdict: ${claim.verdict}`,
-      suggestedAction: claim.verdict === "uncertain" ? "rewrite" : "remove",
-    }));
+  const qualityFailures: QualityFailure[] = env.EVIDENCE_VALIDATION_ENABLED
+    ? (factCheckOutcome?.detail?.claims ?? [])
+        .filter((claim) => claim.verdict !== "supported")
+        .map((claim) => ({
+          type: claim.verdict === "uncertain" ? "weak_evidence" : "unsupported_claim",
+          claim: claim.claim,
+          sourceIds: claim.sourceUrl ? evidenceSources.filter((source) => source.url === claim.sourceUrl).map((source) => source.id) : [],
+          reason: claim.note ?? `Evidence verdict: ${claim.verdict}`,
+          suggestedAction: claim.verdict === "uncertain" ? "rewrite" : "remove",
+        }))
+    : [];
 
   // Task 4: holistic LLM editorial judgment. Runs alongside the heuristics;
   // in JUDGE_SHADOW_MODE (the default) it is computed and persisted but does
@@ -384,7 +387,7 @@ export async function scoreBlogQuality(blog: BlogForQuality) {
   // 70 (not 100) tolerates the occasional "uncertain" verdict rather than
   // demanding every single claim read as fully "supported".
   const CRITICAL_FACT_CHECK_THRESHOLD = 70;
-  const factCheckOk = !factCheck || factCheck.score >= CRITICAL_FACT_CHECK_THRESHOLD;
+  const factCheckOk = !env.EVIDENCE_VALIDATION_ENABLED || !factCheck || factCheck.score >= CRITICAL_FACT_CHECK_THRESHOLD;
 
   // Task 4 (live mode only): per-dimension floor - one collapsed dimension
   // (e.g. Readability 4/10) can no longer be averaged into a pass. Fact

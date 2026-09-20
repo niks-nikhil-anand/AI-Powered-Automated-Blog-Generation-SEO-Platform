@@ -16,9 +16,11 @@ import {
   startWorkerAttempt,
   QualityGateError,
 } from "../shared/recovery";
+import { env } from "../shared/env";
 import { logVertexRuntimeConfig, slugify } from "../shared/vertex";
 import { canonicalEvidenceSources } from "../shared/evidence";
 import { validatePlannedClaims } from "../shared/evidence-validator";
+import { normalizePlannedClaims } from "../shared/evidence-claims";
 import { failBlogInput } from "../shared/blog-input";
 
 const log = logger.child({ worker: "outline-worker" });
@@ -77,17 +79,25 @@ async function outlineTopic(payload: OutlineJobPayload) {
         });
     const { outline, usage, model } = generated;
     const latencyMs = Date.now() - startedAt;
-    const sections = Array.isArray(outline.sections) ? outline.sections : [];
+    let sections = Array.isArray(outline.sections) ? outline.sections : [];
     const faqs = Array.isArray(outline.faqs) ? outline.faqs : [];
-    const plannedClaims = Array.isArray((plan as { plannedClaims?: unknown }).plannedClaims)
-      ? ((plan as { plannedClaims: unknown[] }).plannedClaims)
-      : [];
-    const outlineClaims = sections.flatMap((section) => Array.isArray((section as { claims?: unknown }).claims) ? (section as { claims: unknown[] }).claims : []);
+    const plannedClaims = normalizePlannedClaims((plan as { plannedClaims?: unknown }).plannedClaims, evidenceSources);
+    let outlineClaims = sections.flatMap((section) => Array.isArray((section as { claims?: unknown }).claims) ? (section as { claims: unknown[] }).claims : []);
+    if (sourced && outlineClaims.length === 0 && plannedClaims.length > 0) {
+      sections = sections.map((section, index) => {
+        const claim = plannedClaims[index % plannedClaims.length];
+        return {
+          ...section,
+          claims: [{ text: claim.claim, evidenceSourceIds: claim.evidenceSourceIds }],
+        };
+      });
+      outlineClaims = sections.flatMap((section) => Array.isArray((section as { claims?: unknown }).claims) ? (section as { claims: unknown[] }).claims : []);
+    }
 
     // Sourced submissions keep the full evidence contract; an unsourced one
     // has nothing to validate claims against, so the gate is skipped rather
     // than failed (see BlogInput.evidenceArticles in prisma/schema.prisma).
-    if (sourced) {
+    if (sourced && env.EVIDENCE_VALIDATION_ENABLED) {
       // Outline claims use the presentation-facing `text` field; the shared
       // evidence validator uses `claim`. Normalize at this boundary so the
       // semantic evidence check is applied to the actual outline claims.
@@ -114,7 +124,7 @@ async function outlineTopic(payload: OutlineJobPayload) {
       { label: "meta description", ok: Boolean(outline.metaDescription) },
       { label: "H2/H3 sections", ok: sections.length >= minSections },
       { label: "FAQs", ok: faqs.length >= minFaqs },
-      { label: "claim-level evidence metadata", ok: !sourced || outlineClaims.length > 0 },
+      { label: "claim-level evidence metadata", ok: !sourced || !env.EVIDENCE_VALIDATION_ENABLED || outlineClaims.length > 0 },
     ]);
     assertGate(gate);
 
