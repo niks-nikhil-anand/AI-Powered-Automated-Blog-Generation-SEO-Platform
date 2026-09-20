@@ -50,7 +50,7 @@ type LogEntryData = {
   // there's no meaningful metadata to store as an explicit null here.
   meta: Prisma.InputJsonValue | undefined;
   workflowRunId: string | null;
-  trendId: string | null;
+  blogInputId: string | null;
   blogId: string | null;
 };
 
@@ -87,7 +87,7 @@ export class PrismaTransport extends Transport {
   log(info: Record<string, unknown>, callback: () => void): void {
     this.emit("logged", info);
 
-    const { level, message, timestamp, stack, worker, workflowRunId, trendId, blogId, ...rest } = info;
+    const { level, message, timestamp, stack, worker, workflowRunId, blogInputId, blogId, ...rest } = info;
     // Constant on every single line (winston's defaultMeta) - dropped rather
     // than repeated in every row's `meta` blob.
     delete rest.service;
@@ -100,7 +100,7 @@ export class PrismaTransport extends Transport {
       stack: typeof stack === "string" ? stack : null,
       meta: Object.keys(rest).length > 0 ? safeMeta(rest as Record<string, unknown>) ?? undefined : undefined,
       workflowRunId: typeof workflowRunId === "string" ? workflowRunId : null,
-      trendId: typeof trendId === "string" ? trendId : null,
+      blogInputId: typeof blogInputId === "string" ? blogInputId : null,
       blogId: typeof blogId === "string" ? blogId : null,
     });
 
