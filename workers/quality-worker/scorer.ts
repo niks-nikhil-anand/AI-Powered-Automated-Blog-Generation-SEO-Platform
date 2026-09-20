@@ -14,9 +14,9 @@ type BlogForQuality = {
   slug: string;
   content: string;
   excerpt: string | null;
-  trendId: string | null;
-  /** Trend.evidenceSummary - see IMPLEMENTATION_PLAN.md Phase 2.1/2.4. */
-  trend?: { evidenceSummary: string | null; evidenceArticles?: unknown } | null;
+  blogInputId: string | null;
+  /** BlogInput.evidenceSummary - see IMPLEMENTATION_PLAN.md Phase 2.1/2.4. */
+  blogInput?: { evidenceSummary: string | null; evidenceArticles?: unknown } | null;
   /** ContentPlan fields the LLM judge scores usefulness against (Task 4). */
   plan?: { searchIntent: string; audience: string; angle: string } | null;
   featuredImage?: { width: number | null; height: number | null; size: number; publicUrl: string } | null;
@@ -120,7 +120,7 @@ async function assessFeaturedImage(blog: BlogForQuality): Promise<VisionAssessme
       usage: result.usage,
       latencyMs: Date.now() - startedAt,
       blogId: blog.id,
-      trendId: blog.trendId,
+      blogInputId: blog.blogInputId,
     });
     return result.data;
   } catch (error) {
@@ -132,7 +132,7 @@ async function assessFeaturedImage(blog: BlogForQuality): Promise<VisionAssessme
 /**
  * Fact-check with cost tracking (same pattern as every other Vertex call
  * site - workers/shared/pricing.ts). Task 3: when FULL_FACTCHECK_ENABLED
- * and the trend carries full-text evidence articles, runs the claim-level
+ * and the submission carries reference articles, runs the claim-level
  * full-coverage check; otherwise the legacy sampled check against
  * evidenceSummary. Either way both the score-compatible result and the
  * rich detail (null for legacy) come back.
@@ -141,7 +141,7 @@ async function factCheckContent(
   blog: BlogForQuality
 ): Promise<{ result: FactCheckResult | FullFactCheckResult; detail: FullFactCheckDetail | null } | null> {
   const startedAt = Date.now();
-  const articles = canonicalEvidenceSources(blog.trend?.evidenceArticles);
+  const articles = canonicalEvidenceSources(blog.blogInput?.evidenceArticles);
 
   if (env.FULL_FACTCHECK_ENABLED && articles.length > 0) {
     const full = await runFullFactCheck(blog.content, articles);
@@ -152,12 +152,12 @@ async function factCheckContent(
       usage: full.usage,
       latencyMs: Date.now() - startedAt,
       blogId: blog.id,
-      trendId: blog.trendId,
+      blogInputId: blog.blogInputId,
     });
     return { result: full, detail: full.detail };
   }
 
-  const evidenceSummary = blog.trend?.evidenceSummary;
+  const evidenceSummary = blog.blogInput?.evidenceSummary;
   if (!evidenceSummary) return null;
   const legacy = await runFactCheck(blog.content, evidenceSummary);
   if (!legacy) return null;
@@ -167,7 +167,7 @@ async function factCheckContent(
     usage: legacy.usage,
     latencyMs: Date.now() - startedAt,
     blogId: blog.id,
-    trendId: blog.trendId,
+    blogInputId: blog.blogInputId,
   });
   return { result: legacy, detail: null };
 }
@@ -201,7 +201,7 @@ export async function scoreBlogQuality(blog: BlogForQuality) {
   const imageAssessment = await assessFeaturedImage(blog);
   const factCheckOutcome = await factCheckContent(blog);
   const factCheck = factCheckOutcome?.result ?? null;
-  const evidenceSources = canonicalEvidenceSources(blog.trend?.evidenceArticles);
+  const evidenceSources = canonicalEvidenceSources(blog.blogInput?.evidenceArticles);
   const qualityFailures: QualityFailure[] = (factCheckOutcome?.detail?.claims ?? [])
     .filter((claim) => claim.verdict !== "supported")
     .map((claim) => ({
@@ -227,7 +227,7 @@ export async function scoreBlogQuality(blog: BlogForQuality) {
         usage: judge.usage,
         latencyMs: Date.now() - judgeStartedAt,
         blogId: blog.id,
-        trendId: blog.trendId,
+        blogInputId: blog.blogInputId,
       });
     }
   }
@@ -318,7 +318,7 @@ export async function scoreBlogQuality(blog: BlogForQuality) {
     },
     {
       // 11th check (IMPLEMENTATION_PLAN.md Phase 2.5) - a real Vertex-verified
-      // claims check against Trend.evidenceSummary. Distinct from "AI & Fact
+      // claims check against BlogInput.evidenceSummary. Distinct from "AI & Fact
       // Quality" above, which stays a cheap regex heuristic; this is the
       // "actually checks facts" dimension. Scores a neutral 7 (not 0) when
       // there's no evidence to check against or the call fails - "couldn't
@@ -337,9 +337,9 @@ export async function scoreBlogQuality(blog: BlogForQuality) {
               .map((c) => `${c.verdict}: "${c.claim}" - ${c.note ?? "no note"}`),
           ]
         : [
-            blog.trend?.evidenceSummary
+            blog.blogInput?.evidenceSummary
               ? "Fact-check unavailable (Vertex call failed or returned no claims) - scored neutral 7/10"
-              : "Fact-check skipped (trend has no persisted evidence) - scored neutral 7/10",
+              : "Fact-check skipped (submission carries no reference sources) - scored neutral 7/10",
           ],
     },
   ];
