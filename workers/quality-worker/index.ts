@@ -16,6 +16,7 @@ import { getPublishTarget } from "../shared/publish-slots";
 import { getRetryAttempts } from "../shared/retry-config";
 import { withPipelineRetryPolicy } from "../shared/pipeline-retry-policy";
 import { withVertexTelemetryContext } from "../shared/vertex-telemetry-context";
+import { failBlogInput } from "../shared/blog-input";
 
 const log = logger.child({ worker: "quality-worker" });
 export const MAX_WRITING_REPAIR_ATTEMPTS = 2;
@@ -30,11 +31,11 @@ export async function runQualityCheck(payload: QualityJobPayload) {
     where: { id: payload.blogId },
     // plan rides along for the Task 4 judge (it scores usefulness against
     // the plan's stated intent, not in a vacuum).
-    include: { seo: true, featuredImage: true, trend: { include: { plan: true } } },
+    include: { seo: true, featuredImage: true, blogInput: { include: { plan: true } } },
   });
   if (!blog) throw new Error(`Blog ${payload.blogId} not found`);
 
-  const report = await scoreBlogQuality({ ...blog, plan: blog.trend?.plan ?? null });
+  const report = await scoreBlogQuality({ ...blog, plan: blog.blogInput?.plan ?? null });
 
   // undefined (not null) for the Task 3/4 detail columns when those paths
   // didn't run - legacy reports must not get their new fields nulled out
@@ -90,11 +91,11 @@ export async function runQualityCheck(payload: QualityJobPayload) {
     // idempotency key without hand-rolling a Redis check.
     //
     // Publish-slot hold: when this blog came from a scheduled slot, its
-    // target publish time was recorded at dispatch (keyed by trendId).
+    // target publish time was recorded at dispatch (keyed by blogInputId).
     // Finishing early holds the publish job (BullMQ delayed job) until that
     // time; finishing at/past it (retries ran long) publishes immediately -
     // the blog is never abandoned for missing its slot.
-    const targetPublishAt = blog.trendId ? await getPublishTarget(blog.trendId) : null;
+    const targetPublishAt = blog.blogInputId ? await getPublishTarget(blog.blogInputId) : null;
     const holdMs = targetPublishAt ? Math.max(0, targetPublishAt - Date.now()) : 0;
     await publishQueue.add(
       "publish_blog",
@@ -132,7 +133,8 @@ export async function runQualityCheck(payload: QualityJobPayload) {
     // N configured retries -> at most N+1 writing attempts before the blog is
     // a permanent QA failure. No hard-coded retry count anywhere.
     // At most two QA-triggered repair attempts; further failure means the
-    // evidence package is insufficient and must go back to research.
+    // submission's own reference sources are too thin to support the article
+    // it asks for, and the editor has to amend the brief.
     const maxWritingAttempts = Math.min((await getRetryAttempts()) + 1, MAX_WRITING_REPAIR_ATTEMPTS + 1);
 
     if (lastWritingInput && writingAttemptCount < maxWritingAttempts) {
@@ -164,7 +166,7 @@ export async function runQualityCheck(payload: QualityJobPayload) {
             factCheckIssues,
           },
         },
-        { jobId: JOB_IDS.writeQaRetry(lastWritingInput.trendId, writingAttemptCount) }
+        { jobId: JOB_IDS.writeQaRetry(lastWritingInput.blogInputId, writingAttemptCount) }
       );
       await passWorkerAttempt({
         workflowRunId: attempt.workflow.id,
@@ -178,7 +180,7 @@ export async function runQualityCheck(payload: QualityJobPayload) {
         workflowRunId: attempt.workflow.id,
         attemptId: attempt.attempt.id,
         error: report.failures.length > 0
-          ? `NEEDS_RESEARCH: evidence insufficient after ${maxWritingAttempts - 1} repair attempts`
+          ? `INSUFFICIENT_EVIDENCE: the submission's sources could not support its claims after ${maxWritingAttempts - 1} repair attempts`
           : `Quality score ${report.overallScore} below 90 after writing retries`,
         qualityReport: gate,
       });
@@ -189,6 +191,10 @@ export async function runQualityCheck(payload: QualityJobPayload) {
       data: { status: permanentlyFailed ? "FAILED" : "PENDING_REVIEW" },
     });
     if (permanentlyFailed) {
+      await failBlogInput(
+        blog.blogInputId,
+        new Error(`Quality score ${report.overallScore} stayed below 90 after ${maxWritingAttempts} writing attempt(s)`)
+      );
       // A dead article must not shrink today's target - immediately try to
       // backfill from the backlog instead of waiting for the next scheduled
       // reconcile tick. See workers/shared/daily-target.ts.
