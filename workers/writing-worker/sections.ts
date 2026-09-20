@@ -58,11 +58,15 @@ export type SectionArticleContext = {
   };
   outline?: { sections: unknown; faqs: unknown };
   sources?: GroundedSource[];
-  /** Legacy evidence for trends that predate full-text evidence ingestion. */
+  /** Digest of the submission's reference sources; empty for unsourced briefs. */
   evidenceSummary?: string;
   /** Rotated per section so legacy articles cite more than one source. */
   preferredEvidenceUrl?: string;
   keywords: string[];
+  /** BlogInput.tone - professional | casual | technical. */
+  tone?: string;
+  /** BlogInput.contentLength - the editor's target word count for the article. */
+  targetWords?: number;
 };
 
 export type SectionDraft = {
@@ -132,7 +136,11 @@ function normalizeHeading(value: string): string {
  * intent and wordTarget then steer that section's generation.
  */
 export function buildSectionPlan(context: SectionArticleContext): SectionSpec[] {
-  const targetTotal = Math.round((env.BLOG_MIN_WORDS + env.BLOG_MAX_WORDS) / 2);
+  // The editor's target word count drives the per-section budget; without
+  // one, the BLOG_MIN_WORDS/BLOG_MAX_WORDS midpoint as before.
+  const targetTotal = context.targetWords && context.targetWords > 0
+    ? context.targetWords
+    : Math.round((env.BLOG_MIN_WORDS + env.BLOG_MAX_WORDS) / 2);
   const skeleton = skeletonWords(targetTotal);
 
   const outlineSections: OutlineSectionLike[] = Array.isArray(context.outline?.sections)
@@ -318,10 +326,10 @@ async function mapWithConcurrency<T, R>(items: T[], concurrency: number, fn: (it
   return results;
 }
 
-function cacheKey(trendId: string): string {
+function cacheKey(blogInputId: string): string {
   // Versioned after the citation protocol changed. Existing cached sections
   // may contain raw/foreign links and must not be replayed into a retry.
-  return `sections:v2:${trendId}`;
+  return `sections:v2:${blogInputId}`;
 }
 
 /** Inputs that must match for a cached section to be reused on retry. */
@@ -354,12 +362,12 @@ const CACHE_TTL_SECONDS = 3600;
 export async function generateAllSections(
   plan: SectionSpec[],
   context: SectionArticleContext,
-  trendId: string
+  blogInputId: string
 ): Promise<{ drafts: SectionDraft[]; usage: { promptTokens: number; completionTokens: number }; models: string[] }> {
   const hash = inputsHash(plan, context);
   let cached: CachedSections | null = null;
   try {
-    const raw = await redis.get(cacheKey(trendId));
+    const raw = await redis.get(cacheKey(blogInputId));
     if (raw) {
       const parsed = JSON.parse(raw) as CachedSections;
       if (parsed.inputsHash === hash) cached = parsed;
@@ -417,7 +425,7 @@ export async function generateAllSections(
   });
 
   try {
-    await redis.set(cacheKey(trendId), JSON.stringify(newCache), "EX", CACHE_TTL_SECONDS);
+    await redis.set(cacheKey(blogInputId), JSON.stringify(newCache), "EX", CACHE_TTL_SECONDS);
   } catch (error) {
     log.warn("Section cache write failed (non-fatal)", { error: error instanceof Error ? error.message : String(error) });
   }
