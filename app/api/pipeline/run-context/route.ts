@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { researchQueue } from "@/workers/shared/queues";
+import { schedulerQueue } from "@/workers/shared/queues";
 import { allQueueCounts, STAGE_ORDER } from "@/lib/queues";
 import { env } from "@/workers/shared/env";
 import { RECONCILE_SLOT_ID, getPublishSlotView } from "@/workers/shared/publish-slots";
@@ -23,11 +23,11 @@ export async function GET() {
 
   const [schedulers, queues, workersConnected, lastAttempt, usageRows, passedRuns, slotView] =
     await Promise.all([
-      researchQueue.getJobSchedulers().catch(() => []),
+      schedulerQueue.getJobSchedulers().catch(() => []),
       allQueueCounts(),
-      researchQueue.getWorkersCount().catch(() => 0),
+      schedulerQueue.getWorkersCount().catch(() => 0),
       prisma.workerAttempt.findFirst({
-        where: { worker: "research-worker" },
+        where: { worker: "scheduler-worker" },
         orderBy: { startedAt: "desc" },
       }),
       prisma.aIUsage.findMany({
@@ -95,7 +95,7 @@ export async function GET() {
   const durationMs = measuredDuration ?? FALLBACK_DURATION_MS;
   const durationMin = durationMs / 60000;
 
-  const research = queues.research;
+  const scheduler = queues.scheduler;
 
   return NextResponse.json({
     schedules,
@@ -110,11 +110,11 @@ export async function GET() {
     // delayed placeholder job per registered cron schedule (one per entry in
     // `schedules` above) representing its next future fire time - that's not
     // a run "in progress", it's just sitting there waiting for its turn,
-    // sometimes many hours out. With 3 schedules registered, `delayed` is
-    // never 0, which made this permanently true and the manual trigger
+    // sometimes many hours out. With several schedules registered, `delayed`
+    // is never 0, which made this permanently true and the manual trigger
     // button permanently disabled. `active`/`waiting` are the real signal:
     // a job is actually running, or queued to run immediately.
-    runInFlight: research.active > 0 || research.waiting > 0,
+    runInFlight: scheduler.active > 0 || scheduler.waiting > 0,
     workersConnected,
     estimate: {
       costUsd,
