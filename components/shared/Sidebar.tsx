@@ -89,23 +89,12 @@ export function Sidebar({ collapsed: externalCollapsed, onToggleCollapse }: Side
           ),
         },
         {
-          label: "Trend Research",
-          href: "/dashboard/trends",
+          label: "New Blog",
+          href: "/dashboard/blogs/new",
           badge: null,
           icon: (
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M3 17l6-6 4 4 7-7" />
-              <path d="M15 8h5v5" />
-            </svg>
-          ),
-        },
-        {
-          label: "Topics Pool",
-          href: "/dashboard/topics/pool",
-          badge: null,
-          icon: (
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M4 5h16M4 12h16M4 19h10" /><circle cx="18" cy="19" r="2" />
+              <path d="M12 5v14M5 12h14" />
             </svg>
           ),
         },
@@ -197,6 +186,8 @@ export function Sidebar({ collapsed: externalCollapsed, onToggleCollapse }: Side
       ],
     },
   ];
+
+  const navHrefs = navGroups.flatMap((group) => group.items.map((item) => item.href));
 
   return (
     <aside
@@ -306,7 +297,14 @@ export function Sidebar({ collapsed: externalCollapsed, onToggleCollapse }: Side
               </div>
             )}
             {group.items.map((item) => {
-              const isActive = pathname === item.href || (item.href !== "/dashboard" && pathname?.startsWith(item.href));
+              // Exact match wins; prefix matching is only for genuine
+              // sub-routes, and never for a sibling that shares the prefix
+              // (/dashboard/blogs must not light up on /dashboard/blogs/new).
+              const isActive =
+                pathname === item.href ||
+                (item.href !== "/dashboard" &&
+                  pathname?.startsWith(`${item.href}/`) &&
+                  !navHrefs.some((href) => href !== item.href && href.startsWith(`${item.href}/`) && pathname?.startsWith(href)));
               return (
                 <Link
                   key={item.href}
