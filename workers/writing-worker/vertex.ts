@@ -2,7 +2,7 @@ import { env, isVertexConfigured } from "../shared/env";
 import { logger } from "../shared/logger";
 import { generateVertexText, slugify, VertexQuotaError, type VertexTextResult } from "../shared/vertex";
 import { getSetting, MODEL_SETTING_KEYS } from "../shared/settings";
-import { buildSectionPlan, generateAllSections, type SectionArticleContext } from "./sections";
+import { buildSectionPlan, generateAllSections, type SectionArticleContext, DEFAULT_MUST_FOLLOW_RULES } from "./sections";
 import type { GroundedSource } from "./citations";
 
 const log = logger.child({ worker: "writing-worker" });
@@ -97,6 +97,11 @@ export type WritingContext = {
   tone?: string;
   /** BlogInput.contentLength - the editor's target word count for the article. */
   targetWords?: number;
+  /** Full submission specs (writingInstructions, internalLinks, etc.) */
+  specs?: Record<string, unknown>;
+  internalLinks?: string[];
+  writingInstructions?: string[];
+  mustFollow?: string[];
 };
 
 /**
@@ -130,7 +135,7 @@ function buildPrompt(topic: string, description: string, context: WritingContext
   const grounded = sources.length > 0;
   const markerList = sources.map((source) => source.marker).join(", ");
   const evidenceBlock = grounded
-    ? `SOURCES (the ONLY ground truth for specific facts; use only the FACTS listed under each source):
+    ? `SOURCES (ground truth for specific facts; use only the FACTS listed under each source):
 ${sources.map((source) => `${source.marker} ${source.title} - ${source.url}\nFACTS:\n${source.evidence.map((fact) => `- ${fact}`).join("\n")}`).join("\n")}`
     : `Evidence (the research source material this article is grounded in - cite specific facts/statistics/claims to these sources rather than treating the URLs as background color):
 ${context.evidenceSummary || "No evidence summary provided."}`;
@@ -138,7 +143,7 @@ ${context.evidenceSummary || "No evidence summary provided."}`;
     ? `
 Citation protocol (mandatory):
 - When you state a specific fact, number, percentage, date, version, statistic, or capability drawn from the SOURCES, append its source marker inline immediately after the claim (e.g. "... cuts cold-start latency noticeably [S1].").
-- Every specific claim MUST carry a marker. If no source covers it, write it qualitatively instead - no invented figures.
+- Every specific claim drawn from sources MUST carry a marker. If no source covers it, write it qualitatively instead - no invented figures.
 - Only these markers exist: ${markerList}. Never invent other markers. Never paste raw URLs into the article - markers only; they are converted into inline links automatically.
 - Use at least two distinct markers in the article body when two or more sources are provided.
 - Do NOT add a "Sources" or "References" section at the end.
@@ -148,58 +153,62 @@ Citation protocol (mandatory):
     ? "8. Follow the Citation protocol above for every specific claim - markers, never raw URLs."
     : `8. When you state a specific fact, statistic, or claim drawn from the Evidence above, cite it with an inline Markdown link to its exact source URL from that evidence (e.g. "according to [the source](https://...)"). Cite at least two distinct source URLs from the Evidence if two or more are available there - don't invent URLs that aren't in the Evidence.`;
   const rule10 = grounded
-    ? `10. Only state a specific number, percentage, date, version, or named benchmark result if it explicitly appears in the SOURCES above (with its marker attached per the protocol). For anything the SOURCES don't cover, describe it qualitatively instead of inventing a figure (e.g. "adds noticeable memory overhead", not a fabricated "uses 40% more memory"). This also applies to specific product features, architecture, or deployment/technical capabilities of the article's subject (a company, product, or service) - don't assert a specific capability unless a source says so, and don't state what it "is" or "does" as if confirmed when no source covers it. When the SOURCES are thin on the subject's actual product/mechanics, write Key Features, How it Works, and Real World Use Cases about the general category/technology instead, rather than presenting invented specifics as confirmed facts about the named subject. Vagueness on uncovered specifics is fine; invented precision is not.`
-    : `10. Only state a specific number, percentage, date, version, or named benchmark result if it is explicitly present in the Evidence above. For anything the Evidence doesn't cover, describe it qualitatively instead of inventing a figure (e.g. "adds noticeable memory overhead", not a fabricated "uses 40% more memory"). This also applies to specific product features, architecture, or deployment/technical capabilities of the article's subject (a company, product, or service) - don't assert a specific capability (e.g. "offers an on-premise deployment option") unless it's in the Evidence, and don't state what it "is" or "does" as if confirmed (e.g. not "Superblocks is a programmable platform for workflows and scheduled jobs" when the Evidence never says that). When the Evidence is thin and doesn't describe the subject's actual product/mechanics (common for fresh news items), write Key Features, How it Works, and Real World Use Cases about the general category/technology instead (e.g. "low-code internal-tooling platforms in this category typically let teams...") rather than presenting invented specifics as confirmed facts about the named subject. Vagueness on uncovered specifics is fine; invented precision is not.`;
+    ? `10. Only state a specific number, percentage, date, version, or named benchmark result if it explicitly appears in the SOURCES above (with its marker attached per the protocol). For anything the SOURCES don't cover, describe it qualitatively instead of inventing a figure. Explain architectural concepts, official framework features, and standard developer paradigms thoroughly with technical depth. Avoid unsupported benchmark speed rankings or declaring an unqualified "best" framework without evidence.`
+    : `10. Only state a specific number, percentage, date, version, or named benchmark result if it is explicitly present in the Evidence above. For anything the Evidence doesn't cover, describe it qualitatively instead of inventing a figure. Explain architectural concepts, official framework features, and standard developer paradigms thoroughly with technical depth. Avoid unsupported benchmark speed rankings or declaring an unqualified "best" framework without evidence.`;
 
   const { min: minWords, max: maxWords } = wordRange(context.targetWords);
 
-  return `You are a Staff Technical Writer for DevKit Market, a developer-focused tech blog.
+  const rawSpecs = (context.specs ?? {}) as Record<string, unknown>;
+  const nestedSpecs = (rawSpecs.specs ?? {}) as Record<string, unknown>;
+  const writingInstructions: string[] =
+    context.writingInstructions ??
+    (Array.isArray(rawSpecs.writingInstructions)
+      ? (rawSpecs.writingInstructions as string[])
+      : Array.isArray(nestedSpecs.writingInstructions)
+      ? (nestedSpecs.writingInstructions as string[])
+      : []);
+  const writingInstructionsBlock =
+    writingInstructions.length > 0
+      ? `\nEditorial Writing Instructions:\n${writingInstructions.map((inst) => `- ${inst}`).join("\n")}\n`
+      : "";
 
-Write a ${minWords}-${maxWords} word technical blog post in GitHub Flavored Markdown.
+  const internalLinks: string[] =
+    context.internalLinks ??
+    (Array.isArray(rawSpecs.internalLinks)
+      ? (rawSpecs.internalLinks as string[])
+      : Array.isArray(nestedSpecs.internalLinks)
+      ? (nestedSpecs.internalLinks as string[])
+      : []);
+  const internalLinksBlock =
+    internalLinks.length > 0
+      ? `\nInternal links to naturally weave into text where contextually appropriate: ${internalLinks.join(", ")}.\n`
+      : "";
 
-Topic: "${topic}"
-Context: ${description || "No additional context provided."}
-Content plan:
-${context.plan ? JSON.stringify(context.plan, null, 2) : "No separate content plan provided."}
+  const rawGenInst = (rawSpecs.generationInstructions ?? nestedSpecs.generationInstructions) as Record<string, unknown> | undefined;
+  const userMustFollow = Array.isArray(rawGenInst?.mustFollow)
+    ? (rawGenInst.mustFollow as string[])
+    : Array.isArray(context.mustFollow)
+    ? context.mustFollow
+    : [];
+  const mustFollowRules = Array.from(new Set([...DEFAULT_MUST_FOLLOW_RULES, ...userMustFollow]));
+  const mustFollowBlock = `
+Mandatory Generation Instructions (Must Follow):
+${mustFollowRules.map((rule, idx) => `${idx + 1}. ${rule}`).join("\n")}
+`;
 
-Target keywords (each must appear verbatim, case-insensitive, at least once somewhere in the article body):
-${targetKeywords.length ? targetKeywords.map((keyword) => `- ${keyword}`).join("\n") : "- No target keywords provided."}
+  const outlineSections = Array.isArray(context.outline?.sections)
+    ? (context.outline.sections as Array<Record<string, unknown>>)
+    : [];
 
-Approved outline:
-${context.outline ? JSON.stringify(context.outline, null, 2) : "No separate outline provided."}
-
-${evidenceBlock}
-${citationProtocol}${
-  context.priorAttempt
-    ? `
-This is a REWRITE. The previous attempt scored ${context.priorAttempt.score}/100 and failed the quality gate for these reasons:
-${context.priorAttempt.reasons.map((reason) => `- ${reason}`).join("\n")}
-Fix the weak areas listed above. Preserve anything that was already working - this is a targeted rewrite, not a fresh take.
-`
-    : ""
-}
-
-Guidelines:
-1. ${TONE_GUIDANCE[context.tone ?? "professional"] ?? TONE_GUIDANCE.professional}
-2. Use the approved outline as factual/source context, but reshape the final article into the mandatory structure below.
-3. Always include the Table of Contents section below, regardless of article length.
-4. Include at least one Markdown comparison table in Pros and Cons.
-5. Use proper GitHub Flavored Markdown.
-6. Do not invent unsupported facts. Use cautious wording when evidence is incomplete.
-7. The Call To Action should be short, practical, and related to DevKit Market.
-EVIDENCE-FIRST WRITING POLICY:
-- Never make a factual claim unless it is supported by the supplied FACTS.
-- Never infer benefits from features; do not claim improved performance, productivity, UX, efficiency, security, scalability, or easier/faster development unless explicitly supported.
-- Do not use promotional adjectives as factual evidence.
-- Do not invent commands, APIs, configuration, architecture, workflows, use cases, common mistakes, or developer behavior.
-- If evidence is insufficient, remove the claim or write a narrower factual overview. Recommendations must be labeled general editorial guidance.
-${rule8}
-9. Weave every phrase in "Target keywords" naturally into the body at least once each - in a heading, a sentence, or an FAQ question. Never dump keywords as a list, sentence, or aside (e.g. do NOT write "Keywords: X, Y, Z" or a sentence that just strings the phrases together). If a keyword doesn't fit naturally in a sentence, use it as a subsection heading instead (e.g. under Key Features, Real World Use Cases, or an FAQ question).
-${rule10}
-11. Keep paragraphs under 100 words - this is a hard limit, not a target. If a paragraph runs long while drafting, split it into two before moving on. Sentences should average 15-20 words.
-12. Beyond the mandatory Pros and Cons table, include at least one bullet list and one numbered list elsewhere in the body (e.g. Best Practices as a numbered checklist, Common Mistakes as bullets), and at least one fenced code block showing a command, config snippet, or short example relevant to the topic - place it wherever it's most natural (How it Works or Best Practices). Use "- " (hyphen + space) for every bullet list in the article - never "* " (asterisk) - and "1. ", "2. ", etc. for numbered lists.
-
-Mandatory Markdown structure:
+  const structureSection =
+    outlineSections.length > 0
+      ? `Article Structure Instructions:
+- Follow the approved outline sections and subsections exactly as given in the Approved outline above.
+- Always include a Table of Contents (## Table of Contents) with anchor links to every H2 section right after the introduction.
+- If an outline section specifies a comparisonTable, render the full Markdown comparison table with the specified columns and rows.
+- If an outline section has subsections or paragraphs, emit each as an "### [Heading]" subsection with detailed technical prose addressing the discussion points.
+- Ensure the complete article is thorough, detailed, and reaches the target length of ${minWords}-${maxWords} words.`
+      : `Mandatory Markdown structure:
 # [SEO-friendly title]
 
 [Introduction: 2-4 paragraphs that explain the topic, reader problem, and practical value.]
@@ -249,14 +258,53 @@ Mandatory Markdown structure:
 [Summarize the practical takeaway.]
 
 ## Call To Action
-[One short CTA paragraph.]
+[One short CTA paragraph.]`;
+
+  return `You are a Staff Technical Writer for DevKit Market, a developer-focused tech blog.
+
+Write a ${minWords}-${maxWords} word technical blog post in GitHub Flavored Markdown.
+
+Topic: "${topic}"
+Context: ${description || "No additional context provided."}
+Content plan:
+${context.plan ? JSON.stringify(context.plan, null, 2) : "No separate content plan provided."}
+
+Target keywords (each must appear verbatim, case-insensitive, at least once somewhere in the article body):
+${targetKeywords.length ? targetKeywords.map((keyword) => `- ${keyword}`).join("\n") : "- No target keywords provided."}
+
+Approved outline:
+${context.outline ? JSON.stringify(context.outline, null, 2) : "No separate outline provided."}
+
+${evidenceBlock}
+${citationProtocol}${
+  context.priorAttempt
+    ? `
+This is a REWRITE. The previous attempt scored ${context.priorAttempt.score}/100 and failed the quality gate for these reasons:
+${context.priorAttempt.reasons.map((reason) => `- ${reason}`).join("\n")}
+Fix the weak areas listed above. Preserve anything that was already working - this is a targeted rewrite, not a fresh take.
+`
+    : ""
+}
+${writingInstructionsBlock}${internalLinksBlock}${mustFollowBlock}
+Guidelines:
+1. ${TONE_GUIDANCE[context.tone ?? "professional"] ?? TONE_GUIDANCE.professional}
+2. Use the approved outline as the authoritative article structure.
+3. Always include the Table of Contents section, linking every H2 as a Markdown anchor.
+4. Use proper GitHub Flavored Markdown.
+5. Do not invent unsupported facts. Use cautious wording when evidence is incomplete.
+6. The Call To Action should be short, practical, and related to DevKit Market.
+${rule8}
+9. Weave target keywords naturally into headings and sentences.
+${rule10}
+11. Keep paragraphs under 100 words each. Sentences should average 15-20 words.
+12. Include comparison tables, lists, and short code snippets where appropriate.
+
+${structureSection}
 
 Heading rules:
 - Use exactly one H1: the first line must start with "# ".
 - Never use "# " again after the first line. All main sections must use "## ". Subsections must use "### ".
-- Use the H2 labels above exactly, except "[topic]" and bracketed placeholders should be replaced naturally.
-- Use H3 only under Key Features, Benefits, How it Works, Real World Use Cases, and FAQs.
-- Every H3 must have at least one useful paragraph under it.
+- Every H3 must have substantial technical paragraphs under it.
 
 Respond with ONLY the article body as Markdown. Do not return JSON. Do not wrap the whole article in a code fence.`;
 }
@@ -282,6 +330,17 @@ function enforceSingleH1(markdown: string, title: string): string {
   }
 
   return normalized.join("\n").trim();
+}
+
+function seoMetaDescription(candidate: string | undefined, title: string, keywords: string[]): string {
+  const trimmed = candidate?.trim() ?? "";
+  if (trimmed.length >= 80 && trimmed.length <= 160) return trimmed;
+
+  const keywordText = keywords.length > 0 ? `, including ${keywords.slice(0, 3).join(", ")},` : "";
+  return `A practical technical guide to ${title}${keywordText} with architecture trade-offs, examples, and decision guidance for developers.`.slice(
+    0,
+    160
+  );
 }
 
 let warnedMock = false;
@@ -331,7 +390,7 @@ async function generateWithVertex(topic: string, description: string, context: W
     slug: slugify(title),
     excerpt: (context.outline?.metaDescription || `Technical guide to ${topic}`).slice(0, 200),
     metaTitle: (context.outline?.metaTitle || title).slice(0, 60),
-    metaDescription: (context.outline?.metaDescription || `Technical guide to ${topic}`).slice(0, 160),
+    metaDescription: seoMetaDescription(context.outline?.metaDescription, title, keywords),
     keywords: keywords.length > 0 ? keywords.slice(0, 8) : [topic.toLowerCase()],
     markdown: enforceSingleH1(result.text, title),
     usage: result.usage,
@@ -354,6 +413,31 @@ async function generateSectionedDraft(topic: string, description: string, contex
     ...(Array.isArray(context.plan?.secondaryKeywords) ? context.plan.secondaryKeywords.map(String) : []),
   ].filter(Boolean) as string[];
 
+  const rawSpecs = (context.specs ?? {}) as Record<string, unknown>;
+  const nestedSpecs = (rawSpecs.specs ?? {}) as Record<string, unknown>;
+  const writingInstructions: string[] =
+    context.writingInstructions ??
+    (Array.isArray(rawSpecs.writingInstructions)
+      ? (rawSpecs.writingInstructions as string[])
+      : Array.isArray(nestedSpecs.writingInstructions)
+      ? (nestedSpecs.writingInstructions as string[])
+      : []);
+  const internalLinks: string[] =
+    context.internalLinks ??
+    (Array.isArray(rawSpecs.internalLinks)
+      ? (rawSpecs.internalLinks as string[])
+      : Array.isArray(nestedSpecs.internalLinks)
+      ? (nestedSpecs.internalLinks as string[])
+      : []);
+
+  const rawGenInst = (rawSpecs.generationInstructions ?? nestedSpecs.generationInstructions) as Record<string, unknown> | undefined;
+  const userMustFollow = Array.isArray(rawGenInst?.mustFollow)
+    ? (rawGenInst.mustFollow as string[])
+    : Array.isArray(context.mustFollow)
+    ? context.mustFollow
+    : [];
+  const mustFollowRules = Array.from(new Set([...DEFAULT_MUST_FOLLOW_RULES, ...userMustFollow]));
+
   const sectionContext: SectionArticleContext = {
     title,
     topic,
@@ -365,6 +449,10 @@ async function generateSectionedDraft(topic: string, description: string, contex
     keywords,
     tone: context.tone,
     targetWords: context.targetWords,
+    specs: context.specs,
+    internalLinks,
+    writingInstructions,
+    mustFollow: mustFollowRules,
   };
 
   const plan = buildSectionPlan(sectionContext);
@@ -416,7 +504,7 @@ async function generateSectionedDraft(topic: string, description: string, contex
     slug: slugify(title),
     excerpt: (context.outline?.metaDescription || `Technical guide to ${topic}`).slice(0, 200),
     metaTitle: (context.outline?.metaTitle || title).slice(0, 60),
-    metaDescription: (context.outline?.metaDescription || `Technical guide to ${topic}`).slice(0, 160),
+    metaDescription: seoMetaDescription(context.outline?.metaDescription, title, keywords),
     keywords: keywords.length > 0 ? keywords.slice(0, 8) : [topic.toLowerCase()],
     markdown,
     usage,
