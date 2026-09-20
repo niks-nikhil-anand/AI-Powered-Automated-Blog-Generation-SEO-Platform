@@ -139,7 +139,7 @@ export async function PATCH(request: Request, context: RouteContext) {
         data: {
           title: validated.title,
           slug,
-          category: validated.category ?? null,
+          category: validated.category || (body as Record<string, unknown>).category as string || null,
           keywords: validated.primaryKeywords,
           secondaryKeywords: validated.secondaryKeywords,
           audience: validated.audience ?? null,
@@ -148,16 +148,15 @@ export async function PATCH(request: Request, context: RouteContext) {
           contentLength: validated.contentLength,
           focusKeyword: validated.focusKeyword ?? null,
           metaTitle: validated.metaTitle ?? null,
-          metaDescription: validated.metaDescription ?? null,
-          outlineJson: validated.outlineJson ?? Prisma.JsonNull,
-          evidenceArticles: evidenceArticles.length > 0 ? evidenceArticles : Prisma.JsonNull,
+          outlineJson: (validated.outlineJson as any) ?? Prisma.JsonNull,
+          evidenceArticles: evidenceArticles.length > 0 ? (evidenceArticles as any) : Prisma.JsonNull,
           evidenceSummary,
           priority: validated.priority,
           status: "PENDING",
           failureReason: null,
           processedAt: null,
           dispatchedAt: null,
-          specs: validated,
+          specs: (body as any) ?? validated,
         },
       });
     });
