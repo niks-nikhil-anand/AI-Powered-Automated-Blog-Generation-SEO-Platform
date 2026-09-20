@@ -139,10 +139,10 @@ export function RunPipelineModal({ onClose }: RunPipelineModalProps) {
     setSubmitting(true);
     setError("");
     try {
-      const res = await fetch("/api/research/run", { method: "POST" });
+      const res = await fetch("/api/pipeline/run", { method: "POST" });
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || "Failed to queue the pipeline");
-      setQueued({ jobId: String(data.jobId ?? "?"), queue: String(data.queue ?? "research_queue") });
+      setQueued({ jobId: String(data.jobId ?? "?"), queue: String(data.queue ?? "scheduler_queue") });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to queue the pipeline");
     } finally {
@@ -179,7 +179,7 @@ export function RunPipelineModal({ onClose }: RunPipelineModalProps) {
           <div className="flex-1">
             <div className="text-[14px] font-bold text-[var(--fg)]">Run pipeline</div>
             <div className="text-[11.5px] text-[var(--mut)] mt-[2px]">
-              Trigger a research run now
+              Dispatch queued blog submissions now
             </div>
           </div>
           <button
@@ -262,7 +262,7 @@ export function RunPipelineModal({ onClose }: RunPipelineModalProps) {
             )}
           </div>
           <div className="text-[12px] text-[var(--fg2)] mt-[6px]">
-            {!context?.lastRun && (loading ? "Loading…" : "No research run recorded yet")}
+            {!context?.lastRun && (loading ? "Loading…" : "No scheduler run recorded yet")}
             {context?.lastRun && (
               <>
                 {context.lastRun.dispatchedCount === null
@@ -312,7 +312,7 @@ export function RunPipelineModal({ onClose }: RunPipelineModalProps) {
           {runInFlight && (
             <div className="mt-[9px] flex items-center gap-[7px] rounded-[8px] p-[7px_9px] bg-[rgba(245,158,11,0.10)] border border-[rgba(245,158,11,0.25)]">
               <span className="text-[11.5px] text-[var(--amber)]">
-                A research run is already in progress.
+                A scheduler run is already in progress.
               </span>
             </div>
           )}
@@ -320,7 +320,7 @@ export function RunPipelineModal({ onClose }: RunPipelineModalProps) {
           {noWorkers && (
             <div className="mt-[9px] flex items-center gap-[7px] rounded-[8px] p-[7px_9px] bg-[rgba(245,158,11,0.10)] border border-[rgba(245,158,11,0.25)]">
               <span className="text-[11.5px] text-[var(--amber)]">
-                No worker is consuming research_queue — the job will sit queued.
+                No worker is consuming scheduler_queue — the job will sit queued.
               </span>
             </div>
           )}
