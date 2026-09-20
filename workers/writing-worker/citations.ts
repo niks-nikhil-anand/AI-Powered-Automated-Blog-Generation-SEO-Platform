@@ -37,7 +37,7 @@ export type CitationResult = {
   foreignLinks: string[];
 };
 
-/** Index-ordered [S1]..[Sn] binding for a trend's fetched evidence articles. */
+/** Index-ordered [S1]..[Sn] binding for a submission's reference articles. */
 export function toGroundedSources(articles: EvidenceArticle[]): GroundedSource[] {
   return articles.map((article, index) => ({
     id: article.id ?? `S${index + 1}`,
