@@ -3,14 +3,17 @@ import { createRedisConnection } from "./redis";
 import { currentJobAttempts } from "./retry-config";
 
 /**
- * Queue names. Matches the naming convention in README.md's "Queue
- * Architecture" section. Only `research` and `writing` are implemented so
- * far (MVP scope) - `planning`, `outline`, `image`, `quality`, and
- * `publish` are reserved names for the remaining workers described in the
- * README roadmap (Phase 3/4).
+ * Queue names. The content pipeline proper is
+ * planning -> outline -> writing -> image -> quality -> publish; a blog
+ * enters it when a BlogInput is submitted at /dashboard/blogs/new.
+ *
+ * `scheduler` is not a content stage - it carries the cron-driven jobs
+ * (the daily-target reconcile tick and the publish slots), which dispatch
+ * PENDING BlogInput rows into `planning`. It replaced the research queue,
+ * which used to own those schedulers.
  */
 export const QUEUE_NAMES = {
-  research: "research_queue",
+  scheduler: "scheduler_queue",
   planning: "planning_queue",
   outline: "outline_queue",
   writing: "writing_queue",
@@ -40,7 +43,7 @@ const dynamicJobOptions = {
   removeOnFail: { count: 10000 },
 };
 
-export const researchQueue = new Queue(QUEUE_NAMES.research, {
+export const schedulerQueue = new Queue(QUEUE_NAMES.scheduler, {
   connection: createRedisConnection(),
   defaultJobOptions: dynamicJobOptions,
 });
@@ -94,7 +97,7 @@ export const vertexQueue = new Queue(QUEUE_NAMES.vertex, {
  * re-running it, and completed jobs linger via removeOnComplete):
  *
  *  - ENTITY-keyed (plan/outline/write/publish): the stage runs once ever
- *    per trend/blog. A retried upstream job that crashes after enqueueing
+ *    per BlogInput/blog. A retried upstream job that crashes after enqueueing
  *    re-adds the same ID and BullMQ dedupes it - no duplicate AI spend.
  *
  *  - EPOCH-keyed (writeQaRetry/image/quality/manual*): the stage
@@ -110,19 +113,19 @@ export const vertexQueue = new Queue(QUEUE_NAMES.vertex, {
  * extra QA re-score - cheap versus a stalled pipeline.
  */
 export const JOB_IDS = {
-  /** research -> planning: one plan per trend (matches the long-standing convention). */
-  plan: (trendId: string) => `plan-${trendId}`,
-  /** planning -> outline: one outline per trend. */
-  outline: (trendId: string) => `outline-${trendId}`,
-  /** outline -> writing (fresh draft): one blog per trend. */
-  write: (trendId: string) => `write-${trendId}`,
+  /** input -> planning: one plan per submitted specification. */
+  plan: (blogInputId: string) => `plan-${blogInputId}`,
+  /** planning -> outline: one outline per submitted specification. */
+  outline: (blogInputId: string) => `outline-${blogInputId}`,
+  /** outline -> writing (fresh draft): one blog per submitted specification. */
+  write: (blogInputId: string) => `write-${blogInputId}`,
   /**
    * quality -> writing (QA requeue): retry-stable - a retried quality job
    * recounts the same writingAttemptCount and dedupes against itself.
    */
-  writeQaRetry: (trendId: string, writingAttemptCount: number) => `write-${trendId}-qa${writingAttemptCount}`,
+  writeQaRetry: (blogInputId: string, writingAttemptCount: number) => `write-${blogInputId}-qa${writingAttemptCount}`,
   /** dashboard regenerate: double-click before the job runs dedupes on the same count. */
-  writeManualRegen: (trendId: string, writingAttemptCount: number) => `write-${trendId}-regen${writingAttemptCount}`,
+  writeManualRegen: (blogInputId: string, writingAttemptCount: number) => `write-${blogInputId}-regen${writingAttemptCount}`,
   /** writing -> image: epoch = the writing attempt that produced this draft. */
   image: (blogId: string, writingAttemptId: string) => `image-${blogId}-${writingAttemptId}`,
   /** image -> quality: epoch = the image-worker attempt. */
@@ -131,27 +134,26 @@ export const JOB_IDS = {
   qualityManual: (blogId: string) => `quality-${blogId}-manual-${Date.now()}`,
   /** quality -> publish: one publish per blog, ever (idempotency key). */
   publish: (blogId: string) => `publish-${blogId}`,
-  /** dashboard "Run research": double-click within the same minute dedupes. */
-  manualResearch: () => `manual-research-${Math.floor(Date.now() / 60_000)}`,
-  manualTopicResearch: (manualTopicId: string) => `manual-topic-research-${manualTopicId}-${Date.now()}`,
+  /** dashboard "Run pipeline": double-click within the same minute dedupes. */
+  manualReconcile: () => `manual-reconcile-${Math.floor(Date.now() / 60_000)}`,
 } as const;
 
 export type PlanningJobPayload = {
-  trendId: string;
-  topic: string;
+  blogInputId: string;
+  title: string;
   category: string;
-  score: number;
+  /** BlogInput.evidenceSummary - empty string when the input is unsourced. */
   evidenceSummary: string;
   evidenceSources?: unknown[];
 };
 
 export type OutlineJobPayload = {
-  trendId: string;
+  blogInputId: string;
   planId: string;
 };
 
 export type WritingJobPayload = {
-  trendId: string;
+  blogInputId: string;
   outlineId?: string;
   topic: string;
   description: string;
@@ -179,7 +181,7 @@ export type WritingJobPayload = {
 
 export type ImageJobPayload = {
   blogId: string;
-  trendId?: string;
+  blogInputId?: string;
   title: string;
   slug: string;
   category: string;
