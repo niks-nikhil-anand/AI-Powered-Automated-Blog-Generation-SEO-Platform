@@ -1,7 +1,7 @@
 import { env } from "./env";
 import { prisma } from "./prisma";
 import { logger } from "./logger";
-import { JOB_IDS, planningQueue } from "./queues";
+import { JOB_IDS, planningQueue, outlineQueue, writingQueue } from "./queues";
 import { getSetting, DAILY_TARGET_KEY } from "./settings";
 
 const log = logger.child({ worker: "daily-target" });
@@ -61,6 +61,13 @@ export async function dispatchBlogInput(input: {
   evidenceSummary: string | null;
   evidenceArticles: unknown;
 }) {
+  const planJob = await planningQueue.getJob(JOB_IDS.plan(input.id));
+  if (planJob) await planJob.remove().catch(() => {});
+  const outlineJob = await outlineQueue.getJob(JOB_IDS.outline(input.id));
+  if (outlineJob) await outlineJob.remove().catch(() => {});
+  const writeJob = await writingQueue.getJob(JOB_IDS.write(input.id));
+  if (writeJob) await writeJob.remove().catch(() => {});
+
   await planningQueue.add(
     "plan_blog",
     {
