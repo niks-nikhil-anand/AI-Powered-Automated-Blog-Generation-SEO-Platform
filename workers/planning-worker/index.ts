@@ -4,7 +4,6 @@ import { prisma } from "../shared/prisma";
 import { logger } from "../shared/logger";
 import { withPipelineRetryPolicy } from "../shared/pipeline-retry-policy";
 import { withVertexTelemetryContext } from "../shared/vertex-telemetry-context";
-import { env } from "../shared/env";
 import { generateContentPlan } from "./vertex";
 import { workerOptions } from "../shared/worker-options";
 import { recordAIUsage } from "../shared/pricing";
@@ -19,27 +18,22 @@ import {
 import { logVertexRuntimeConfig } from "../shared/vertex";
 import { canonicalEvidenceSources } from "../shared/evidence";
 import { validatePlannedClaims, validateEvidencePackage } from "../shared/evidence-validator";
+import { failBlogInput } from "../shared/blog-input";
 
 const log = logger.child({ worker: "planning-worker" });
 
 async function planTopic(payload: PlanningJobPayload) {
   const attempt = await startWorkerAttempt({
     worker: "planning-worker",
-    trendId: payload.trendId,
+    blogInputId: payload.blogInputId,
     input: payload,
   });
 
-  const trend = await prisma.trend.findUnique({ where: { id: payload.trendId } });
-  if (!trend) throw new Error(`Trend ${payload.trendId} not found`);
-  // manuallyApproved lets a human-approved below-threshold trend (see
-  // app/api/trends/[id]/approve) survive this gate instead of being
-  // silently re-rejected right after the dashboard said "queued successfully."
-  if (trend.score < env.RESEARCH_MIN_SCORE_TO_WRITE && !trend.manuallyApproved) {
-    log.info(`Skipping "${trend.topic}" because score ${Math.round(trend.score)} is below ${env.RESEARCH_MIN_SCORE_TO_WRITE}`, {
-      trendId: trend.id,
-      score: trend.score,
-    });
-    const output = { trendId: trend.id, skipped: true, reason: "score_below_write_threshold" };
+  const blogInput = await prisma.blogInput.findUnique({ where: { id: payload.blogInputId } });
+  if (!blogInput) throw new Error(`BlogInput ${payload.blogInputId} not found`);
+  if (blogInput.status === "CANCELLED") {
+    log.info(`Skipping "${blogInput.title}" - the submission was cancelled`, { blogInputId: blogInput.id });
+    const output = { blogInputId: blogInput.id, skipped: true, reason: "submission_cancelled" };
     await passWorkerAttempt({
       workflowRunId: attempt.workflow.id,
       attemptId: attempt.attempt.id,
@@ -50,30 +44,51 @@ async function planTopic(payload: PlanningJobPayload) {
   }
 
   try {
-    const evidenceSources = canonicalEvidenceSources(trend.evidenceArticles);
-    const evidenceGate = validateEvidencePackage(evidenceSources);
-    if (!evidenceGate.ok) {
-      throw new QualityGateError({ stage: "evidence-validator", score: 0, passed: false, reasons: evidenceGate.diagnostics });
+    // Sourced submissions keep the full research-era evidence contract; an
+    // unsourced one is planned from the editor's specification alone (see
+    // BlogInput.evidenceArticles in prisma/schema.prisma).
+    const evidenceSources = canonicalEvidenceSources(blogInput.evidenceArticles);
+    const sourced = evidenceSources.length > 0;
+    if (sourced) {
+      const evidenceGate = validateEvidencePackage(evidenceSources);
+      if (!evidenceGate.ok) {
+        throw new QualityGateError({ stage: "evidence-validator", score: 0, passed: false, reasons: evidenceGate.diagnostics });
+      }
     }
+
     const startedAt = Date.now();
     const { plan, usage, model } = await generateContentPlan(
-      payload.topic,
-      payload.category,
-      payload.score,
-      payload.evidenceSummary,
+      {
+        title: blogInput.title,
+        category: blogInput.category ?? payload.category ?? "General",
+        audience: blogInput.audience,
+        searchIntent: blogInput.searchIntent,
+        tone: blogInput.tone,
+        contentLength: blogInput.contentLength,
+        focusKeyword: blogInput.focusKeyword,
+        keywords: blogInput.keywords,
+        secondaryKeywords: blogInput.secondaryKeywords,
+      },
+      blogInput.evidenceSummary ?? payload.evidenceSummary ?? "",
       evidenceSources
     );
     const plannedClaims = plan.plannedClaims;
-    const claimGate = validatePlannedClaims(plannedClaims, evidenceSources);
-    if (!claimGate.ok) {
-      throw new QualityGateError({ stage: "evidence-validator", score: 0, passed: false, reasons: claimGate.diagnostics });
+    if (sourced) {
+      const claimGate = validatePlannedClaims(plannedClaims, evidenceSources);
+      if (!claimGate.ok) {
+        throw new QualityGateError({ stage: "evidence-validator", score: 0, passed: false, reasons: claimGate.diagnostics });
+      }
+      log.info("Planning evidence contract passed", {
+        blogInputId: payload.blogInputId,
+        plannedClaims: plannedClaims.length,
+        claimsWithEvidence: claimGate.supportedClaims.length,
+        researchSufficiencyScore: claimGate.researchSufficiencyScore,
+      });
+    } else {
+      log.info("Planning ran in unsourced mode - no evidence contract to enforce", {
+        blogInputId: payload.blogInputId,
+      });
     }
-    log.info("Planning evidence contract passed", {
-      trendId: payload.trendId,
-      plannedClaims: plannedClaims.length,
-      claimsWithEvidence: claimGate.supportedClaims.length,
-      researchSufficiencyScore: claimGate.researchSufficiencyScore,
-    });
     const plannedClaimsJson = JSON.parse(JSON.stringify(plannedClaims));
     const latencyMs = Date.now() - startedAt;
     const gate = scoreRequiredFields("planning-worker", [
@@ -87,9 +102,9 @@ async function planTopic(payload: PlanningJobPayload) {
     assertGate(gate);
 
     const saved = await prisma.contentPlan.upsert({
-      where: { trendId: payload.trendId },
+      where: { blogInputId: payload.blogInputId },
       create: {
-        trendId: payload.trendId,
+        blogInputId: payload.blogInputId,
         searchIntent: plan.searchIntent,
         audience: plan.audience,
         angle: plan.angle,
@@ -116,27 +131,28 @@ async function planTopic(payload: PlanningJobPayload) {
       model,
       usage,
       latencyMs,
-      trendId: payload.trendId,
+      blogInputId: payload.blogInputId,
     });
 
     // Deterministic jobId: a retried planning job can never enqueue a second
-    // outline job for the same trend (duplicate-spend guard).
+    // outline job for the same submission (duplicate-spend guard).
     await outlineQueue.add(
       "outline_blog",
-      { trendId: payload.trendId, planId: saved.id },
-      { jobId: JOB_IDS.outline(payload.trendId) }
+      { blogInputId: payload.blogInputId, planId: saved.id },
+      { jobId: JOB_IDS.outline(payload.blogInputId) }
     );
-    await prisma.trend.update({ where: { id: payload.trendId }, data: { status: "PLANNED" } });
+    await prisma.blogInput.update({ where: { id: payload.blogInputId }, data: { status: "PROCESSING" } });
     await passWorkerAttempt({
       workflowRunId: attempt.workflow.id,
       attemptId: attempt.attempt.id,
-      output: { trendId: trend.id, planId: saved.id },
+      output: { blogInputId: blogInput.id, planId: saved.id },
       qualityReport: gate,
       nextStage: "outline-worker",
+      blogInputId: blogInput.id,
     });
 
-    log.info(`Content plan saved for "${trend.topic}"`, { trendId: trend.id, planId: saved.id });
-    return { trendId: trend.id, planId: saved.id };
+    log.info(`Content plan saved for "${blogInput.title}"`, { blogInputId: blogInput.id, planId: saved.id });
+    return { blogInputId: blogInput.id, planId: saved.id };
   } catch (err) {
     await failWorkerAttempt({
       workflowRunId: attempt.workflow.id,
@@ -144,6 +160,7 @@ async function planTopic(payload: PlanningJobPayload) {
       error: err,
       qualityReport: err instanceof QualityGateError ? err.report : undefined,
     });
+    await failBlogInput(payload.blogInputId, err);
     throw err;
   }
 }
