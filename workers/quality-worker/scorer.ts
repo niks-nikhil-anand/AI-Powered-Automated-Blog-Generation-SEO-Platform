@@ -5,6 +5,7 @@ import { recordAIUsage } from "../shared/pricing";
 import { canonicalEvidenceSources } from "../shared/evidence";
 import { runFactCheck, runFullFactCheck, type FactCheckResult, type FullFactCheckDetail, type FullFactCheckResult } from "./factcheck";
 import { judgeBlog, type JudgeResult } from "./judge";
+import { validateArticleContract } from "../shared/article-contract";
 
 const log = logger.child({ worker: "quality-worker" });
 
@@ -16,9 +17,20 @@ type BlogForQuality = {
   excerpt: string | null;
   blogInputId: string | null;
   /** BlogInput.evidenceSummary - see IMPLEMENTATION_PLAN.md Phase 2.1/2.4. */
-  blogInput?: { evidenceSummary: string | null; evidenceArticles?: unknown } | null;
+  blogInput?: {
+    evidenceSummary: string | null;
+    evidenceArticles?: unknown;
+    outlineJson?: unknown;
+    outline?: { sections: unknown } | null;
+    specs?: unknown;
+    contentLength?: number | null;
+    focusKeyword?: string | null;
+    keywords?: string[];
+    secondaryKeywords?: string[];
+  } | null;
   /** ContentPlan fields the LLM judge scores usefulness against (Task 4). */
   plan?: { searchIntent: string; audience: string; angle: string } | null;
+  outline?: { sections: unknown } | null;
   featuredImage?: { width: number | null; height: number | null; size: number; publicUrl: string } | null;
   seo?: {
     metaTitle: string;
@@ -190,9 +202,60 @@ export async function scoreBlogQuality(blog: BlogForQuality) {
   const h3 = headings(content, "### ");
   const keywords = keywordList(blog.seo?.keywords);
   const lowerContent = content.toLowerCase();
-  const missingSections = requiredSections.filter(
-    (section) => !h2.some((heading) => heading.toLowerCase().startsWith(section.toLowerCase()))
-  );
+
+  const outlineSections: string[] = [];
+  const rawSpecs = (blog.blogInput?.specs ?? {}) as Record<string, unknown>;
+  const nestedSpecs = (rawSpecs.specs ?? {}) as Record<string, unknown>;
+  const internalLinks = Array.isArray(rawSpecs.internalLinks)
+    ? rawSpecs.internalLinks
+    : Array.isArray(nestedSpecs.internalLinks)
+      ? nestedSpecs.internalLinks
+      : [];
+  const rawSections =
+    blog.outline?.sections ??
+    blog.blogInput?.outline?.sections ??
+    (blog.blogInput?.outlineJson as { sections?: unknown } | undefined)?.sections ??
+    (rawSpecs.outlineJson as { sections?: unknown } | undefined)?.sections ??
+    (rawSpecs.outline as { sections?: unknown } | undefined)?.sections ??
+    (Array.isArray(rawSpecs.sections) ? rawSpecs.sections : undefined);
+
+  if (Array.isArray(rawSections) && rawSections.length > 0) {
+    rawSections.forEach((s, index) => {
+      if (typeof s === "string" && s.trim()) {
+        if (!(index === 0 && /intro|introduction/i.test(s.trim()))) outlineSections.push(s.trim());
+      } else if (s && typeof s === "object" && "heading" in s && typeof (s as { heading: unknown }).heading === "string") {
+        const heading = (s as { heading: string }).heading.trim();
+        if (!(index === 0 && /intro|introduction/i.test(heading))) outlineSections.push(heading);
+      } else if (s && typeof s === "object" && "title" in s && typeof (s as { title: unknown }).title === "string") {
+        const title = (s as { title: string }).title.trim();
+        if (!(index === 0 && /intro|introduction/i.test(title))) outlineSections.push(title);
+      }
+    });
+  }
+
+  const expectedSections = outlineSections.length > 0 ? outlineSections : requiredSections;
+  const articleContract = validateArticleContract({
+    content,
+    targetWords: blog.blogInput?.contentLength,
+    outlineSections: rawSections,
+    focusKeyword: blog.blogInput?.focusKeyword,
+    primaryKeywords: blog.blogInput?.keywords,
+    secondaryKeywords: blog.blogInput?.secondaryKeywords,
+    metaTitle: blog.seo?.metaTitle,
+    metaDescription: blog.seo?.metaDescription,
+    internalLinks,
+  });
+  const missingSections = expectedSections.filter((section) => {
+    const s = section.toLowerCase().replace(/[^a-z0-9]/g, "");
+    return !h2.some((heading) => {
+      const h = heading.toLowerCase().replace(/[^a-z0-9]/g, "");
+      if (h.includes(s) || s.includes(h) || heading.toLowerCase().startsWith(section.toLowerCase())) return true;
+      if (/call to action|cta/i.test(section) && /call to action|cta|next steps/i.test(heading)) return true;
+      if (/faq|frequently asked/i.test(section) && /faq|frequently asked/i.test(heading)) return true;
+      if (/pros and cons/i.test(section) && (/pros/i.test(heading) || /tradeoff/i.test(heading) || /comparison/i.test(heading))) return true;
+      return false;
+    });
+  });
   const paragraphs = content.split(/\n{2,}/).map((paragraph) => paragraph.trim()).filter(Boolean);
   const longParagraphs = paragraphs.filter((paragraph) => paragraph.split(/\s+/).length > 130);
   const sentences = content.split(/[.!?]+/).map((sentence) => sentence.trim()).filter(Boolean);
@@ -241,8 +304,8 @@ export async function scoreBlogQuality(blog: BlogForQuality) {
       label: "SEO Structure",
       score: clamp(
         (h1.length === 1 ? 2 : 0) +
-          (h2.length >= 10 ? 2 : 0) +
-          (h3.length >= 8 ? 1 : 0) +
+          (h2.length >= (outlineSections.length > 0 ? Math.min(outlineSections.length, 6) : 10) ? 2 : 0) +
+          (h3.length >= (outlineSections.length > 0 ? Math.min(4, outlineSections.length) : 8) ? 1 : 0) +
           (blog.seo?.metaTitle ? 1 : 0) +
           (blog.seo?.metaDescription ? 1 : 0) +
           (blog.slug ? 1 : 0) +
@@ -253,7 +316,11 @@ export async function scoreBlogQuality(blog: BlogForQuality) {
     },
     {
       label: "Content Completeness",
-      score: clamp(10 - missingSections.length * 0.8),
+      score: clamp(
+        outlineSections.length > 0
+          ? 10 - (missingSections.length / Math.max(1, outlineSections.length)) * 10
+          : 10 - missingSections.length * 0.8
+      ),
       maxScore: 10,
       notes: missingSections.length ? [`Missing: ${missingSections.join(", ")}`] : ["All required sections covered"],
     },
@@ -265,7 +332,12 @@ export async function scoreBlogQuality(blog: BlogForQuality) {
     },
     {
       label: "Content Quality",
-      score: clamp((wordCount >= 1200 ? 3 : 0) + (wordCount >= 1800 ? 2 : 0) + (h2.length >= 10 ? 2 : 0) + (!hasDuplicateParagraphs(content) ? 3 : 0)),
+      score: clamp(
+        (wordCount >= 1200 ? 3 : 0) +
+          (wordCount >= 1800 ? 2 : 0) +
+          (h2.length >= (outlineSections.length > 0 ? Math.min(outlineSections.length, 6) : 10) ? 2 : 0) +
+          (!hasDuplicateParagraphs(content) ? 3 : 0)
+      ),
       maxScore: 10,
       notes: [`Word count: ${wordCount}`, hasDuplicateParagraphs(content) ? "Duplicate paragraph risk found" : "No duplicate paragraphs found"],
     },
@@ -347,6 +419,15 @@ export async function scoreBlogQuality(blog: BlogForQuality) {
     },
   ];
 
+  checks.push({
+    label: "Article Contract",
+    score: articleContract.passed ? 10 : 0,
+    maxScore: 10,
+    notes: articleContract.passed
+      ? [`Contract passed: ${articleContract.wordCount} words`]
+      : articleContract.reasons.slice(0, 12),
+  });
+
   // Task 4: the judge appears in the persisted checks for dashboard
   // display, but it does NOT join the flat average - it enters overallScore
   // through the weight below, and only when live (not shadow mode).
@@ -396,12 +477,16 @@ export async function scoreBlogQuality(blog: BlogForQuality) {
     !judgeLive ||
     heuristicChecks.every((check) => check.score >= env.DIMENSION_FLOOR || check.label === "Fact Verification");
 
-  const passed = overallScore >= 90 && factCheckOk && floorsOk;
+  const passed = overallScore >= 90 && factCheckOk && floorsOk && articleContract.passed;
 
   return {
     overallScore,
     passed,
-    recommendation: !factCheckOk ? "Blocked - unverified facts" : recommendation(overallScore),
+    recommendation: !articleContract.passed
+      ? "Failed - article contract violations"
+      : !factCheckOk
+        ? "Blocked - unverified facts"
+        : recommendation(overallScore),
     checks,
     factCheckDetail: factCheckOutcome?.detail ?? null,
     judgeDetail: judge
