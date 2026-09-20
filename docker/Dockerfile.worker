@@ -23,7 +23,7 @@ RUN chmod +x docker/worker-entrypoint.sh
 RUN npx prisma generate
 
 # Overridden per-service by docker-compose.yml (`command:`), e.g.:
-#   node_modules/.bin/tsx workers/research-worker/index.ts
+#   node_modules/.bin/tsx workers/scheduler-worker/index.ts
 #   node_modules/.bin/tsx workers/planning-worker/index.ts
 #   node_modules/.bin/tsx workers/outline-worker/index.ts
 #   node_modules/.bin/tsx workers/writing-worker/index.ts
