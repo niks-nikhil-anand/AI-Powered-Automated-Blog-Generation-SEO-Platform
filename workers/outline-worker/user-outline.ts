@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { normalizeOutlineClaims } from "../shared/evidence-claims";
 import type { OutlineResult } from "./types";
 
 /** Same rule as workers/shared/vertex.ts's slugify, inlined so this module stays free of the Vertex/Redis stack. */
@@ -29,6 +30,7 @@ export const UserOutlineSchema = z.object({
         intent: z.string().optional(),
         bullets: z.array(z.string()).optional(),
         wordTarget: z.number().optional(),
+        claims: z.array(z.unknown()).optional(),
       })
     )
     .min(1),
@@ -67,7 +69,7 @@ export function outlineFromUserInput(
     intent: section.intent || `Cover "${section.heading}" for the reader.`,
     bullets: section.bullets && section.bullets.length > 0 ? section.bullets : [section.heading],
     ...(section.wordTarget !== undefined ? { wordTarget: section.wordTarget } : {}),
-    claims: [],
+    claims: normalizeOutlineClaims(section.claims),
   }));
 
   // May legitimately be empty: OutlineResultSchema's `.min(1)` guards VERTEX

@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
 import { canonicalEvidenceSources } from "../workers/shared/evidence";
+import {
+  derivePlannedClaimsFromEvidence,
+  normalizeOutlineClaims,
+  normalizePlannedClaims,
+  resolveEvidenceBackedPlannedClaims,
+} from "../workers/shared/evidence-claims";
 import { validateEvidencePackage, validatePlannedClaims } from "../workers/shared/evidence-validator";
 import { materializeCitations, groundedCitationCheck, toGroundedSources } from "../workers/writing-worker/citations";
 
@@ -32,6 +38,28 @@ assert.equal(validatePlannedClaims([{ claim: "AI improves productivity", evidenc
 assert.equal(validatePlannedClaims([{ claim: "AI improves productivity", evidenceSourceIds: ["S999"] }], sources).ok, false);
 assert.equal(validatePlannedClaims([{ claim: "openKylin 3.0 deepens AI agent integration.", evidenceSourceIds: ["S1"] }], sources).ok, true);
 assert.equal(validatePlannedClaims([{ claim: "openKylin improves scalability.", evidenceSourceIds: ["S1"] }], sources).ok, false);
+
+const aliasClaims = normalizePlannedClaims(
+  [{ text: "openKylin 3.0 deepens AI agent integration.", sourceIds: ["S1", "S999"] }],
+  sources
+);
+assert.deepEqual(aliasClaims, [
+  { claim: "openKylin 3.0 deepens AI agent integration.", evidenceSourceIds: ["S1"], supportLevel: "direct" },
+]);
+assert.deepEqual(normalizeOutlineClaims([{ claim: "openKylin 3.0 deepens AI agent integration.", sourceIds: ["S1"] }], sources), [
+  { text: "openKylin 3.0 deepens AI agent integration.", evidenceSourceIds: ["S1"] },
+]);
+assert.deepEqual(derivePlannedClaimsFromEvidence(sources), [
+  { claim: "openKylin 3.0 deepens AI agent integration.", evidenceSourceIds: ["S1"], supportLevel: "direct" },
+]);
+const resolved = resolveEvidenceBackedPlannedClaims({
+  modelClaims: [],
+  manualClaims: [],
+  evidenceSources: sources,
+});
+assert.equal(resolved.source, "derived");
+assert.equal(resolved.claims.length, 1);
+assert.equal(validatePlannedClaims(resolved.claims, sources).ok, true);
 
 // Production outline claims are shaped as { text, evidenceSourceIds } and
 // must be normalized before using the shared semantic validator.
