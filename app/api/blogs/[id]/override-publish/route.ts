@@ -57,6 +57,17 @@ export async function POST(request: Request, context: RouteContext) {
     // rewrite instead. A report with `passed: true` skips these checks -
     // that's the normal "publish now" path, not an override.
     if (!report.passed) {
+      const checks = Array.isArray(report.checks) ? report.checks : [];
+      const contractFailed = checks.some((check) => {
+        const row = check as { label?: unknown; score?: unknown };
+        return row.label === "Article Contract" && Number(row.score ?? 0) < 10;
+      });
+      if (contractFailed) {
+        return NextResponse.json(
+          { ok: false, error: "Override isn't available - the article does not satisfy the submitted JSON, word-count, outline, or SEO contract. Regenerate it instead." },
+          { status: 422 }
+        );
+      }
       if (report.recommendation === "Blocked - unverified facts") {
         return NextResponse.json(
           { ok: false, error: "Override isn't available - the fact-check found unsupported claims. This needs a rewrite, not a manual pass." },
