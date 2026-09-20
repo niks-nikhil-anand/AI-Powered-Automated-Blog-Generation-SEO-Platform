@@ -46,6 +46,7 @@ import {
 } from "../shared/recovery";
 import { logVertexRuntimeConfig } from "../shared/vertex";
 import { extractClaimsDeterministic } from "../shared/claims";
+import { failBlogInput } from "../shared/blog-input";
 
 const log = logger.child({ worker: "writing-worker" });
 
@@ -59,10 +60,10 @@ async function getOrCreateCategory(name: string) {
 }
 
 /**
- * excludeBlogId lets a retry for the same trend keep its own slug instead
- * of colliding with itself - without it, upserting on trendId with an
- * unchanged title would find the row's own existing slug via findUnique
- * and bump it to "-1" for no reason.
+ * excludeBlogId lets a retry for the same submission keep its own slug
+ * instead of colliding with itself - without it, upserting on blogInputId
+ * with an unchanged title would find the row's own existing slug via
+ * findUnique and bump it to "-1" for no reason.
  */
 async function uniqueSlug(base: string, excludeBlogId?: string, maxAttempts = 100): Promise<string> {
   const safeBase = base || "untitled";
@@ -114,10 +115,10 @@ function markdownUrls(markdown: string): string[] {
 }
 
 /**
- * At least N citations to the trend's actual evidence URLs, not just any
- * external link (see IMPLEMENTATION_PLAN.md Phase 2.3). Skips the check
- * entirely when the trend has no evidence to cite (e.g. it predates the
- * Phase 2.1 migration) - that's not the draft's fault.
+ * At least N citations to the submission's actual reference URLs, not just
+ * any external link (see IMPLEMENTATION_PLAN.md Phase 2.3). Skips the check
+ * entirely when the submission carries no sources - an unsourced brief has
+ * nothing to cite, and that's the editor's choice, not the draft's fault.
  */
 function citationCheck(markdown: string, evidenceSummary?: string | null): { ok: boolean; found: number; required: number } {
   const evidenceUrls = extractEvidenceUrls(evidenceSummary);
@@ -200,7 +201,7 @@ function writingGate(
  * normal full-draft path.
  */
 async function attemptTargetedRepair(args: {
-  trend: { id: string; evidenceSummary: string | null };
+  blogInput: { id: string; evidenceSummary: string | null };
   topic: string;
   description: string;
   outline: { title: string; plan?: SectionArticleContext["plan"] } | null;
@@ -208,12 +209,12 @@ async function attemptTargetedRepair(args: {
   judgeFixes: { section: string; issue: string; fix: string; priority: "high" | "medium" | "low" }[];
   attempt: { workflow: { id: string }; attempt: { id: string } };
 }): Promise<{ blogId: string; slug: string; score: number } | null> {
-  const { trend, topic, description, outline, groundedSources, judgeFixes, attempt } = args;
+  const { blogInput, topic, description, outline, groundedSources, judgeFixes, attempt } = args;
   if (judgeFixes.length === 0 || judgeFixes.length > 3) return null;
 
-  const blog = await prisma.blog.findUnique({ where: { trendId: trend.id } });
+  const blog = await prisma.blog.findUnique({ where: { blogInputId: blogInput.id } });
   if (!blog) {
-    log.info("Targeted repair skipped - no existing blog row, falling back to full rewrite", { trendId: trend.id });
+    log.info("Targeted repair skipped - no existing blog row, falling back to full rewrite", { blogInputId: blogInput.id });
     return null;
   }
 
@@ -227,7 +228,7 @@ async function attemptTargetedRepair(args: {
   for (const fix of orderedFixes) {
     const sectionIndex = sections.findIndex((section) => section === findSection(sections, fix.section));
     if (sectionIndex === -1) {
-      log.info("Judge fix targets an unmatched section, falling back to full rewrite", { trendId: trend.id, section: fix.section });
+      log.info("Judge fix targets an unmatched section, falling back to full rewrite", { blogInputId: blogInput.id, section: fix.section });
       return null;
     }
     matched.push({ fix, sectionIndex });
@@ -241,7 +242,7 @@ async function attemptTargetedRepair(args: {
     description,
     plan: outline?.plan,
     sources: groundedSources,
-    evidenceSummary: trend.evidenceSummary ?? undefined,
+    evidenceSummary: blogInput.evidenceSummary ?? undefined,
     keywords: [],
   };
 
@@ -281,13 +282,13 @@ async function attemptTargetedRepair(args: {
   let usageRecordId: string | null = null;
   const latencyShare = Math.round((Date.now() - startedAt) / Math.max(1, usageRecords.length));
   for (const record of usageRecords) {
-    const saved = await recordAIUsage({ worker: "writing-worker", model: record.model, usage: record.usage, latencyMs: latencyShare, trendId: trend.id });
+    const saved = await recordAIUsage({ worker: "writing-worker", model: record.model, usage: record.usage, latencyMs: latencyShare, blogInputId: blogInput.id });
     if (!usageRecordId) usageRecordId = saved.id;
   }
 
   const gate = writingGate(
     markdown,
-    trend.evidenceSummary,
+    blogInput.evidenceSummary,
     groundedSources.length > 0 ? groundedCitations(markdown, groundedSources) : undefined
   );
   assertGate(gate);
@@ -306,7 +307,7 @@ async function attemptTargetedRepair(args: {
     "generate_blog_image",
     {
       blogId: blog.id,
-      trendId: trend.id,
+      blogInputId: blogInput.id,
       title: blog.title,
       slug: blog.slug,
       category: "",
@@ -432,7 +433,7 @@ async function repairSectionsWithClaims(args: {
  * applicable - no blog row, too many issues, or an unmappable claim.
  */
 async function attemptClaimRepair(args: {
-  trend: { id: string; evidenceSummary: string | null };
+  blogInput: { id: string; evidenceSummary: string | null };
   topic: string;
   description: string;
   outline: { title: string; plan?: SectionArticleContext["plan"] } | null;
@@ -440,13 +441,13 @@ async function attemptClaimRepair(args: {
   factCheckIssues: { claim: string; verdict: string; note?: string }[];
   attempt: { workflow: { id: string }; attempt: { id: string } };
 }): Promise<{ blogId: string; slug: string; score: number } | null> {
-  const { trend, topic, description, outline, groundedSources, factCheckIssues, attempt } = args;
+  const { blogInput, topic, description, outline, groundedSources, factCheckIssues, attempt } = args;
   if (factCheckIssues.length === 0 || factCheckIssues.length > 10) return null;
   if (!isVertexConfigured) return null;
 
-  const blog = await prisma.blog.findUnique({ where: { trendId: trend.id } });
+  const blog = await prisma.blog.findUnique({ where: { blogInputId: blogInput.id } });
   if (!blog) {
-    log.info("Claim repair skipped - no existing blog row, falling back to full rewrite", { trendId: trend.id });
+    log.info("Claim repair skipped - no existing blog row, falling back to full rewrite", { blogInputId: blogInput.id });
     return null;
   }
 
@@ -458,7 +459,7 @@ async function attemptClaimRepair(args: {
   for (const issue of factCheckIssues) {
     const section = locateClaimSection(blog.content, issue.claim);
     if (section === null && !splitIntoSections(blog.content).some((s) => s.heading === null)) {
-      log.info("Fact-check issue not locatable in the article, falling back to full rewrite", { trendId: trend.id });
+      log.info("Fact-check issue not locatable in the article, falling back to full rewrite", { blogInputId: blogInput.id });
       return null;
     }
     issues.push({
@@ -476,7 +477,7 @@ async function attemptClaimRepair(args: {
     description,
     plan: outline?.plan,
     sources: groundedSources,
-    evidenceSummary: trend.evidenceSummary ?? undefined,
+    evidenceSummary: blogInput.evidenceSummary ?? undefined,
     keywords: [],
   };
   const repair = await repairSectionsWithClaims({ markdown: blog.content, issues, unmarkedClaims: [], context });
@@ -484,7 +485,7 @@ async function attemptClaimRepair(args: {
 
   // Verify the splice before persisting - a repair that didn't actually
   // fix the claims must not burn a QA round-trip to find out.
-  const selfCheck = await selfCheckClaims(repair.markdown, groundedSources, trend.evidenceSummary, trend.id);
+  const selfCheck = await selfCheckClaims(repair.markdown, groundedSources, blogInput.evidenceSummary, blogInput.id);
 
   // Repaired sections carry fresh [S]-markers; untouched sections already
   // hold real links (materialize only touches marker tokens - idempotent).
@@ -494,13 +495,13 @@ async function attemptClaimRepair(args: {
   let usageRecordId: string | null = null;
   const latencyShare = Math.round((Date.now() - startedAt) / Math.max(1, repair.usageRecords.length));
   for (const record of repair.usageRecords) {
-    const saved = await recordAIUsage({ worker: "writing-worker", model: record.model, usage: record.usage, latencyMs: latencyShare, trendId: trend.id });
+    const saved = await recordAIUsage({ worker: "writing-worker", model: record.model, usage: record.usage, latencyMs: latencyShare, blogInputId: blogInput.id });
     if (!usageRecordId) usageRecordId = saved.id;
   }
 
   const gate = writingGate(
     markdown,
-    trend.evidenceSummary,
+    blogInput.evidenceSummary,
     groundedSources.length > 0 ? groundedCitations(markdown, groundedSources) : undefined,
     { selfCheck, unmarkedClaims: [] }
   );
@@ -520,7 +521,7 @@ async function attemptClaimRepair(args: {
     "generate_blog_image",
     {
       blogId: blog.id,
-      trendId: trend.id,
+      blogInputId: blogInput.id,
       title: blog.title,
       slug: blog.slug,
       category: "",
@@ -552,8 +553,8 @@ async function attemptClaimRepair(args: {
   return { blogId: blog.id, slug: blog.slug, score: gate.score };
 }
 
-async function generateBlogForTrend(
-  trendId: string,
+async function generateBlogForInput(
+  blogInputId: string,
   topic: string,
   description: string,
   outlineId?: string,
@@ -561,20 +562,14 @@ async function generateBlogForTrend(
 ) {
   const attempt = await startWorkerAttempt({
     worker: "writing-worker",
-    trendId,
-    input: { trendId, topic, description, outlineId },
+    blogInputId,
+    input: { blogInputId, topic, description, outlineId },
   });
-  const trend = await prisma.trend.findUnique({ where: { id: trendId } });
-  if (!trend) throw new Error(`Trend ${trendId} not found`);
-  // manuallyApproved lets a human-approved below-threshold trend (see
-  // app/api/trends/[id]/approve) survive this gate the same way
-  // planning-worker's and outline-worker's identical checks do.
-  if (trend.score < env.RESEARCH_MIN_SCORE_TO_WRITE && !trend.manuallyApproved) {
-    log.info(`Skipping blog generation for "${trend.topic}" because score ${Math.round(trend.score)} is below ${env.RESEARCH_MIN_SCORE_TO_WRITE}`, {
-      trendId,
-      score: trend.score,
-    });
-    const output = { trendId, skipped: true, reason: "score_below_write_threshold" };
+  const blogInput = await prisma.blogInput.findUnique({ where: { id: blogInputId } });
+  if (!blogInput) throw new Error(`BlogInput ${blogInputId} not found`);
+  if (blogInput.status === "CANCELLED") {
+    log.info(`Skipping blog generation for "${blogInput.title}" - the submission was cancelled`, { blogInputId });
+    const output = { blogInputId, skipped: true, reason: "submission_cancelled" };
     await passWorkerAttempt({
       workflowRunId: attempt.workflow.id,
       attemptId: attempt.attempt.id,
@@ -589,11 +584,11 @@ async function generateBlogForTrend(
         include: { plan: true },
       })
     : await prisma.contentOutline.findUnique({
-        where: { trendId },
+        where: { blogInputId },
         include: { plan: true },
       });
 
-  const evidenceSourcesForContract = canonicalEvidenceSources(trend.evidenceArticles);
+  const evidenceSourcesForContract = canonicalEvidenceSources(blogInput.evidenceArticles);
   const plannedClaimsForContract = outline?.plan ? (outline.plan as { plannedClaims?: unknown }).plannedClaims : undefined;
   const outlineClaimsForContract = Array.isArray(outline?.sections)
     ? (outline.sections as Array<{ claims?: unknown }>).flatMap((section) => Array.isArray(section.claims) ? section.claims : [])
@@ -604,8 +599,8 @@ async function generateBlogForTrend(
     throw new QualityGateError({ stage: "writing-validator", score: 0, passed: false, reasons: ["WRITING_REJECTED: outline contains claims without valid evidence mappings", ...planningContract.diagnostics, ...outlineContract.diagnostics] });
   }
 
-  log.info(`Generating blog for trend "${topic}"`, {
-    trendId,
+  log.info(`Generating blog for blogInput "${topic}"`, {
+    blogInputId,
     outlineId: outline?.id,
     mode: isVertexConfigured ? "vertex" : "fallback",
   });
@@ -628,11 +623,11 @@ async function generateBlogForTrend(
         }
       : undefined;
 
-  // Task 2: when the trend carries full-text evidence (Task 1) and the flag
-  // is on, the draft grounds on [S1]-marked sources and citations are
-  // materialized by code below. Trends without evidenceArticles keep the
-  // legacy evidenceSummary path untouched.
-  const evidenceArticles = canonicalEvidenceSources(trend.evidenceArticles);
+  // Task 2: when the submission carries reference articles and the flag is
+  // on, the draft grounds on [S1]-marked sources and citations are
+  // materialized by code below. Unsourced submissions keep the legacy
+  // evidenceSummary path untouched (and cite nothing when that is empty too).
+  const evidenceArticles = canonicalEvidenceSources(blogInput.evidenceArticles);
   const groundedSources: GroundedSource[] =
     env.GROUNDED_WRITING_ENABLED && evidenceArticles.length > 0 ? toGroundedSources(evidenceArticles) : [];
 
@@ -643,7 +638,7 @@ async function generateBlogForTrend(
     // repair isn't applicable - see attemptTargetedRepair's contract.
     if (env.TARGETED_REPAIR_ENABLED && (recoveryContext?.judgeFixes?.length ?? 0) > 0) {
       const repaired = await attemptTargetedRepair({
-        trend,
+        blogInput,
         topic,
         description,
         outline,
@@ -661,7 +656,7 @@ async function generateBlogForTrend(
     // the self-check module for post-repair verification.
     if (env.WRITING_SELFCHECK_ENABLED && priorFactCheckIssues.length > 0) {
       const repaired = await attemptClaimRepair({
-        trend,
+        blogInput,
         topic,
         description,
         outline,
@@ -684,10 +679,12 @@ async function generateBlogForTrend(
             faqs: outline.faqs,
           }
         : undefined,
-      evidenceSummary: trend.evidenceSummary ?? undefined,
+      evidenceSummary: blogInput.evidenceSummary ?? undefined,
       evidenceSources: groundedSources.length > 0 ? groundedSources : undefined,
       priorAttempt,
-      trendId,
+      blogInputId,
+      tone: blogInput.tone ?? undefined,
+      targetWords: blogInput.contentLength ?? undefined,
     });
     const latencyMs = Date.now() - startedAt;
 
@@ -705,7 +702,7 @@ async function generateBlogForTrend(
       const repairStartedAt = Date.now();
       const markerEnforcementOn = env.WRITING_CLAIM_MARKER_ENFORCEMENT && groundedSources.length > 0;
       if (markerEnforcementOn) unmarkedClaims = findUnmarkedClaims(draft.markdown);
-      selfCheck = await selfCheckClaims(draft.markdown, groundedSources, trend.evidenceSummary, trendId);
+      selfCheck = await selfCheckClaims(draft.markdown, groundedSources, blogInput.evidenceSummary, blogInputId);
 
       const sectionContext: SectionArticleContext = {
         title: draft.title,
@@ -713,8 +710,10 @@ async function generateBlogForTrend(
         description,
         plan: outline?.plan,
         sources: groundedSources,
-        evidenceSummary: trend.evidenceSummary ?? undefined,
+        evidenceSummary: blogInput.evidenceSummary ?? undefined,
         keywords: draft.keywords,
+        tone: blogInput.tone ?? undefined,
+        targetWords: blogInput.contentLength ?? undefined,
       };
 
       // Bounded section-repair loop: regenerate only the sections holding
@@ -735,7 +734,7 @@ async function generateBlogForTrend(
         draft.markdown = repair.markdown;
         if (markerEnforcementOn) unmarkedClaims = findUnmarkedClaims(draft.markdown);
         else unmarkedClaims = [];
-        selfCheck = await selfCheckClaims(draft.markdown, groundedSources, trend.evidenceSummary, trendId);
+        selfCheck = await selfCheckClaims(draft.markdown, groundedSources, blogInput.evidenceSummary, blogInputId);
       }
 
       // Last resort: one qualitative redraft carrying the concrete failing
@@ -743,7 +742,7 @@ async function generateBlogForTrend(
       // how to consume those - see buildPrompt's REWRITE block).
       if (selfCheck && selfCheck.score < SELFCHECK_PASS_SCORE) {
         log.warn("Claim repair insufficient, attempting one qualitative redraft", {
-          trendId,
+          blogInputId,
           selfCheckScore: selfCheck.score,
           issues: selfCheck.issues.length,
         });
@@ -758,15 +757,17 @@ async function generateBlogForTrend(
                 faqs: outline.faqs,
               }
             : undefined,
-          evidenceSummary: trend.evidenceSummary ?? undefined,
+          evidenceSummary: blogInput.evidenceSummary ?? undefined,
           evidenceSources: groundedSources.length > 0 ? groundedSources : undefined,
+          tone: blogInput.tone ?? undefined,
+          targetWords: blogInput.contentLength ?? undefined,
           priorAttempt: {
             score: selfCheck.score,
             reasons: selfCheck.issues
               .slice(0, 10)
               .map((issue) => `${issue.verdict} claim: "${issue.claim}"${issue.note ? ` - ${issue.note}` : ""}`),
           },
-          trendId,
+          blogInputId,
         });
         if (redraft.usageRecords && redraft.usageRecords.length > 0) {
           repairUsageRecords.push(...redraft.usageRecords);
@@ -775,14 +776,14 @@ async function generateBlogForTrend(
         }
         draft.markdown = redraft.markdown;
         if (markerEnforcementOn) unmarkedClaims = findUnmarkedClaims(draft.markdown);
-        selfCheck = await selfCheckClaims(draft.markdown, groundedSources, trend.evidenceSummary, trendId);
+        selfCheck = await selfCheckClaims(draft.markdown, groundedSources, blogInput.evidenceSummary, blogInputId);
       }
 
       // Repair/redraft spend is real spend - record it with wall-clock
       // latency split evenly, the same convention as sectioned drafts.
       const repairLatencyShare = Math.round((Date.now() - repairStartedAt) / Math.max(1, repairUsageRecords.length));
       for (const record of repairUsageRecords) {
-        await recordAIUsage({ worker: "writing-worker", model: record.model, usage: record.usage, latencyMs: repairLatencyShare, trendId });
+        await recordAIUsage({ worker: "writing-worker", model: record.model, usage: record.usage, latencyMs: repairLatencyShare, blogInputId });
       }
     }
 
@@ -799,11 +800,11 @@ async function generateBlogForTrend(
         foreignLinks: materialized.foreignLinks,
       };
       if (materialized.droppedMarkers.length > 0) {
-        log.warn("Draft invented citation markers (stripped)", { trendId, droppedMarkers: materialized.droppedMarkers });
+        log.warn("Draft invented citation markers (stripped)", { blogInputId, droppedMarkers: materialized.droppedMarkers });
       }
       if (materialized.foreignLinks.length > 0) {
         // Soft signal only - logged for calibration, not a gate failure.
-        log.warn("Draft links to non-evidence domains", { trendId, foreignLinks: materialized.foreignLinks });
+        log.warn("Draft links to non-evidence domains", { blogInputId, foreignLinks: materialized.foreignLinks });
       }
     }
 
@@ -821,7 +822,7 @@ async function generateBlogForTrend(
           model: record.model,
           usage: record.usage,
           latencyMs: latencyShare,
-          trendId,
+          blogInputId,
         });
         if (!usageRecordId) usageRecordId = saved.id;
       }
@@ -831,14 +832,14 @@ async function generateBlogForTrend(
         model: draft.model,
         usage: draft.usage,
         latencyMs,
-        trendId,
+        blogInputId,
       });
       usageRecordId = saved.id;
     }
 
     const gate = writingGate(
       draft.markdown,
-      trend.evidenceSummary,
+      blogInput.evidenceSummary,
       groundedSources.length > 0 && citationMeta
         ? { citedMarkers: citationMeta.citedMarkers, sources: groundedSources }
         : undefined,
@@ -846,7 +847,7 @@ async function generateBlogForTrend(
     );
     log.info("Evidence-constrained writing audit", {
       jobId: attempt.attempt.id,
-      trendId,
+      blogInputId,
       researchSources: groundedSources.map((source) => source.id),
       evidenceCount: groundedSources.reduce((count, source) => count + source.evidence.length, 0),
       plannedClaims: outline?.plan && Array.isArray((outline.plan as { plannedClaims?: unknown }).plannedClaims)
@@ -859,13 +860,13 @@ async function generateBlogForTrend(
     });
     assertGate(gate);
     const html = await marked.parse(draft.markdown);
-    // Upsert on trendId instead of always create - a retried write_blog job
-    // for a trend that already has a Blog row (e.g. quality-worker's
+    // Upsert on blogInputId instead of always create - a retried write_blog job
+    // for a blogInput that already has a Blog row (e.g. quality-worker's
     // recovery requeue) updates that row instead of creating a duplicate.
     // See IMPLEMENTATION_PLAN.md Phase 1.4.
-    const existingBlogForTrend = await prisma.blog.findUnique({ where: { trendId }, select: { id: true } });
-    const slug = await uniqueSlug(draft.slug, existingBlogForTrend?.id);
-    const category = await getOrCreateCategory(trend.category || "General");
+    const existingBlogForInput = await prisma.blog.findUnique({ where: { blogInputId }, select: { id: true } });
+    const slug = await uniqueSlug(draft.slug, existingBlogForInput?.id);
+    const category = await getOrCreateCategory(blogInput.category || "General");
     const score = heuristicScore(draft.markdown);
 
     const seoData = {
@@ -886,9 +887,9 @@ async function generateBlogForTrend(
     };
 
     const blog = await prisma.blog.upsert({
-      where: { trendId },
+      where: { blogInputId },
       create: {
-        trendId,
+        blogInputId,
         title: draft.title,
         slug,
         excerpt: draft.excerpt,
@@ -913,14 +914,13 @@ async function generateBlogForTrend(
 
     await attachUsageToBlog(usageRecordId, blog.id);
 
-    await prisma.trend.update({ where: { id: trendId }, data: { status: "PROCESSED" } });
     // Epoch-keyed jobId: a QA-requeued full rewrite re-runs this path with an
     // existing image job - the fresh ID keeps the chain moving (no stall).
     await imageQueue.add(
       "generate_blog_image",
       {
         blogId: blog.id,
-        trendId,
+        blogInputId,
         title: blog.title,
         slug: blog.slug,
         category: category.name,
@@ -962,6 +962,7 @@ async function generateBlogForTrend(
       error: err,
       qualityReport: err instanceof QualityGateError ? err.report : undefined,
     });
+    await failBlogInput(blogInputId, err);
     throw err;
   }
 }
@@ -972,8 +973,8 @@ export function startWritingWorker() {
     async (job) => withVertexTelemetryContext(
       { jobId: String(job.id), queue: QUEUE_NAMES.writing, worker: "writing-worker", pipeline: "content", stage: "writing" },
       () => withPipelineRetryPolicy(async () => {
-      const { trendId, topic, description, outlineId, recoveryContext } = job.data as WritingJobPayload;
-      return generateBlogForTrend(trendId, topic, description, outlineId, recoveryContext);
+      const { blogInputId, topic, description, outlineId, recoveryContext } = job.data as WritingJobPayload;
+      return generateBlogForInput(blogInputId, topic, description, outlineId, recoveryContext);
       })
     ),
     workerOptions(1)
