@@ -10,7 +10,7 @@ interface DashboardPageProps {
   onOpenRunPipeline?: () => void;
 }
 
-type StageKey = "research" | "planning" | "outline" | "writing" | "image" | "quality" | "publish";
+type StageKey = "scheduler" | "planning" | "outline" | "writing" | "image" | "quality" | "publish";
 
 type StageStatus = {
   total: number;
@@ -25,7 +25,7 @@ type StageStatus = {
 };
 
 const emptyStageStatus: Record<StageKey, StageStatus> = {
-  research: { total: 0, active: 0, waiting: 0, delayed: 0, failed: 0, completed: 0, state: "idle", dot: "var(--mut)", anim: "none" },
+  scheduler: { total: 0, active: 0, waiting: 0, delayed: 0, failed: 0, completed: 0, state: "idle", dot: "var(--mut)", anim: "none" },
   planning: { total: 0, active: 0, waiting: 0, delayed: 0, failed: 0, completed: 0, state: "idle", dot: "var(--mut)", anim: "none" },
   outline: { total: 0, active: 0, waiting: 0, delayed: 0, failed: 0, completed: 0, state: "idle", dot: "var(--mut)", anim: "none" },
   writing: { total: 0, active: 0, waiting: 0, delayed: 0, failed: 0, completed: 0, state: "idle", dot: "var(--mut)", anim: "none" },
@@ -150,7 +150,7 @@ export default function ExecutiveDashboard({ onOpenBlogModal, onOpenRunPipeline 
     expectedPublishedByNow: 0,
   });
   const [stageCounts, setStageCounts] = useState({
-    research: 0,
+    scheduler: 0,
     planning: 0,
     outline: 0,
     writing: 0,
@@ -225,7 +225,7 @@ export default function ExecutiveDashboard({ onOpenBlogModal, onOpenRunPipeline 
         dashboardMetrics.todayPublishedCount >= dailyTarget ? "var(--emerald)" : "var(--amber)",
       pct: `${Math.min(100, (dashboardMetrics.todayPublishedCount / dailyTarget) * 100)}%`,
       color: "var(--indigo)",
-      foot: `Goal: ${dailyTarget} blogs / day · 3 research runs`,
+      foot: `Goal: ${dailyTarget} blogs / day`,
     },
     {
       label: "Success Rate",
@@ -270,7 +270,7 @@ export default function ExecutiveDashboard({ onOpenBlogModal, onOpenRunPipeline 
   ];
 
   const stageMeta: { key: StageKey; name: string; rate: string; doneLabel: string; arrow: "block" | "none" }[] = [
-    { key: "research", name: "Research", rate: "topics", doneLabel: "ready", arrow: "block" },
+    { key: "scheduler", name: "Submissions", rate: "queued", doneLabel: "queued", arrow: "block" },
     { key: "planning", name: "Planning", rate: "plans", doneLabel: "planned", arrow: "block" },
     { key: "outline", name: "Outline", rate: "outlines", doneLabel: "outlined", arrow: "block" },
     { key: "writing", name: "Writing", rate: "drafts", doneLabel: "drafted", arrow: "block" },
@@ -327,8 +327,7 @@ export default function ExecutiveDashboard({ onOpenBlogModal, onOpenRunPipeline 
             Executive Dashboard
           </h1>
           <p className="margin-0 text-[12px] text-[var(--mut)] mt-[3px]">
-            Automated blog generation pipeline · {today} · research runs{" "}
-            <span className="font-mono text-[var(--fg2)]">06:30 · 14:00 · 23:30 IST</span>
+            Editor-submitted blog specifications, generated end to end · {today}
           </p>
         </div>
         <div className="flex gap-[7px]">
