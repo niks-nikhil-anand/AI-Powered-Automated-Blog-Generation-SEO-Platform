@@ -28,10 +28,42 @@ export const UserOutlineSchema = z.object({
       z.object({
         heading: z.string().min(1),
         intent: z.string().optional(),
+        description: z.string().optional(),
         bullets: z.array(z.string()).optional(),
         wordTarget: z.number().optional(),
+        targetWords: z.number().optional(),
         claims: z.array(z.unknown()).optional(),
-      })
+        paragraphs: z
+          .array(
+            z
+              .object({
+                heading: z.string().min(1),
+                discuss: z.array(z.string()).optional().default([]),
+                keywords: z.array(z.string()).optional().default([]),
+              })
+              .passthrough()
+          )
+          .optional(),
+        subsections: z
+          .array(
+            z
+              .object({
+                heading: z.string().min(1),
+                discuss: z.array(z.string()).optional().default([]),
+                keywords: z.array(z.string()).optional().default([]),
+              })
+              .passthrough()
+          )
+          .optional(),
+        comparisonTable: z
+          .object({
+            columns: z.array(z.string()),
+            rows: z.array(z.string()),
+            instructions: z.string().optional(),
+          })
+          .passthrough()
+          .optional(),
+      }).passthrough()
     )
     .min(1),
   faqs: z
@@ -42,17 +74,25 @@ export const UserOutlineSchema = z.object({
         // which is what the writing prompt consumes.
         answer: z.string().optional(),
         answerIntent: z.string().optional(),
-      })
+      }).passthrough()
     )
     .optional(),
-});
+}).passthrough();
 
 export type UserOutline = z.infer<typeof UserOutlineSchema>;
 
 export function parseUserOutline(value: unknown): UserOutline | null {
   if (!value || typeof value !== "object") return null;
-  const parsed = UserOutlineSchema.safeParse(value);
-  return parsed.success ? parsed.data : null;
+  const direct = UserOutlineSchema.safeParse(value);
+  if (direct.success) return direct.data;
+  const nested =
+    (value as Record<string, unknown>).outlineJson ??
+    (value as Record<string, unknown>).outline;
+  if (nested && typeof nested === "object") {
+    const nestedParsed = UserOutlineSchema.safeParse(nested);
+    if (nestedParsed.success) return nestedParsed.data;
+  }
+  return null;
 }
 
 /**
@@ -64,21 +104,60 @@ export function outlineFromUserInput(
   userOutline: UserOutline,
   meta: { title: string; metaTitle?: string | null; metaDescription?: string | null; angle: string; slug: string }
 ): OutlineResult {
-  const sections = userOutline.sections.map((section) => ({
-    heading: section.heading,
-    intent: section.intent || `Cover "${section.heading}" for the reader.`,
-    bullets: section.bullets && section.bullets.length > 0 ? section.bullets : [section.heading],
-    ...(section.wordTarget !== undefined ? { wordTarget: section.wordTarget } : {}),
-    claims: normalizeOutlineClaims(section.claims),
-  }));
+  const sections = userOutline.sections.map((section) => {
+    const rawSubsections = section.paragraphs ?? section.subsections ?? [];
+    const subsections = rawSubsections.map((sub) => ({
+      heading: sub.heading,
+      discuss: Array.isArray(sub.discuss) ? sub.discuss.map(String) : [],
+      keywords: Array.isArray(sub.keywords) ? sub.keywords.map(String) : [],
+    }));
+
+    let bullets = section.bullets && section.bullets.length > 0 ? section.bullets : [];
+    if (bullets.length === 0 && subsections.length > 0) {
+      bullets = subsections.map((sub) =>
+        sub.discuss.length > 0 ? `${sub.heading}: ${sub.discuss.join("; ")}` : sub.heading
+      );
+    }
+    if (bullets.length === 0) {
+      bullets = [section.heading];
+    }
+
+    return {
+      heading: section.heading,
+      intent: section.intent || section.description || `Cover "${section.heading}" for the reader.`,
+      bullets,
+      ...(section.wordTarget !== undefined || section.targetWords !== undefined
+        ? { wordTarget: section.wordTarget ?? section.targetWords }
+        : {}),
+      claims: normalizeOutlineClaims(section.claims),
+      subsections: subsections.length > 0 ? subsections : undefined,
+      paragraphs: subsections.length > 0 ? subsections : undefined,
+      comparisonTable: section.comparisonTable,
+    };
+  });
 
   // May legitimately be empty: OutlineResultSchema's `.min(1)` guards VERTEX
   // output, not an editor's deliberate choice. The writing worker's mandatory
   // skeleton emits an FAQs section either way.
-  const faqs = (userOutline.faqs ?? []).map((faq) => ({
+  let faqs = (userOutline.faqs ?? []).map((faq) => ({
     question: faq.question,
     answerIntent: faq.answerIntent || faq.answer || `Answer "${faq.question}" directly and concretely.`,
   }));
+
+  // If user supplied FAQs as an outline section instead of the faqs array, extract them
+  if (faqs.length === 0) {
+    const faqSection = userOutline.sections.find((s) => /faq|frequently asked/i.test(s.heading));
+    const faqSubsections = faqSection?.paragraphs ?? faqSection?.subsections ?? [];
+    if (faqSubsections.length > 0) {
+      faqs = faqSubsections.map((sub) => ({
+        question: sub.heading,
+        answerIntent:
+          Array.isArray(sub.discuss) && sub.discuss.length > 0
+            ? sub.discuss.join(". ")
+            : `Answer "${sub.heading}" directly and concretely.`,
+      }));
+    }
+  }
 
   return {
     title: meta.title,
