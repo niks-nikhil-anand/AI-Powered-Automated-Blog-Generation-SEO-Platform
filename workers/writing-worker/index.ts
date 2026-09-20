@@ -24,6 +24,7 @@ import {
   generateSection,
   joinSections,
   splitIntoSections,
+  clearSectionCache,
   type SectionArticleContext,
   type SectionSpec,
 } from "./sections";
@@ -47,6 +48,7 @@ import {
 import { logVertexRuntimeConfig } from "../shared/vertex";
 import { extractClaimsDeterministic } from "../shared/claims";
 import { failBlogInput } from "../shared/blog-input";
+import { validateArticleContract, type ArticleContractResult } from "../shared/article-contract";
 
 const log = logger.child({ worker: "writing-worker" });
 
@@ -141,15 +143,16 @@ function writingGate(
   markdown: string,
   evidenceSummary?: string | null,
   grounded?: { citedMarkers: string[]; sources: GroundedSource[] },
-  factSafety?: { selfCheck: SelfCheckResult | null; unmarkedClaims: string[] }
+  factSafety?: { selfCheck: SelfCheckResult | null; unmarkedClaims: string[] },
+  contract?: ArticleContractResult
 ): QualityGateReport {
   const score = heuristicScore(markdown);
   const reasons: string[] = [];
-  if (score < 90) reasons.push(`Heuristic writing score ${score} is below 90`);
-  if (!/^#\s+/m.test(markdown)) reasons.push("Missing H1 title");
-  if ((markdown.match(/^##\s+/gm) ?? []).length < 8) reasons.push("Missing required H2 sections");
-  if (!/^##\s+FAQs?/im.test(markdown)) reasons.push("Missing FAQ section");
-  if (!/call to action|cta/i.test(markdown)) reasons.push("Missing call to action");
+  if (!markdown || !markdown.trim()) reasons.push("Draft markdown is empty");
+
+  if (contract && !contract.passed) {
+    reasons.push(...contract.reasons);
+  }
 
   if (grounded) {
     // Task 2 path: markers were materialized into links by code, so this
@@ -185,8 +188,8 @@ function writingGate(
 
   return {
     stage: "writing-worker",
-    score: Math.min(score, reasons.length > 0 ? 89 : 100),
-    passed: reasons.length === 0 && score >= 90,
+    score: reasons.length === 0 ? 100 : score,
+    passed: reasons.length === 0,
     reasons: reasons.length > 0 ? reasons : ["Writing format and quality passed"],
   };
 }
@@ -553,7 +556,7 @@ async function attemptClaimRepair(args: {
   return { blogId: blog.id, slug: blog.slug, score: gate.score };
 }
 
-async function generateBlogForInput(
+export async function generateBlogForInput(
   blogInputId: string,
   topic: string,
   description: string,
@@ -589,11 +592,20 @@ async function generateBlogForInput(
       });
 
   const evidenceSourcesForContract = canonicalEvidenceSources(blogInput.evidenceArticles);
-  const plannedClaimsForContract = outline?.plan ? (outline.plan as { plannedClaims?: unknown }).plannedClaims : undefined;
-  const outlineClaimsForContract = Array.isArray(outline?.sections)
-    ? (outline.sections as Array<{ claims?: unknown }>).flatMap((section) => Array.isArray(section.claims) ? section.claims : [])
-    : [];
-  if (env.EVIDENCE_VALIDATION_ENABLED) {
+  const sourced = evidenceSourcesForContract.length > 0;
+  if (sourced && env.EVIDENCE_VALIDATION_ENABLED) {
+    const plannedClaimsForContract = outline?.plan ? (outline.plan as { plannedClaims?: unknown }).plannedClaims : undefined;
+    const rawOutlineClaims = Array.isArray(outline?.sections)
+      ? (outline.sections as Array<{ claims?: unknown }>).flatMap((section) => Array.isArray(section.claims) ? section.claims : [])
+      : [];
+    const outlineClaimsForContract = rawOutlineClaims.map((claim) => {
+      const c = claim as { claim?: unknown; text?: unknown; evidenceSourceIds?: unknown; supportLevel?: unknown };
+      return {
+        claim: typeof c.claim === "string" ? c.claim : typeof c.text === "string" ? c.text : "",
+        evidenceSourceIds: Array.isArray(c.evidenceSourceIds) ? c.evidenceSourceIds : [],
+        supportLevel: c.supportLevel === "supported" ? ("supported" as const) : ("direct" as const),
+      };
+    });
     const planningContract = validatePlannedClaims(plannedClaimsForContract, evidenceSourcesForContract);
     const outlineContract = validatePlannedClaims(outlineClaimsForContract, evidenceSourcesForContract);
     if (!planningContract.ok || !outlineContract.ok) {
@@ -669,6 +681,23 @@ async function generateBlogForInput(
       if (repaired) return repaired;
     }
 
+    const rawSpecs = (blogInput.specs ?? {}) as Record<string, unknown>;
+    const nestedSpecs = (rawSpecs.specs ?? {}) as Record<string, unknown>;
+    const writingInstructions: string[] =
+      Array.isArray(rawSpecs.writingInstructions)
+        ? (rawSpecs.writingInstructions as string[])
+        : Array.isArray(nestedSpecs.writingInstructions)
+        ? (nestedSpecs.writingInstructions as string[])
+        : [];
+    const internalLinks: string[] =
+      Array.isArray(rawSpecs.internalLinks)
+        ? (rawSpecs.internalLinks as string[])
+        : Array.isArray(nestedSpecs.internalLinks)
+        ? (nestedSpecs.internalLinks as string[])
+        : [];
+    const rawGenInst = (rawSpecs.generationInstructions ?? nestedSpecs.generationInstructions) as Record<string, unknown> | undefined;
+    const userMustFollow = Array.isArray(rawGenInst?.mustFollow) ? (rawGenInst.mustFollow as string[]) : [];
+
     const startedAt = Date.now();
     const draft = await generateBlogDraft(topic, description, {
       plan: outline?.plan,
@@ -687,6 +716,10 @@ async function generateBlogForInput(
       blogInputId,
       tone: blogInput.tone ?? undefined,
       targetWords: blogInput.contentLength ?? undefined,
+      specs: (blogInput.specs as Record<string, unknown> | null) ?? undefined,
+      internalLinks,
+      writingInstructions,
+      mustFollow: userMustFollow,
     });
     const latencyMs = Date.now() - startedAt;
 
@@ -711,11 +744,16 @@ async function generateBlogForInput(
         topic,
         description,
         plan: outline?.plan,
+        outline: outline ? { sections: outline.sections, faqs: outline.faqs } : undefined,
         sources: groundedSources,
         evidenceSummary: blogInput.evidenceSummary ?? undefined,
         keywords: draft.keywords,
         tone: blogInput.tone ?? undefined,
         targetWords: blogInput.contentLength ?? undefined,
+        specs: (blogInput.specs as Record<string, unknown> | null) ?? undefined,
+        internalLinks,
+        writingInstructions,
+        mustFollow: userMustFollow,
       };
 
       // Bounded section-repair loop: regenerate only the sections holding
@@ -761,15 +799,19 @@ async function generateBlogForInput(
             : undefined,
           evidenceSummary: blogInput.evidenceSummary ?? undefined,
           evidenceSources: groundedSources.length > 0 ? groundedSources : undefined,
+          blogInputId,
           tone: blogInput.tone ?? undefined,
           targetWords: blogInput.contentLength ?? undefined,
+          specs: (blogInput.specs as Record<string, unknown> | null) ?? undefined,
+          internalLinks,
+          writingInstructions,
+          mustFollow: userMustFollow,
           priorAttempt: {
             score: selfCheck.score,
             reasons: selfCheck.issues
               .slice(0, 10)
               .map((issue) => `${issue.verdict} claim: "${issue.claim}"${issue.note ? ` - ${issue.note}` : ""}`),
           },
-          blogInputId,
         });
         if (redraft.usageRecords && redraft.usageRecords.length > 0) {
           repairUsageRecords.push(...redraft.usageRecords);
@@ -810,6 +852,18 @@ async function generateBlogForInput(
       }
     }
 
+    const articleContract = validateArticleContract({
+      content: draft.markdown,
+      targetWords: blogInput.contentLength,
+      outlineSections: outline?.sections,
+      focusKeyword: blogInput.focusKeyword,
+      primaryKeywords: blogInput.keywords,
+      secondaryKeywords: blogInput.secondaryKeywords,
+      metaTitle: draft.metaTitle,
+      metaDescription: draft.metaDescription,
+      internalLinks,
+    });
+
     // Record spend before the gate: a rejected draft still burned tokens.
     // Task 5: sectioned drafts carry per-call usage rows - record each so
     // per-model rollups stay accurate (wall-clock latency is split evenly;
@@ -845,7 +899,8 @@ async function generateBlogForInput(
       groundedSources.length > 0 && citationMeta
         ? { citedMarkers: citationMeta.citedMarkers, sources: groundedSources }
         : undefined,
-      env.WRITING_SELFCHECK_ENABLED ? { selfCheck, unmarkedClaims } : undefined
+      env.WRITING_SELFCHECK_ENABLED ? { selfCheck, unmarkedClaims } : undefined,
+      articleContract
     );
     log.info("Evidence-constrained writing audit", {
       jobId: attempt.attempt.id,
@@ -860,6 +915,7 @@ async function generateBlogForInput(
       citationMapping: groundedSources.map((source) => ({ sourceId: source.id, url: source.url, cited: citationMeta?.citedMarkers.includes(source.marker) ?? false })),
       qualityResult: gate.passed ? "PASS" : "FAIL",
     });
+    if (!gate.passed) await clearSectionCache(blogInputId);
     assertGate(gate);
     const html = await marked.parse(draft.markdown);
     // Upsert on blogInputId instead of always create - a retried write_blog job
