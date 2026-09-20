@@ -3,7 +3,7 @@
 import React, { useSyncExternalStore } from "react";
 import { StationClock } from "./StationClock";
 
-/** Default clocks - India is primary since env.TIMEZONE defaults to Asia/Kolkata; the US pair matters because research-worker has a slot named for the US news cycle. */
+/** Default clocks - India is primary since env.TIMEZONE defaults to Asia/Kolkata; the US pair matters for publish slots aimed at the US reading day. */
 export const DEFAULT_CLOCKS = [
   { badge: "IN", label: "India", tz: "Asia/Kolkata", primary: true },
   { badge: "US", label: "US Eastern", tz: "America/New_York", primary: false },
