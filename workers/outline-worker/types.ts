@@ -24,7 +24,14 @@ export const OutlineSectionSchema = z.object({
    */
   wordTarget: z.number().optional(),
   sourceMarkers: z.array(z.string().regex(/^S\d+$/)).optional(),
-  claims: z.array(OutlineClaimSchema).min(1),
+  /**
+   * Required only for SOURCED submissions (the ones carrying reference
+   * articles): outline-worker's evidence gate then insists every section
+   * carries at least one claim mapped to a real source. An unsourced
+   * submission has nothing to map claims to, so an empty array is the
+   * correct answer there and the gate skips the check entirely.
+   */
+  claims: z.array(OutlineClaimSchema).default([]),
 });
 
 export const OutlineFaqSchema = z.object({
