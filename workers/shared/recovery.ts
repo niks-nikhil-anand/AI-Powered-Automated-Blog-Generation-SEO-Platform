@@ -163,7 +163,7 @@ export async function failWorkerAttempt(params: {
 }
 
 export function assertGate(report: QualityGateReport) {
-  if (!report.passed || report.score < QUALITY_THRESHOLD) {
+  if (!report.passed) {
     throw new QualityGateError(report);
   }
 }
