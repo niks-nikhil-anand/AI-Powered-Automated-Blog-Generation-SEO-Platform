@@ -43,8 +43,8 @@ export function Navbar({ onOpenCmdk, onOpenRunPipeline }: NavbarProps) {
     switch (pathname) {
       case "/dashboard/blogs":
         return "Content Pipeline & Blog Management";
-      case "/dashboard/trends":
-        return "Trend Research & Topic Selection";
+      case "/dashboard/blogs/new":
+        return "New Blog Submission";
       case "/dashboard/assets":
         return "Asset Library";
       case "/dashboard/quality":
@@ -120,7 +120,7 @@ export function Navbar({ onOpenCmdk, onOpenRunPipeline }: NavbarProps) {
           <circle cx="11" cy="11" r="7" />
           <path d="M20 20l-3.5-3.5" />
         </svg>
-        <span>Search blogs, trends, jobs…</span>
+        <span>Search blogs, submissions, jobs…</span>
         <span className="ml-auto font-mono text-[10px] font-semibold px-[5px] py-[2px] rounded-[5px] border border-[var(--bd)] bg-[var(--card2)] text-[var(--fg2)]">
           ⌘K
         </span>
