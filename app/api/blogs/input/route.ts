@@ -91,7 +91,7 @@ export async function POST(req: NextRequest) {
       data: {
         title: validated.title,
         slug,
-        category: validated.category,
+        category: validated.category || (body as Record<string, unknown>).category as string || undefined,
         keywords: validated.primaryKeywords,
         secondaryKeywords: validated.secondaryKeywords,
         audience: validated.audience,
@@ -101,12 +101,12 @@ export async function POST(req: NextRequest) {
         focusKeyword: validated.focusKeyword,
         metaTitle: validated.metaTitle,
         metaDescription: validated.metaDescription,
-        outlineJson: validated.outlineJson,
-        evidenceArticles: evidenceArticles.length > 0 ? evidenceArticles : undefined,
+        outlineJson: (validated.outlineJson as any) ?? undefined,
+        evidenceArticles: evidenceArticles.length > 0 ? (evidenceArticles as any) : undefined,
         evidenceSummary,
         priority: validated.priority,
         status: "PENDING",
-        specs: validated,
+        specs: (body as any) ?? validated,
       },
     });
 
