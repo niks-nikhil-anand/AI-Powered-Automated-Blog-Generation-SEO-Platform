@@ -57,11 +57,6 @@ function required(name: string): string | undefined {
   return value && value.length > 0 ? value : undefined;
 }
 
-function numberInRange(name: string, fallback: number, min: number, max: number): number {
-  const value = Number(optional(name, String(fallback)));
-  return Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback;
-}
-
 export const env = {
   DATABASE_URL: process.env.DATABASE_URL ?? "",
 
@@ -114,18 +109,6 @@ export const env = {
   VERTEX_RETRY_BUDGET_MS: Number(optional("VERTEX_RETRY_BUDGET_MS", "600000")),
   VERTEX_BREAKER_COOLDOWN_MS: Number(optional("VERTEX_BREAKER_COOLDOWN_MS", "120000")),
   VERTEX_BREAKER_MAX_COOLDOWN_MS: Number(optional("VERTEX_BREAKER_MAX_COOLDOWN_MS", "900000")),
-
-  // Langfuse is initialized only by workers/vertex-gateway. These values are
-  // kept server-side and must never be exposed through NEXT_PUBLIC_* vars.
-  LANGFUSE_ENABLED: optional("LANGFUSE_ENABLED", "false") === "true",
-  LANGFUSE_PUBLIC_KEY: required("LANGFUSE_PUBLIC_KEY"),
-  LANGFUSE_SECRET_KEY: required("LANGFUSE_SECRET_KEY"),
-  LANGFUSE_BASE_URL: optional("LANGFUSE_BASE_URL", "https://cloud.langfuse.com"),
-  LANGFUSE_ENVIRONMENT: optional("LANGFUSE_ENVIRONMENT", optional("NODE_ENV", "development")),
-  LANGFUSE_RELEASE: required("LANGFUSE_RELEASE"),
-  LANGFUSE_SAMPLE_RATE: numberInRange("LANGFUSE_SAMPLE_RATE", 1, 0, 1),
-  LANGFUSE_CAPTURE_PROMPTS: optional("LANGFUSE_CAPTURE_PROMPTS", "false") === "true",
-  LANGFUSE_CAPTURE_OUTPUTS: optional("LANGFUSE_CAPTURE_OUTPUTS", "false") === "true",
 
   /**
    * Kill switch for real AI hero-image generation in image-worker (see
