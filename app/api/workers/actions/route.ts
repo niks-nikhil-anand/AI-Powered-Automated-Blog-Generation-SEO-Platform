@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
  * Mutations for the Queue & Worker Operations page
  * (docs/workers-page-uiux-plan.md §3.3). All actions are idempotent BullMQ
  * operations over the seven known queues - pause/resume only halts
- * *consumption* (delayed jobs and the research job schedulers still
+ * *consumption* (delayed jobs and the scheduler's cron jobs still
  * enqueue), and retry moves failed jobs back to waiting. The response
  * `detail` string is shown verbatim in the page's notice modal, so it must
  * always describe what actually happened (including "nothing to do").
@@ -32,7 +32,7 @@ export async function POST(req: Request) {
           ok: true,
           affected: allQueues.length,
           detail: pausing
-            ? `Paused all ${allQueues.length} queues - consumption halted; scheduled research jobs will still enqueue.`
+            ? `Paused all ${allQueues.length} queues - consumption halted; scheduled jobs will still enqueue.`
             : `Resumed all ${allQueues.length} queues - workers are consuming again.`,
         });
       }
