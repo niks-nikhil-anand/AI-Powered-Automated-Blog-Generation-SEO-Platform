@@ -17,7 +17,6 @@ export interface BlogItem {
   slug: string;
   cat?: string;
   words?: string;
-  trend?: string;
   quality?: string;
   cost?: string;
   costValue?: number;
