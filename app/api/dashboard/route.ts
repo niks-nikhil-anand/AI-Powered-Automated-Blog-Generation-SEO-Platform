@@ -159,7 +159,8 @@ function outlineMarkdown(outline: {
   return `# ${outline.title}\n\n${outline.metaDescription}\n\n${sectionText}${faqText}`.trim();
 }
 
-function blogStatusLabel(status: string) {
+function blogStatusLabel(status: string, qualityReport?: { passed: boolean } | null) {
+  if (qualityReport && !qualityReport.passed) return "Failed QA";
   if (status === "PUBLISHED") return "Published";
   if (status === "FAILED") return "Failed QA";
   if (status === "PENDING_REVIEW") return "Review";
@@ -377,7 +378,7 @@ export async function GET() {
   }
 
   const blogRows = blogs.map((blog) => {
-    const status = blogStatusLabel(blog.status);
+    const status = blogStatusLabel(blog.status, blog.qualityReport);
     // blog.seo.score starts out as writing-worker's own rough placeholder
     // heuristic (see writing-worker/index.ts) before quality-worker ever
     // runs - falling back to it here made a not-yet-scored blog display an
