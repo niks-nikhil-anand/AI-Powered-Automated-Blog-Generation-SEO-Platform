@@ -14,19 +14,17 @@ import { getRetryAttempts, refreshRetryAttempts } from "@/workers/shared/retry-c
 export const dynamic = "force-dynamic";
 
 /**
- * planning/outline/writing/semantic/judge/writingSections/writingSelfcheck
- * are the stages that actually call an LLM (see the comment in
+ * planning/outline/writing/judge/writingSections/writingSelfcheck are the
+ * stages that actually call an LLM (see the comment in
  * workers/shared/settings.ts) - image/publish have no dashboard-editable
- * model, so there's nothing to expose or accept for them here. "semantic" is
- * research-worker's relevance/dedup pass, "judge" is quality-worker's
- * editorial pass (Task 4), "writingSections" is per-section drafting
- * (Task 5), "writingSelfcheck" the write-time claim check (Task 6).
+ * model, so there's nothing to expose or accept for them here. "judge" is
+ * quality-worker's editorial pass (Task 4), "writingSections" is per-section
+ * drafting (Task 5), "writingSelfcheck" the write-time claim check (Task 6).
  */
 const MODEL_DEFAULTS: Record<keyof typeof MODEL_SETTING_KEYS, string> = {
   planning: env.VERTEX_FLASH,
   outline: env.VERTEX_FLASH,
   writing: env.VERTEX_MODEL,
-  semantic: env.VERTEX_FLASH,
   judge: env.VERTEX_FLASH,
   writingSections: env.VERTEX_FLASH,
   writingSelfcheck: env.VERTEX_FLASH,
@@ -93,7 +91,6 @@ export async function GET() {
       // hardcoded strings before - e.g. claiming Image "draws an SVG locally"
       // while IMAGE_AI_GENERATION_ENABLED defaults true).
       flags: {
-        semanticEnabled: env.RESEARCH_SEMANTIC_ENABLED,
         imageAiEnabled: env.IMAGE_AI_GENERATION_ENABLED,
         judgeEnabled: env.JUDGE_ENABLED,
         sectionedWritingEnabled: env.SECTIONED_WRITING_ENABLED,
