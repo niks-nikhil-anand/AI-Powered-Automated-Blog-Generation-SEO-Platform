@@ -6,7 +6,6 @@ import { QUEUE_NAMES } from "../shared/queues";
 import { acquireModelSlot, modelClassOf, resetBreaker, tripBreaker, waitForBreakerProbe } from "../shared/rate-limit";
 import { VertexCapacityExhaustedError, type VertexRequest, type VertexResponse } from "../shared/vertex-request";
 import { workerOptions } from "../shared/worker-options";
-import { initializeLangfuse, shutdownLangfuse, traceGatewayRequest, traceVertexInvocation } from "./langfuse";
 
 const log = logger.child({ worker: "vertex-gateway" });
 
@@ -109,13 +108,7 @@ async function processRequest(request: VertexRequest): Promise<VertexResponse> {
   for (let attempt = 1; attempt <= env.VERTEX_RETRY_MAX_ATTEMPTS; attempt += 1) {
     await acquireModelSlot(modelClassOf(request.model));
     try {
-      const response = await traceVertexInvocation({
-        request,
-        modelClass,
-        attempt,
-        probe,
-        work: () => execute(request),
-      });
+      const response = await execute(request);
       await resetBreaker(modelClass);
       return response;
     } catch (error) {
@@ -143,7 +136,7 @@ async function processRequest(request: VertexRequest): Promise<VertexResponse> {
 
 async function processGatewayJob(job: Job<VertexRequest>): Promise<VertexResponse> {
   try {
-    return await traceGatewayRequest({ request: job.data, work: () => processRequest(job.data) });
+    return await processRequest(job.data);
   } catch (error) {
     if (error instanceof VertexCapacityExhaustedError) {
       await job.updateData({
@@ -160,7 +153,6 @@ async function processGatewayJob(job: Job<VertexRequest>): Promise<VertexRespons
 }
 
 export function startVertexGateway() {
-  initializeLangfuse();
   const worker = new Worker<VertexRequest, VertexResponse>(
     QUEUE_NAMES.vertex,
     processGatewayJob,
@@ -176,7 +168,6 @@ if (require.main === module) {
   const worker = startVertexGateway();
   const shutdown = async () => {
     await worker.close();
-    await shutdownLangfuse();
     process.exit(0);
   };
   process.on("SIGTERM", () => { void shutdown(); });
