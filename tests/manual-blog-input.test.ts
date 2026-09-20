@@ -22,14 +22,14 @@ assert.equal(blogInputSchema.safeParse({ title: "A perfectly fine title", conten
 assert.equal(blogInputSchema.safeParse({ title: "A perfectly fine title", contentLength: 9000 }).success, false);
 assert.equal(blogInputSchema.safeParse({ title: "A perfectly fine title", tone: "snarky" }).success, false);
 
-// Sources are the switch into grounded mode, so a source without extracted
-// facts must be rejected rather than silently accepted as evidence.
+// Sources are optional context. They can be URL-only now because source
+// validation no longer blocks the pipeline by default.
 assert.equal(
   blogInputSchema.safeParse({
     title: "A perfectly fine title",
     sources: [{ url: "https://example.com", title: "Example", evidence: [] }],
   }).success,
-  false
+  true
 );
 assert.equal(
   blogInputSchema.safeParse({
@@ -45,6 +45,37 @@ assert.equal(
   }).success,
   true
 );
+const stringSources = blogInputSchema.parse({
+  title: "A perfectly fine title",
+  sources: ["https://example.com/reference"],
+});
+assert.equal(stringSources.sources?.[0]?.url, "https://example.com/reference");
+assert.equal(stringSources.sources?.[0]?.title, "example.com");
+assert.ok(stringSources.sources?.[0]?.evidence[0].includes("https://example.com/reference"));
+const markdownSourceUrl = blogInputSchema.parse({
+  title: "A perfectly fine title",
+  sources: [{ url: "[https://example.com/a](https://example.com/a)", title: "Example" }],
+});
+assert.equal(markdownSourceUrl.sources?.[0]?.url, "https://example.com/a");
+assert.deepEqual(markdownSourceUrl.sources?.[0]?.evidence, []);
+const plannedClaimAliases = blogInputSchema.parse({
+  title: "A perfectly fine title",
+  plannedClaims: [{ text: "A directly supported claim.", sourceIds: ["S1"] }],
+  outlineJson: {
+    sections: [
+      {
+        heading: "Evidence",
+        claims: [{ claim: "A directly supported claim.", sourceIds: ["S1"] }],
+      },
+    ],
+  },
+});
+assert.deepEqual(plannedClaimAliases.plannedClaims, [
+  { claim: "A directly supported claim.", evidenceSourceIds: ["S1"], supportLevel: "direct" },
+]);
+assert.deepEqual(plannedClaimAliases.outlineJson?.sections[0].claims, [
+  { text: "A directly supported claim.", evidenceSourceIds: ["S1"] },
+]);
 
 assert.equal(slugifyTitle("How to Master React Hooks: A Complete Guide!"), "how-to-master-react-hooks-a-complete-guide");
 assert.equal(slugifyTitle("  Spaced   Out  "), "spaced-out");
@@ -82,7 +113,13 @@ assert.equal(outline.metaDescription, "Explain hooks through implementation impa
 
 // An editor's `answer` becomes the answerIntent the writing prompt consumes.
 const withFaqs = parseUserOutline({
-  sections: [{ heading: "Setup", bullets: ["Install", "Configure"] }],
+  sections: [
+    {
+      heading: "Setup",
+      bullets: ["Install", "Configure"],
+      claims: [{ claim: "Setup requires installing the package.", sourceIds: ["S1"] }],
+    },
+  ],
   faqs: [{ question: "Is it free?", answer: "Yes, entirely." }],
 })!;
 const faqOutline = outlineFromUserInput(withFaqs, {
@@ -97,6 +134,9 @@ assert.equal(OutlineResultSchema.safeParse(faqOutline).success, true);
 assert.equal(faqOutline.faqs[0].answerIntent, "Yes, entirely.");
 assert.equal(faqOutline.metaTitle, "Custom meta title");
 assert.equal(faqOutline.metaDescription, "Custom meta description");
+assert.deepEqual(faqOutline.sections[0].claims, [
+  { text: "Setup requires installing the package.", evidenceSourceIds: ["S1"] },
+]);
 
 /* ---------------------------------------------------------------- */
 /* Word budget                                                       */
