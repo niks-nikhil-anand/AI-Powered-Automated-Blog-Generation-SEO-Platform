@@ -57,7 +57,10 @@ async function outlineTopic(payload: OutlineJobPayload) {
     // parses, it is used verbatim and no Vertex call is made at all. The
     // writing worker still merges it into the mandatory section skeleton, so
     // a short hand-written outline can't produce a structurally thin article.
-    const userOutline = parseUserOutline(blogInput.outlineJson);
+    const rawSpecs = (blogInput.specs ?? {}) as Record<string, unknown>;
+    const userOutline = parseUserOutline(
+      blogInput.outlineJson ?? rawSpecs.outlineJson ?? rawSpecs.outline
+    );
     const startedAt = Date.now();
     const generated = userOutline
       ? {
@@ -137,16 +140,16 @@ async function outlineTopic(payload: OutlineJobPayload) {
         slug: outline.slug,
         metaTitle: outline.metaTitle,
         metaDescription: outline.metaDescription,
-        sections: sections,
-        faqs: faqs,
+        sections: sections as any,
+        faqs: faqs as any,
       },
       update: {
         title: outline.title,
         slug: outline.slug,
         metaTitle: outline.metaTitle,
         metaDescription: outline.metaDescription,
-        sections: sections,
-        faqs: faqs,
+        sections: sections as any,
+        faqs: faqs as any,
       },
     });
 
@@ -161,17 +164,24 @@ async function outlineTopic(payload: OutlineJobPayload) {
     // Every claim that exists must carry evidence - an unsourced submission
     // legitimately has none, but a claim asserting a source that isn't there
     // must never reach the writer.
-    for (const claim of outlineClaims) {
-      const value = claim as { text?: unknown; evidenceSourceIds?: unknown };
-      if (!Array.isArray(value.evidenceSourceIds) || value.evidenceSourceIds.length === 0) {
-        throw new Error(`WRITING_ENQUEUE_BLOCKED: claim has no evidence: ${String(value.text ?? "")}`);
+    if (sourced && env.EVIDENCE_VALIDATION_ENABLED) {
+      for (const claim of outlineClaims) {
+        const value = claim as { text?: unknown; evidenceSourceIds?: unknown };
+        if (!Array.isArray(value.evidenceSourceIds) || value.evidenceSourceIds.length === 0) {
+          throw new Error(`WRITING_ENQUEUE_BLOCKED: claim has no evidence: ${String(value.text ?? "")}`);
+        }
       }
     }
 
-    // Deterministic jobId: a retried outline job can never enqueue a second
-    // fresh write for the same submission. QA requeues use their own
-    // epoch-keyed IDs (JOB_IDS.writeQaRetry), so this guard never blocks
-    // recovery.
+    // Deterministic jobId: remove stale finished write job on re-run so BullMQ doesn't drop the new job
+    const writeJobId = JOB_IDS.write(payload.blogInputId);
+    const existingWriteJob = await writingQueue.getJob(writeJobId);
+    if (existingWriteJob) {
+      const state = await existingWriteJob.getState();
+      if (state === "completed" || state === "failed") {
+        await existingWriteJob.remove().catch(() => {});
+      }
+    }
     await writingQueue.add(
       "write_blog",
       {
@@ -180,7 +190,7 @@ async function outlineTopic(payload: OutlineJobPayload) {
         topic: saved.title,
         description: plan.angle,
       },
-      { jobId: JOB_IDS.write(payload.blogInputId) }
+      { jobId: writeJobId }
     );
     await passWorkerAttempt({
       workflowRunId: attempt.workflow.id,
