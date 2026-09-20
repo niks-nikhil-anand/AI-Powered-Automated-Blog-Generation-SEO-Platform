@@ -28,12 +28,12 @@ function jsonValue(value: unknown) {
 type AttemptInput = {
   worker: string;
   input: unknown;
-  trendId?: string;
+  blogInputId?: string;
   blogId?: string;
 };
 
 async function getOrCreateWorkflow(input: AttemptInput) {
-  if (!input.blogId && !input.trendId) {
+  if (!input.blogId && !input.blogInputId) {
     return prisma.workflowRun.create({
       data: {
         currentStage: input.worker,
@@ -48,7 +48,7 @@ async function getOrCreateWorkflow(input: AttemptInput) {
         status: { not: "PASSED" },
         OR: [
           ...(input.blogId ? [{ blogId: input.blogId }] : []),
-          ...(input.trendId ? [{ trendId: input.trendId }] : []),
+          ...(input.blogInputId ? [{ blogInputId: input.blogInputId }] : []),
         ],
       },
       orderBy: { createdAt: "desc" },
@@ -60,14 +60,14 @@ async function getOrCreateWorkflow(input: AttemptInput) {
         data: {
           currentStage: input.worker,
           blogId: input.blogId ?? existing.blogId,
-          trendId: input.trendId ?? existing.trendId,
+          blogInputId: input.blogInputId ?? existing.blogInputId,
         },
       });
     }
 
     return tx.workflowRun.create({
       data: {
-        trendId: input.trendId,
+        blogInputId: input.blogInputId,
         blogId: input.blogId,
         currentStage: input.worker,
       },
@@ -111,6 +111,7 @@ export async function passWorkerAttempt(params: {
   qualityReport?: QualityGateReport;
   nextStage?: string;
   blogId?: string;
+  blogInputId?: string;
 }) {
   await prisma.workerAttempt.update({
     where: { id: params.attemptId },
@@ -128,6 +129,7 @@ export async function passWorkerAttempt(params: {
       status: params.nextStage ? "RUNNING" : "PASSED",
       currentStage: params.nextStage ?? "complete",
       blogId: params.blogId,
+      blogInputId: params.blogInputId,
       failureReason: null,
     },
   });
