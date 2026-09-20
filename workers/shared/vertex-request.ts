@@ -2,7 +2,7 @@ import { QueueEvents } from "bullmq";
 import { randomUUID } from "crypto";
 import { createRedisConnection } from "./redis";
 import { QUEUE_NAMES, vertexQueue } from "./queues";
-import type { VertexTelemetryContext } from "./langfuse";
+import type { VertexTelemetryContext } from "./vertex-telemetry";
 import { currentVertexTelemetryContext } from "./vertex-telemetry-context";
 
 export type VertexPriority = "critical" | "deferrable";
@@ -22,7 +22,7 @@ export type VertexRequest = {
   negativePrompt?: string;
   /** Time the request entered vertex_queue, used to measure gateway queue wait. */
   enqueuedAt?: number;
-  /** Non-sensitive request identity, consumed by the gateway's Langfuse trace. */
+  /** Non-sensitive request identity, attached by workers for gateway logs and diagnostics. */
   telemetry?: VertexTelemetryContext;
   /** Structured terminal gateway outcome, written only by the gateway worker. */
   gatewayError?: {
