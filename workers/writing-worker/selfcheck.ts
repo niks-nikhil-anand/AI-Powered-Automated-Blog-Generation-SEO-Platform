@@ -142,7 +142,7 @@ export async function selfCheckClaims(
   markdown: string,
   sources: GroundedSource[],
   evidenceSummary: string | null,
-  trendId?: string
+  blogInputId?: string
 ): Promise<SelfCheckResult | null> {
   if (!isVertexConfigured) return null;
   if (sources.length === 0 && !evidenceSummary?.trim()) return null;
@@ -187,7 +187,7 @@ export async function selfCheckClaims(
         model,
         usage: result.value.usage,
         latencyMs: Math.round((Date.now() - startedAt) / batches.length),
-        trendId,
+        blogInputId,
       }).catch((error) => log.warn("Self-check usage recording failed (non-fatal)", { error: String(error) }));
 
       const parsed = SelfCheckBatchSchema.safeParse(result.value.data);
@@ -217,7 +217,7 @@ export async function selfCheckClaims(
 
     const score = scoreVerifiedClaims(verified);
     log.info("Claim self-check complete", {
-      trendId,
+      blogInputId,
       totalClaims: verified.length,
       issues: issues.length,
       score,
