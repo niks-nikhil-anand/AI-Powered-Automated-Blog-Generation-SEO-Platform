@@ -31,11 +31,15 @@ export async function runQualityCheck(payload: QualityJobPayload) {
     where: { id: payload.blogId },
     // plan rides along for the Task 4 judge (it scores usefulness against
     // the plan's stated intent, not in a vacuum).
-    include: { seo: true, featuredImage: true, blogInput: { include: { plan: true } } },
+    include: { seo: true, featuredImage: true, blogInput: { include: { plan: true, outline: true } } },
   });
   if (!blog) throw new Error(`Blog ${payload.blogId} not found`);
 
-  const report = await scoreBlogQuality({ ...blog, plan: blog.blogInput?.plan ?? null });
+  const report = await scoreBlogQuality({
+    ...blog,
+    plan: blog.blogInput?.plan ?? null,
+    outline: blog.blogInput?.outline ?? null,
+  });
 
   // undefined (not null) for the Task 3/4 detail columns when those paths
   // didn't run - legacy reports must not get their new fields nulled out
@@ -84,8 +88,13 @@ export async function runQualityCheck(payload: QualityJobPayload) {
   if (report.failures.length > 0) {
     gate.reasons.push(...report.failures.slice(0, 10).map((failure) => `${failure.type}: ${failure.claim} - ${failure.reason}`));
   }
+  const articleContractFailed = report.checks.some((check) => check.label === "Article Contract" && check.score < check.maxScore);
 
   if (report.passed) {
+    await prisma.blog.update({
+      where: { id: blog.id },
+      data: { status: "PENDING_REVIEW" },
+    });
     // Deterministic jobId - BullMQ refuses a second enqueue for the same
     // id outright, the idiomatic equivalent of a `publish:{blogId}:{date}`
     // idempotency key without hand-rolling a Redis check.
@@ -185,10 +194,11 @@ export async function runQualityCheck(payload: QualityJobPayload) {
         qualityReport: gate,
       });
     }
-    const permanentlyFailed = !(lastWritingInput && writingAttemptCount < maxWritingAttempts);
+    const recoveryQueued = Boolean(lastWritingInput && writingAttemptCount < maxWritingAttempts);
+    const permanentlyFailed = !recoveryQueued;
     await prisma.blog.update({
       where: { id: blog.id },
-      data: { status: permanentlyFailed ? "FAILED" : "PENDING_REVIEW" },
+      data: { status: permanentlyFailed || articleContractFailed ? "FAILED" : "PENDING_REVIEW" },
     });
     if (permanentlyFailed) {
       await failBlogInput(
