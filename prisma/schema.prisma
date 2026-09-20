@@ -18,12 +18,23 @@ enum BlogStatus {
   ARCHIVED
 }
 
-enum TrendStatus {
-  NEW
-  PLANNED
-  PROCESSED
-  IGNORED
-  REJECTED
+/// Lifecycle of a manually-submitted blog specification. PENDING = queued
+/// but not yet dispatched (the scheduler's backlog), PROCESSING = somewhere
+/// in planning -> outline -> writing -> image -> quality, COMPLETED = the
+/// generated blog published, FAILED = a stage gave up permanently.
+enum BlogInputStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum BlogInputPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
 }
 
 enum JobStatus {
@@ -31,23 +42,6 @@ enum JobStatus {
   PROCESSING
   COMPLETED
   FAILED
-}
-
-enum ManualTopicStatus {
-  PENDING
-  RESEARCHING
-  QUALIFIED
-  SELECTED
-  USED
-  REJECTED
-  ARCHIVED
-}
-
-enum ManualTopicPriority {
-  LOW
-  NORMAL
-  HIGH
-  URGENT
 }
 
 model Job {
@@ -107,11 +101,12 @@ model Blog {
   status          BlogStatus     @default(DRAFT)
   featuredImageId String?
   featuredImage   Asset?         @relation("FeaturedImage", fields: [featuredImageId], references: [id], onDelete: SetNull)
-  /// One blog per trend - lets writing-worker upsert on retry instead of
-  /// creating a duplicate row for the same trend. Nullable because a Blog
-  /// could theoretically be created outside the research->write pipeline.
-  trendId         String?        @unique
-  trend           Trend?         @relation(fields: [trendId], references: [id], onDelete: SetNull)
+  /// One blog per submitted specification - lets writing-worker upsert on
+  /// retry instead of creating a duplicate row for the same BlogInput.
+  /// Nullable because a Blog could theoretically be created outside the
+  /// input -> plan -> outline -> write pipeline.
+  blogInputId     String?        @unique
+  blogInput       BlogInput?     @relation(fields: [blogInputId], references: [id], onDelete: SetNull)
   seo             BlogSEO?
   qualityReport   QualityReport?
   aiUsage         AIUsage[]
@@ -126,8 +121,8 @@ model Blog {
 
 model ContentPlan {
   id                String          @id @default(cuid())
-  trendId           String          @unique
-  trend             Trend           @relation(fields: [trendId], references: [id], onDelete: Cascade)
+  blogInputId       String          @unique
+  blogInput         BlogInput       @relation(fields: [blogInputId], references: [id], onDelete: Cascade)
   searchIntent      String
   audience          String
   angle             String
@@ -140,13 +135,13 @@ model ContentPlan {
   createdAt         DateTime        @default(now())
   updatedAt         DateTime        @updatedAt
 
-  @@index([trendId])
+  @@index([blogInputId])
 }
 
 model ContentOutline {
   id              String      @id @default(cuid())
-  trendId         String      @unique
-  trend           Trend       @relation(fields: [trendId], references: [id], onDelete: Cascade)
+  blogInputId     String      @unique
+  blogInput       BlogInput   @relation(fields: [blogInputId], references: [id], onDelete: Cascade)
   planId          String      @unique
   plan            ContentPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
   title           String
@@ -158,7 +153,7 @@ model ContentOutline {
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
 
-  @@index([trendId])
+  @@index([blogInputId])
   @@index([planId])
 }
 
@@ -193,7 +188,7 @@ model QualityReport {
   publishingReadiness Int
   /// 11th check, added on top of the original ten (see IMPLEMENTATION_PLAN.md
   /// Phase 2.5) - a real Vertex-verified claims check against
-  /// Trend.evidenceSummary, from workers/quality-worker/factcheck.ts. Distinct
+  /// BlogInput.evidenceSummary, from workers/quality-worker/factcheck.ts. Distinct
   /// from aiFactQuality above, which stays a cheap regex heuristic
   /// (AI-disclaimer/placeholder-text patterns) - this is the "actually checks
   /// facts" dimension the plan calls for.
@@ -215,120 +210,77 @@ model QualityReport {
   updatedAt           DateTime @updatedAt
 }
 
-model Trend {
-  id               String          @id @default(cuid())
-  topic            String
-  source           String
-  category         String
-  score            Float
-  status           TrendStatus     @default(NEW)
-  /// Research evidence (source titles/URLs from candidateDescription() in
-  /// research-worker/index.ts), persisted so later stages can cite/fact-check
-  /// against it - previously this only existed as a one-time planningQueue
-  /// job-payload argument and was gone by the time quality-worker ran. See
-  /// IMPLEMENTATION_PLAN.md Phase 2.1.
-  evidenceSummary  String?         @db.Text
-  /// Set by app/api/trends/[id]/approve when a human approves a trend below
-  /// RESEARCH_MIN_SCORE_TO_WRITE. planning-worker/outline-worker/writing-worker
-  /// each independently gate on score >= threshold; this lets a manual
-  /// override actually survive past all three, instead of being silently
-  /// re-rejected one stage after "queued successfully" said it worked.
-  manuallyApproved Boolean         @default(false)
-  /// Extracted full-text evidence articles (ENHANCEMENT_IMPLEMENTATION_PLAN.md
-  /// Task 1). JSON array: [{ url, title, excerpt, fetchedAt, extractor, chars }].
-  /// Null for trends created before this feature or when the fetch failed -
-  /// downstream stages fall back to evidenceSummary in that case.
-  evidenceArticles Json?
-  /// Per-dimension research score breakdown from scoreClusters()
-  /// (workers/research-worker/pipeline/score.ts). JSON:
-  /// { trendDemand, newsFreshness, githubMomentum, multiSourceValidation,
-  ///   semanticRelevance } - persisted so the dashboard trend-detail modal can
-  ///   show the signal-breakdown bars. Null for trends created before this
-  ///   column existed.
-  scoreBreakdown   Json?
-  /// Canonicalized primary source URL (tracking params stripped, trailing
-  /// slash normalized) used by the research engine's topic-memory layer for
-  /// exact URL dedupe. Null for legacy rows / topics with no URL evidence.
-  /// See workers/research-worker/utils/similarity.ts.
-  canonicalUrl     String?
-  /// Stable, URL-independent topic fingerprint (normalized entity + top
-  /// keywords). Two differently-worded write-ups of the same story share it,
-  /// which is what lets topic memory catch "Microsoft launches AI agent for
-  /// automated unit test generation" ~= "Microsoft's AI-powered unit testing
-  /// agent". Null for legacy rows. Indexed for the novelty lookup.
-  topicFingerprint String?
-  /// Gemini text-embedding of title+keywords as a JSON number[] (cosine
-  /// compared in-process - the repo has no pgvector/vector DB today, and the
-  /// trend volume is small enough that an in-memory scan is fine). Null when
-  /// RESEARCH_EMBEDDING_ENABLED is off or the call failed. See
-  /// workers/shared/embeddings.ts.
-  topicEmbedding   Json?
-  /// Full enriched research detail for engine-produced trends (final score
-  /// dimensions, evidence quality, topic quality, novelty verdict, content
-  /// opportunity, query provenance, tier, topic family). Kept separate from
-  /// scoreBreakdown so the dashboard's existing signal bars keep working.
-  /// JSON - see ResearchDetail in workers/research-worker/types.ts. Null for
-  /// legacy-path trends.
-  researchDetail   Json?
-  plan             ContentPlan?
-  outline          ContentOutline?
-  blog             Blog?
-  createdAt        DateTime        @default(now())
-  updatedAt        DateTime        @updatedAt
+/// A manually-submitted blog specification - the single entry point of the
+/// pipeline now that automated trend discovery is gone. The user fills the
+/// form at /dashboard/blogs/new (or POSTs the same JSON to
+/// /api/blogs/input); the row is then dispatched through
+/// planning -> outline -> writing -> image -> quality -> publish.
+model BlogInput {
+  id    String @id @default(cuid())
+  title String @unique
+  slug  String @unique
 
-  @@index([topic, createdAt])
-  @@index([status])
-  @@index([topicFingerprint])
-  @@index([canonicalUrl])
-}
+  /// The raw validated submission, exactly as it arrived. Every column below
+  /// is a denormalized projection of this blob, kept as real columns so the
+  /// dashboard can filter/sort without unpacking JSON on every row.
+  specs Json
 
-model ManualTopic {
-  id                String             @id @default(cuid())
-  title             String
-  description       String?
-  keywords          String[]
+  /// Primary keywords the article must target (BlogInput.focusKeyword is the
+  /// single most important one).
+  keywords          String[] @default([])
+  /// LSI / supporting keywords.
+  secondaryKeywords String[] @default([])
+  audience          String?
+  searchIntent      String?
+  /// professional | casual | technical - drives the writing prompt's voice.
+  tone              String?  @default("professional")
+  /// Target word count for the finished article.
+  contentLength     Int?     @default(2000)
   category          String?
-  priority          ManualTopicPriority @default(NORMAL)
-  status            ManualTopicStatus   @default(PENDING)
-  notes             String?
-  usedAt            DateTime?
-  lastResearchedAt  DateTime?
-  lastResearchScore Float?
-  lastFailureReason String?
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
+
+  /// Optional pre-structured outline supplied by the user:
+  /// { sections: [{ heading, intent, bullets }], faqs: [{ question, answer }] }.
+  /// When present, outline-worker uses it verbatim instead of asking Vertex
+  /// for a structure.
+  outlineJson Json?
+
+  metaTitle       String?
+  metaDescription String?
+  focusKeyword    String?
+
+  /// Optional reference material the user supplied. Same shape as the
+  /// research pipeline's old Trend.evidenceArticles (see
+  /// workers/shared/evidence.ts's EvidenceArticleSchema), so the whole
+  /// grounding/citation/fact-check stack keeps working for sourced inputs.
+  /// Null/empty = "unsourced" mode: the evidence gates are skipped and the
+  /// article is written from the user's specification alone.
+  evidenceArticles Json?
+  /// Human-readable digest of the sources above, used by the legacy
+  /// (non-marker) citation and fact-check paths.
+  evidenceSummary  String? @db.Text
+
+  priority      BlogInputPriority @default(NORMAL)
+  status        BlogInputStatus   @default(PENDING)
+  /// Why the pipeline gave up, when status is FAILED.
+  failureReason String?
+
+  plan         ContentPlan?
+  outline      ContentOutline?
+  blog         Blog?
+  workflowRuns WorkflowRun[]
+
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  /// When the pipeline finished with this row (published or failed).
+  processedAt  DateTime?
+  /// When the row was handed to the planning queue.
+  dispatchedAt DateTime?
 
   @@index([status])
   @@index([priority])
   @@index([createdAt])
-  @@index([usedAt])
-  @@index([lastResearchedAt])
+  @@index([processedAt])
 }
-
-/// One row per research-engine run (docs/RESEARCH_ENGINE_UPGRADE.md Phase 17),
-/// holding the structured run report: raw->selected funnel counts, rejection
-/// buckets, SERP usage, score/novelty/evidence averages, topic-family mix and
-/// the dispatch outcome. Powers observability into "why did we get N topics"
-/// and gives the calibration loop real data. Written only when
-/// RESEARCH_ENGINE_ENABLED is on; legacy runs don't touch this table.
-model ResearchRun {
-  id            String   @id @default(cuid())
-  /// Links back to the WorkflowRun/WorkerAttempt audit trail when available.
-  workflowRunId String?
-  /// Structured report payload - see ResearchRunReport in
-  /// workers/research-worker/types.ts for the exact shape.
-  metrics       Json
-  /// How many topics were actually dispatched to planning this run.
-  selectedCount Int      @default(0)
-  /// Best final score found this run (0 when nothing qualified).
-  bestScore     Float    @default(0)
-  /// Why the dispatch target was/wasn't met ("ok", "insufficient_90plus", ...).
-  outcome       String   @default("ok")
-  createdAt     DateTime @default(now())
-
-  @@index([createdAt])
-}
-
 
 /// Persisted Winston output. Written by the buffered PrismaTransport in
 /// workers/shared/log-transport.ts; pruned to LOG_RETENTION_DAYS.
@@ -341,7 +293,7 @@ model LogEntry {
   stack         String?
   meta          Json?
   workflowRunId String?
-  trendId       String?
+  blogInputId   String?
   blogId        String?
 
   @@index([timestamp])
@@ -351,7 +303,8 @@ model LogEntry {
 
 model WorkflowRun {
   id            String          @id @default(cuid())
-  trendId       String?
+  blogInputId   String?
+  blogInput     BlogInput?      @relation(fields: [blogInputId], references: [id], onDelete: SetNull)
   blogId        String?
   status        String          @default("RUNNING")
   currentStage  String
@@ -359,6 +312,9 @@ model WorkflowRun {
   attempts      WorkerAttempt[]
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
+
+  @@index([blogInputId])
+  @@index([blogId])
 }
 
 model WorkerAttempt {
@@ -384,7 +340,7 @@ model AIUsage {
   model            String
   blogId           String?
   blog             Blog?    @relation(fields: [blogId], references: [id], onDelete: SetNull)
-  trendId          String?
+  blogInputId      String?
   promptTokens     Int
   completionTokens Int
   /**
