@@ -5,7 +5,7 @@ import { ImageJobPayload } from "../shared/queues";
 
 /**
  * ~6-8 art-direction descriptors to rotate across (issue 54: composition
- * diversity). Selection is hashed off the blog/trend id rather than random
+ * diversity). Selection is hashed off the blog/submission id rather than random
  * so a retry on the same job is reproducible, and rather than sequential so
  * two same-day, same-category blogs don't land on the same direction.
  */
