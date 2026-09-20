@@ -5,6 +5,18 @@ export const OutlineClaimSchema = z.object({
   evidenceSourceIds: z.array(z.string().min(1)).min(1),
 });
 
+export const OutlineSubsectionSchema = z.object({
+  heading: z.string().min(1),
+  discuss: z.array(z.string()).optional().default([]),
+  keywords: z.array(z.string()).optional().default([]),
+}).passthrough();
+
+export const OutlineComparisonTableSchema = z.object({
+  columns: z.array(z.string()),
+  rows: z.array(z.string()),
+  instructions: z.string().optional(),
+}).passthrough();
+
 /**
  * Schema-validates generateContentOutline's Vertex response - see
  * IMPLEMENTATION_PLAN.md Phase 2.6. `slug` has no `.min(1)`: vertex.ts
@@ -32,7 +44,10 @@ export const OutlineSectionSchema = z.object({
    * correct answer there and the gate skips the check entirely.
    */
   claims: z.array(OutlineClaimSchema).default([]),
-});
+  subsections: z.array(OutlineSubsectionSchema).optional(),
+  paragraphs: z.array(OutlineSubsectionSchema).optional(),
+  comparisonTable: OutlineComparisonTableSchema.optional(),
+}).passthrough();
 
 export const OutlineFaqSchema = z.object({
   question: z.string().min(1),
