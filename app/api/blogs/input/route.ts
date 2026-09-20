@@ -5,6 +5,26 @@ import { dispatchBlogInput } from "@/workers/shared/daily-target";
 
 export const dynamic = "force-dynamic";
 
+const VALID_SORTS = new Set(["createdAt", "title", "category", "status", "priority"]);
+
+function stageForInput(input: {
+  status: string;
+  plan: { id: string } | null;
+  outline: { id: string } | null;
+  blog: { id: string; status: string; slug: string } | null;
+  workflowRuns: { currentStage: string | null; status: string; failureReason: string | null }[];
+}) {
+  const latestRun = input.workflowRuns[0] ?? null;
+  if (input.status === "PENDING") return "Queued";
+  if (input.status === "CANCELLED") return "Cancelled";
+  if (input.status === "FAILED") return latestRun?.currentStage ?? "Failed";
+  if (input.status === "COMPLETED") return "Published";
+  if (!input.plan) return latestRun?.currentStage ?? "Planning";
+  if (!input.outline) return latestRun?.currentStage ?? "Outline";
+  if (!input.blog) return latestRun?.currentStage ?? "Writing";
+  return latestRun?.currentStage ?? input.blog.status;
+}
+
 /** Unique slug for the BlogInput table (the Blog table has its own guard). */
 async function uniqueInputSlug(base: string): Promise<string> {
   const safeBase = base || "untitled";
@@ -115,27 +135,59 @@ export async function POST(req: NextRequest) {
   }
 }
 
-/** Recent submissions for the list under the form. */
+/** Recent submissions / content plans for the dashboard table. */
 export async function GET(req: NextRequest) {
   const status = req.nextUrl.searchParams.get("status");
-  const take = Math.min(100, Math.max(1, Number(req.nextUrl.searchParams.get("limit") ?? 50)));
+  const category = req.nextUrl.searchParams.get("category");
+  const search = req.nextUrl.searchParams.get("search")?.trim();
+  const paged = req.nextUrl.searchParams.get("paged") === "1";
+  const page = Math.max(1, Number(req.nextUrl.searchParams.get("page") ?? 1));
+  const pageSize = Math.min(100, Math.max(1, Number(req.nextUrl.searchParams.get("pageSize") ?? req.nextUrl.searchParams.get("limit") ?? 50)));
+  const sort = req.nextUrl.searchParams.get("sort") ?? "createdAt";
+  const dir = req.nextUrl.searchParams.get("dir") === "asc" ? "asc" : "desc";
+  const orderField = VALID_SORTS.has(sort) ? sort : "createdAt";
+  const skip = (page - 1) * pageSize;
+  const where = {
+    ...(status && status !== "all" ? { status: status as never } : {}),
+    ...(category && category !== "all"
+      ? category === "Uncategorized"
+        ? { category: null }
+        : { category }
+      : {}),
+    ...(search
+      ? {
+          OR: [
+            { title: { contains: search, mode: "insensitive" as const } },
+            { slug: { contains: search, mode: "insensitive" as const } },
+            { category: { contains: search, mode: "insensitive" as const } },
+          ],
+        }
+      : {}),
+  };
 
-  const blogInputs = await prisma.blogInput.findMany({
-    where: status ? { status: status as never } : {},
-    take,
-    orderBy: { createdAt: "desc" },
-    include: {
-      blog: { select: { id: true, slug: true, status: true } },
-      workflowRuns: {
-        orderBy: { createdAt: "desc" },
-        take: 1,
-        select: { id: true, status: true, currentStage: true, failureReason: true },
+  const [blogInputs, total, statusCounts, categoryRows] = await Promise.all([
+    prisma.blogInput.findMany({
+      where,
+      take: pageSize,
+      skip: paged ? skip : 0,
+      orderBy: { [orderField]: dir },
+      include: {
+        plan: { select: { id: true } },
+        outline: { select: { id: true } },
+        blog: { select: { id: true, slug: true, status: true } },
+        workflowRuns: {
+          orderBy: { createdAt: "desc" },
+          take: 1,
+          select: { id: true, status: true, currentStage: true, failureReason: true },
+        },
       },
-    },
-  });
+    }),
+    prisma.blogInput.count({ where }),
+    prisma.blogInput.groupBy({ by: ["status"], _count: { _all: true } }),
+    prisma.blogInput.findMany({ select: { category: true }, distinct: ["category"], orderBy: { category: "asc" } }),
+  ]);
 
-  return NextResponse.json(
-    blogInputs.map((input) => ({
+  const rows = blogInputs.map((input) => ({
       id: input.id,
       title: input.title,
       slug: input.slug,
@@ -147,8 +199,22 @@ export async function GET(req: NextRequest) {
       dispatchedAt: input.dispatchedAt,
       processedAt: input.processedAt,
       blog: input.blog,
-      currentStage: input.workflowRuns[0]?.currentStage ?? null,
+      planStatus: input.plan ? "READY" : input.status === "PENDING" ? "QUEUED" : "WAITING",
+      outlineStatus: input.outline ? "READY" : input.plan ? "WAITING" : "BLOCKED",
+      blogStatus: input.blog?.status ?? null,
+      currentStage: stageForInput(input),
       workflowStatus: input.workflowRuns[0]?.status ?? null,
-    }))
-  );
+    }));
+
+  if (!paged) return NextResponse.json(rows);
+
+  return NextResponse.json({
+    rows,
+    total,
+    page,
+    pageSize,
+    totalPages: Math.max(1, Math.ceil(total / pageSize)),
+    statuses: statusCounts.map((row) => ({ status: row.status, count: row._count._all })),
+    categories: categoryRows.map((row) => row.category ?? "Uncategorized"),
+  });
 }
