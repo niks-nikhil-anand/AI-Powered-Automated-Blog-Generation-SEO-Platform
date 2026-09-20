@@ -102,8 +102,8 @@ export default function BlogManagementPage() {
     currentPage * BLOGS_PAGE_SIZE
   );
 
-  // Render-time reset (not an effect) - see the comment in the Trends page
-  // for why: setState-in-effect is a lint error in this repo's config.
+  // Render-time reset rather than an effect: setState-in-effect is a lint
+  // error in this repo's config.
   const filterKey = `${activeTab}|${searchQuery}|${categoryFilter}`;
   const [prevFilterKey, setPrevFilterKey] = useState(filterKey);
   if (filterKey !== prevFilterKey) {
@@ -231,9 +231,6 @@ export default function BlogManagementPage() {
                   Words
                 </th>
                 <th className="text-right p-[8px] text-[10px] font-bold tracking-wider uppercase border-b border-[var(--bd)]">
-                  Trend
-                </th>
-                <th className="text-right p-[8px] text-[10px] font-bold tracking-wider uppercase border-b border-[var(--bd)]">
                   Quality
                 </th>
                 <th className="text-right p-[8px] text-[10px] font-bold tracking-wider uppercase border-b border-[var(--bd)]">
@@ -264,9 +261,6 @@ export default function BlogManagementPage() {
                     </td>
                     <td className="p-[9px_8px] text-right">
                       <Skeleton className="h-[12px] w-[40px] ml-auto" />
-                    </td>
-                    <td className="p-[9px_8px] text-right">
-                      <Skeleton className="h-[12px] w-[32px] ml-auto" />
                     </td>
                     <td className="p-[9px_8px] text-right">
                       <Skeleton className="h-[16px] w-[40px] ml-auto rounded-[6px]" />
@@ -314,9 +308,6 @@ export default function BlogManagementPage() {
                   <td className="p-[9px_8px] text-right font-mono text-[11.5px] text-[var(--mut)]">
                     {b.words}
                   </td>
-                  <td className="p-[9px_8px] text-right font-mono font-semibold text-[11.5px] text-[var(--fg2)]">
-                    {b.trend}
-                  </td>
                   <td className="p-[9px_8px] text-right">
                     <span
                       className="font-mono font-bold text-[11px] p-[2px_7px] rounded-[6px]"
@@ -355,7 +346,7 @@ export default function BlogManagementPage() {
                 </tr>
               )) : (
                 <tr>
-                  <td colSpan={10} className="p-[32px_14px] text-center text-[12px] text-[var(--mut)]">
+                  <td colSpan={9} className="p-[32px_14px] text-center text-[12px] text-[var(--mut)]">
                     No articles yet.
                   </td>
                 </tr>
