@@ -113,15 +113,6 @@ services:
       - postgres
     restart: always
 
-  # image-worker calls Imagen via Vertex for the AI hero art (see
-  # workers/image-worker/ai-generator.ts), falling back to the local SVG
-  # generator when IMAGE_AI_GENERATION_ENABLED is false or Vertex is
-  # unreachable, then uploads the result to S3 via the hand-rolled SigV4
-  # signer in workers/image-worker/storage.ts. AWS_ACCESS_KEY/AWS_SECRET_KEY/
-  # AWS_BUCKET_NAME/AWS_CLOUDFRONT_URL match the shorter names
-  # workers/shared/env.ts's optional() fallback chain already reads
-  # (AWS_ACCESS_KEY_ID falls back to AWS_ACCESS_KEY, etc.) - use whichever
-  # pair your .env actually has, this just has to match it.
   image-worker:
     image: auto-blog-worker:latest
     container_name: blog-agent-image-worker
