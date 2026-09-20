@@ -19,7 +19,7 @@ type LogRow = {
   stack: string | null;
   meta: unknown;
   workflowRunId: string | null;
-  trendId: string | null;
+  blogInputId: string | null;
   blogId: string | null;
 };
 
@@ -45,7 +45,7 @@ const LEVEL_STYLES: Record<string, { fg: string; bg: string; bd: string }> = {
 
 /** Every value logger.child({ worker: "..." }) is actually called with, plus the one non-worker writer (manual-override). */
 const WORKERS = [
-  "research-worker",
+  "scheduler-worker",
   "planning-worker",
   "outline-worker",
   "writing-worker",
@@ -503,10 +503,10 @@ export default function SystemLogsPage() {
               </>
             )}
 
-            {(selectedLog.blogId || selectedLog.trendId || selectedLog.workflowRunId) && (
+            {(selectedLog.blogId || selectedLog.blogInputId || selectedLog.workflowRunId) && (
               <div className="flex flex-wrap gap-[14px] text-[10.5px] text-[var(--faint)] font-mono pt-[8px] border-t border-[var(--bd)]">
                 {selectedLog.blogId && <span>blogId: {selectedLog.blogId}</span>}
-                {selectedLog.trendId && <span>trendId: {selectedLog.trendId}</span>}
+                {selectedLog.blogInputId && <span>blogInputId: {selectedLog.blogInputId}</span>}
                 {selectedLog.workflowRunId && <span>workflowRunId: {selectedLog.workflowRunId}</span>}
               </div>
             )}
