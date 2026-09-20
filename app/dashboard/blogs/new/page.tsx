@@ -1,18 +1,32 @@
 "use client";
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import {
-  blogInputSchema,
-  CATEGORIES,
-  PRIORITIES,
-  slugifyTitle,
-  splitKeywords,
-  TONES,
-  type BlogInputFormData,
-} from "./types";
-import { submitBlogInput } from "./actions";
+  ArrowDownUp,
+  CalendarClock,
+  Check,
+  ChevronDown,
+  Filter,
+  FolderKanban,
+  ListFilter,
+  Plus,
+  RefreshCcw,
+  Search,
+  X,
+} from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Pagination,
+  PaginationContent,
+  PaginationEllipsis,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from "@/components/ui/pagination";
+import { getPaginationRange } from "@/lib/utils";
+import { blogInputSchema, CATEGORIES, slugifyTitle } from "./types";
 
 type SubmissionRow = {
   id: string;
@@ -26,87 +40,278 @@ type SubmissionRow = {
   dispatchedAt: string | null;
   processedAt: string | null;
   blog: { id: string; slug: string; status: string } | null;
+  planStatus: string;
+  outlineStatus: string;
+  blogStatus: string | null;
   currentStage: string | null;
 };
 
-const STATUS_STYLE: Record<string, { bg: string; fg: string }> = {
-  PENDING: { bg: "rgba(148,163,184,0.16)", fg: "var(--mut)" },
-  PROCESSING: { bg: "rgba(99,102,241,0.14)", fg: "var(--indigo)" },
-  COMPLETED: { bg: "rgba(16,185,129,0.14)", fg: "var(--emerald)" },
-  FAILED: { bg: "rgba(244,63,94,0.14)", fg: "var(--rose)" },
-  CANCELLED: { bg: "rgba(245,158,11,0.14)", fg: "var(--amber)" },
+type ContentPlanListResponse = {
+  rows: SubmissionRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+  statuses: { status: string; count: number }[];
+  categories: string[];
 };
 
-const OUTLINE_PLACEHOLDER = `{
-  "sections": [
-    {
-      "heading": "What are React Hooks?",
-      "intent": "Define hooks and why they matter",
-      "bullets": ["Introduced in React 16.8", "State in function components"]
-    }
-  ],
-  "faqs": [
-    { "question": "Can I use hooks in class components?", "answer": "No." }
-  ]
+type SortKey = "createdAt" | "title" | "category" | "status" | "priority" | "stage";
+type SortDirection = "asc" | "desc";
+type GroupKey = "none" | "status" | "category" | "priority";
+
+const PAGE_SIZES = [10, 25, 50] as const;
+
+const STATUS_STYLE: Record<string, { bg: string; fg: string; bd: string }> = {
+  PENDING: { bg: "rgba(148,163,184,0.16)", fg: "var(--mut)", bd: "rgba(148,163,184,0.28)" },
+  PROCESSING: { bg: "rgba(99,102,241,0.14)", fg: "var(--indigo)", bd: "rgba(99,102,241,0.26)" },
+  COMPLETED: { bg: "rgba(16,185,129,0.14)", fg: "var(--emerald)", bd: "rgba(16,185,129,0.26)" },
+  FAILED: { bg: "rgba(244,63,94,0.14)", fg: "var(--rose)", bd: "rgba(244,63,94,0.26)" },
+  CANCELLED: { bg: "rgba(245,158,11,0.14)", fg: "var(--amber)", bd: "rgba(245,158,11,0.26)" },
+};
+
+const JSON_PLACEHOLDER = `{
+  "focusKeyword": "ai content planning",
+  "primaryKeywords": ["content plan", "blog workflow"],
+  "audience": "Marketing teams and editors",
+  "searchIntent": "Help readers understand how to plan a blog before writing",
+  "tone": "professional",
+  "contentLength": 1800,
+  "priority": "NORMAL",
+  "outlineJson": {
+    "sections": [
+      { "heading": "Why content plans matter" },
+      { "heading": "How to structure the workflow" }
+    ]
+  }
 }`;
 
-const SOURCES_PLACEHOLDER = `[
-  {
-    "url": "https://example.com/post",
-    "title": "The announcement",
-    "evidence": ["Ships in v4.2", "Cuts cold starts to 80ms"]
-  }
-]`;
-
 const inputClass =
-  "w-full px-[10px] py-[7px] rounded-[8px] border border-[var(--bd)] bg-[var(--card)] text-[12.5px] text-[var(--fg)] outline-none focus:border-[var(--indigo)]";
+  "w-full h-[34px] px-[10px] rounded-[8px] border border-[var(--bd)] bg-[var(--card)] text-[12px] text-[var(--fg)] outline-none transition-colors focus:border-[var(--indigo)]";
 const labelClass = "block text-[11px] font-semibold text-[var(--fg2)] mb-[5px]";
-const hintClass = "text-[10.5px] text-[var(--mut)] mt-[4px]";
 
-function Section({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
+function formatDate(value: string | null): string {
+  if (!value) return "-";
+  return new Date(value).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function statusStyle(status: string) {
+  return STATUS_STYLE[status] ?? STATUS_STYLE.PENDING;
+}
+
+function groupValue(row: SubmissionRow, groupKey: GroupKey): string {
+  if (groupKey === "category") return row.category ?? "Uncategorized";
+  if (groupKey === "priority") return row.priority;
+  if (groupKey === "status") return row.status;
+  return "Content plans";
+}
+
+function SortButton({
+  label,
+  active,
+  direction,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  direction: SortDirection;
+  onClick: () => void;
+}) {
   return (
-    <section className="border border-[var(--bd)] rounded-[12px] bg-[var(--card)] p-[16px]">
-      <h2 className="text-[13px] font-bold text-[var(--fg)]">{title}</h2>
-      {subtitle && <p className="text-[11px] text-[var(--mut)] mt-[3px] mb-[12px]">{subtitle}</p>}
-      <div className={subtitle ? "flex flex-col gap-[12px]" : "flex flex-col gap-[12px] mt-[12px]"}>{children}</div>
-    </section>
+    <button
+      type="button"
+      onClick={onClick}
+      className={`inline-flex items-center gap-[4px] text-left text-[10px] font-bold uppercase tracking-wider transition-colors ${
+        active ? "text-[var(--indigo)]" : "text-[var(--mut)] hover:text-[var(--fg)]"
+      }`}
+    >
+      <span>{label}</span>
+      <ArrowDownUp className={`size-[12px] ${active && direction === "asc" ? "rotate-180" : ""}`} />
+    </button>
+  );
+}
+
+function ContentPlanModal({
+  open,
+  saving,
+  error,
+  onClose,
+  onSubmit,
+}: {
+  open: boolean;
+  saving: boolean;
+  error: string | null;
+  onClose: () => void;
+  onSubmit: (data: { title: string; category: string; json: string }) => void;
+}) {
+  const [title, setTitle] = useState("");
+  const [category, setCategory] = useState("");
+  const [json, setJson] = useState("");
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-[16px]">
+      <div className="w-full max-w-[720px] rounded-[12px] border border-[var(--bd)] bg-[var(--card)] shadow-[0_24px_80px_rgba(15,23,42,0.35)]">
+        <div className="flex items-center justify-between gap-[12px] border-b border-[var(--bd)] p-[14px_16px]">
+          <div>
+            <h2 className="text-[15px] font-bold text-[var(--fg)]">Create content plan</h2>
+            <p className="mt-[2px] text-[11px] text-[var(--mut)]">Save a plan to the backlog without leaving this page.</p>
+          </div>
+          <button
+            type="button"
+            aria-label="Close modal"
+            onClick={onClose}
+            className="inline-flex size-[30px] items-center justify-center rounded-[8px] border border-[var(--bd)] bg-[var(--card)] text-[var(--fg2)] hover:border-[var(--bd2)]"
+          >
+            <X className="size-[15px]" />
+          </button>
+        </div>
+
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            onSubmit({ title, category, json });
+          }}
+          className="flex flex-col gap-[13px] p-[16px]"
+        >
+          <div className="grid grid-cols-1 gap-[12px] md:grid-cols-[1fr_190px]">
+            <div>
+              <label className={labelClass} htmlFor="content-plan-title">
+                Blog title
+              </label>
+              <input
+                id="content-plan-title"
+                required
+                minLength={10}
+                maxLength={200}
+                value={title}
+                onChange={(event) => setTitle(event.target.value)}
+                placeholder="e.g. How to Build a Content Planning Workflow"
+                className={inputClass}
+              />
+            </div>
+            <div>
+              <label className={labelClass} htmlFor="content-plan-category">
+                Category
+              </label>
+              <select
+                id="content-plan-category"
+                value={category}
+                onChange={(event) => setCategory(event.target.value)}
+                className={inputClass}
+              >
+                <option value="">Select category</option>
+                {CATEGORIES.map((item) => (
+                  <option key={item.value} value={item.value}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className={labelClass} htmlFor="content-plan-json">
+              JSON field
+            </label>
+            <textarea
+              id="content-plan-json"
+              rows={13}
+              spellCheck={false}
+              value={json}
+              onChange={(event) => setJson(event.target.value)}
+              placeholder={JSON_PLACEHOLDER}
+              className="w-full resize-y rounded-[8px] border border-[var(--bd)] bg-[var(--card)] p-[10px] font-mono text-[11.5px] leading-[1.55] text-[var(--fg)] outline-none transition-colors focus:border-[var(--indigo)]"
+            />
+            <p className="mt-[5px] text-[10.5px] text-[var(--mut)]">
+              Optional. Add any valid content-plan fields such as keywords, outlineJson, audience, tone, priority, or sources.
+            </p>
+          </div>
+
+          {error && (
+            <div className="rounded-[9px] border border-[rgba(244,63,94,0.28)] bg-[rgba(244,63,94,0.1)] p-[10px] text-[11.5px] text-[var(--rose)]">
+              {error}
+            </div>
+          )}
+
+          <div className="flex items-center justify-end gap-[8px] border-t border-[var(--bd)] pt-[13px]">
+            <button
+              type="button"
+              onClick={onClose}
+              className="h-[32px] rounded-[8px] border border-[var(--bd)] bg-[var(--card)] px-[12px] text-[11.5px] font-semibold text-[var(--fg2)] hover:border-[var(--bd2)]"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={saving}
+              className="inline-flex h-[32px] items-center gap-[6px] rounded-[8px] bg-[var(--indigo)] px-[13px] text-[11.5px] font-semibold text-white disabled:opacity-50"
+            >
+              <Check className="size-[13px]" />
+              {saving ? "Saving..." : "Save plan"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
   );
 }
 
 export default function NewBlogPage() {
-  const router = useRouter();
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [showOutlineInput, setShowOutlineInput] = useState(false);
-  const [showSourcesInput, setShowSourcesInput] = useState(false);
-  const [showJsonPreview, setShowJsonPreview] = useState(false);
-
-  // Raw textarea text is kept separately from the parsed value so a
-  // half-typed JSON object doesn't wipe what the editor already typed.
-  const [outlineText, setOutlineText] = useState("");
-  const [sourcesText, setSourcesText] = useState("");
-  const [keywordsText, setKeywordsText] = useState("");
-  const [secondaryText, setSecondaryText] = useState("");
-  const [slugTouched, setSlugTouched] = useState(false);
-
-  const [form, setForm] = useState<Partial<BlogInputFormData>>({
-    tone: "professional",
-    contentLength: 2000,
-    priority: "NORMAL",
-    startNow: true,
-  });
-
   const [rows, setRows] = useState<SubmissionRow[]>([]);
+  const [totalRows, setTotalRows] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [statusCounts, setStatusCounts] = useState<{ status: string; count: number }[]>([]);
+  const [categories, setCategories] = useState<string[]>([]);
   const [rowsLoading, setRowsLoading] = useState(true);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalVersion, setModalVersion] = useState(0);
+  const [saving, setSaving] = useState(false);
+  const [modalError, setModalError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [groupBy, setGroupBy] = useState<GroupKey>("none");
+  const [sortKey, setSortKey] = useState<SortKey>("createdAt");
+  const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
+  const [pageSize, setPageSize] = useState<(typeof PAGE_SIZES)[number]>(10);
+  const [page, setPage] = useState(1);
 
   const loadRows = useCallback(() => {
-    fetch("/api/blogs/input?limit=25", { cache: "no-store" })
+    const params = new URLSearchParams({
+      paged: "1",
+      page: String(page),
+      pageSize: String(pageSize),
+      sort: sortKey === "stage" ? "createdAt" : sortKey,
+      dir: sortDirection,
+    });
+    if (searchQuery.trim()) params.set("search", searchQuery.trim());
+    if (statusFilter !== "all") params.set("status", statusFilter);
+    if (categoryFilter !== "all") params.set("category", categoryFilter);
+
+    fetch(`/api/blogs/input?${params.toString()}`, { cache: "no-store" })
       .then((res) => res.json())
-      .then((data) => setRows(Array.isArray(data) ? data : []))
-      .catch(() => setRows([]))
+      .then((data: ContentPlanListResponse) => {
+        setRows(Array.isArray(data.rows) ? data.rows : []);
+        setTotalRows(Number.isFinite(data.total) ? data.total : 0);
+        setTotalPages(Number.isFinite(data.totalPages) ? data.totalPages : 1);
+        setStatusCounts(Array.isArray(data.statuses) ? data.statuses : []);
+        setCategories(Array.isArray(data.categories) ? data.categories : []);
+      })
+      .catch(() => {
+        setRows([]);
+        setTotalRows(0);
+        setTotalPages(1);
+      })
       .finally(() => setRowsLoading(false));
-  }, []);
+  }, [categoryFilter, page, pageSize, searchQuery, sortDirection, sortKey, statusFilter]);
 
   useEffect(() => {
     loadRows();
@@ -114,85 +319,92 @@ export default function NewBlogPage() {
     return () => window.clearInterval(timer);
   }, [loadRows]);
 
-  const set = <K extends keyof BlogInputFormData>(key: K, value: BlogInputFormData[K] | undefined) =>
-    setForm((previous) => ({ ...previous, [key]: value }));
+  const currentPage = Math.min(page, totalPages);
+  const pageRows = rows;
 
-  /**
-   * The exact payload that goes to the server - also what "Preview JSON"
-   * shows, so the preview can never drift from what is actually submitted.
-   */
-  const buildPayload = (): { payload: Record<string, unknown>; jsonError: string | null } => {
-    let outlineJson: unknown;
-    let sources: unknown;
-    let jsonError: string | null = null;
+  const filterKey = `${searchQuery}|${statusFilter}|${categoryFilter}|${groupBy}|${sortKey}|${sortDirection}|${pageSize}`;
+  const [previousFilterKey, setPreviousFilterKey] = useState(filterKey);
+  if (filterKey !== previousFilterKey) {
+    setPreviousFilterKey(filterKey);
+    setPage(1);
+  }
 
-    if (showOutlineInput && outlineText.trim()) {
-      try {
-        outlineJson = JSON.parse(outlineText);
-      } catch {
-        jsonError = "Outline JSON is not valid JSON.";
-      }
+  const groupedPageRows = useMemo(() => {
+    if (groupBy === "none") return [{ label: "Content plans", rows: pageRows }];
+    const groups = new Map<string, SubmissionRow[]>();
+    pageRows.forEach((row) => {
+      const label = groupValue(row, groupBy);
+      groups.set(label, [...(groups.get(label) ?? []), row]);
+    });
+    return Array.from(groups.entries()).map(([label, groupRows]) => ({ label, rows: groupRows }));
+  }, [groupBy, pageRows]);
+
+  const setSort = (key: SortKey) => {
+    if (sortKey === key) {
+      setSortDirection((direction) => (direction === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDirection(key === "createdAt" ? "desc" : "asc");
     }
-    if (showSourcesInput && sourcesText.trim()) {
-      try {
-        sources = JSON.parse(sourcesText);
-      } catch {
-        jsonError = jsonError ? `${jsonError} Reference sources JSON is not valid JSON.` : "Reference sources JSON is not valid JSON.";
-      }
-    }
-
-    return {
-      jsonError,
-      payload: {
-        title: form.title ?? "",
-        slug: form.slug || undefined,
-        category: form.category || undefined,
-        focusKeyword: form.focusKeyword || undefined,
-        primaryKeywords: splitKeywords(keywordsText),
-        secondaryKeywords: splitKeywords(secondaryText),
-        metaTitle: form.metaTitle || undefined,
-        metaDescription: form.metaDescription || undefined,
-        audience: form.audience || undefined,
-        searchIntent: form.searchIntent || undefined,
-        tone: form.tone ?? "professional",
-        contentLength: form.contentLength ?? 2000,
-        priority: form.priority ?? "NORMAL",
-        startNow: form.startNow ?? true,
-        ...(outlineJson !== undefined ? { outlineJson } : {}),
-        ...(sources !== undefined ? { sources } : {}),
-      },
-    };
   };
 
-  const handleSubmit = async (event: React.FormEvent) => {
-    event.preventDefault();
-    setError(null);
+  const submitPlan = async ({ title, category, json }: { title: string; category: string; json: string }) => {
+    setModalError(null);
     setNotice(null);
 
-    const { payload, jsonError } = buildPayload();
-    if (jsonError) {
-      setError(jsonError);
-      return;
+    let jsonData: Record<string, unknown> = {};
+    if (json.trim()) {
+      try {
+        const parsed = JSON.parse(json);
+        if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") {
+          setModalError("JSON field must be an object.");
+          return;
+        }
+        jsonData = parsed as Record<string, unknown>;
+      } catch {
+        setModalError("JSON field is not valid JSON.");
+        return;
+      }
     }
+
+    const payload = {
+      tone: "professional",
+      contentLength: 2000,
+      priority: "NORMAL",
+      primaryKeywords: [],
+      secondaryKeywords: [],
+      ...jsonData,
+      title,
+      slug: typeof jsonData.slug === "string" ? jsonData.slug : slugifyTitle(title),
+      category: category || undefined,
+      startNow: false,
+    };
 
     const parsed = blogInputSchema.safeParse(payload);
     if (!parsed.success) {
-      setError(parsed.error.issues.map((issue) => `${issue.path.join(".") || "input"}: ${issue.message}`).join(" · "));
+      setModalError(parsed.error.issues.map((issue) => `${issue.path.join(".") || "input"}: ${issue.message}`).join(" · "));
       return;
     }
 
-    setIsLoading(true);
+    setSaving(true);
     try {
-      const result = await submitBlogInput(parsed.data);
-      if (result.success) {
-        router.push(`/dashboard/blogs/input/${result.id}`);
-      } else {
-        setError(result.error);
+      const response = await fetch("/api/blogs/input", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(parsed.data),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result.success) {
+        setModalError(result.error ?? "Failed to save content plan");
+        return;
       }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to submit blog specification");
+      setModalOpen(false);
+      setNotice(`Content plan saved to BlogInput with status ${result.status}.`);
+      loadRows();
+    } catch (error) {
+      setModalError(error instanceof Error ? error.message : "Failed to save content plan");
     } finally {
-      setIsLoading(false);
+      setSaving(false);
     }
   };
 
@@ -204,466 +416,326 @@ export default function NewBlogPage() {
       body: JSON.stringify({ action }),
     });
     const data = await response.json().catch(() => ({}));
-    if (!response.ok) setNotice(data.error ?? `Failed to ${action} submission`);
+    setNotice(response.ok ? `Plan ${action === "start" ? "started" : `${action}ed`}.` : data.error ?? `Failed to ${action} plan`);
     loadRows();
   };
 
-  const previewJson = JSON.stringify(buildPayload().payload, null, 2);
+  const planStats = {
+    total: totalRows,
+    pending: statusCounts.find((row) => row.status === "PENDING")?.count ?? 0,
+    processing: statusCounts.find((row) => row.status === "PROCESSING")?.count ?? 0,
+    failed: statusCounts.find((row) => row.status === "FAILED")?.count ?? 0,
+  };
+  const statuses = statusCounts.map((row) => row.status).sort();
 
   return (
-    <div className="flex flex-col gap-[16px] max-w-[1100px]">
-      <header>
-        <h1 className="text-[18px] font-bold tracking-tight text-[var(--fg)]">New blog submission</h1>
-        <p className="text-[11.5px] text-[var(--mut)] mt-[3px]">
-          Describe the article you want. The pipeline plans it, outlines it, writes it, illustrates it, scores it, and
-          publishes it.
-        </p>
-      </header>
-
-      <form onSubmit={handleSubmit} className="flex flex-col gap-[14px]">
-        <Section title="Basic info">
-          <div>
-            <label className={labelClass} htmlFor="blog-title">
-              Title <span className="text-[var(--rose)]">*</span>
-            </label>
-            <input
-              id="blog-title"
-              type="text"
-              required
-              minLength={10}
-              maxLength={200}
-              placeholder="e.g. How to Master React Hooks: A Complete Guide"
-              value={form.title ?? ""}
-              onChange={(event) => {
-                set("title", event.target.value);
-                if (!slugTouched) set("slug", slugifyTitle(event.target.value));
-              }}
-              className={inputClass}
-            />
-            <p className={hintClass}>10-200 characters. Must be unique across submissions.</p>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-[12px]">
-            <div>
-              <label className={labelClass} htmlFor="blog-slug">
-                Slug
-              </label>
-              <input
-                id="blog-slug"
-                type="text"
-                placeholder="auto-generated from title"
-                value={form.slug ?? ""}
-                onChange={(event) => {
-                  setSlugTouched(true);
-                  set("slug", event.target.value);
-                }}
-                className={inputClass}
-              />
-            </div>
-            <div>
-              <label className={labelClass} htmlFor="blog-category">
-                Category
-              </label>
-              <select
-                id="blog-category"
-                value={form.category ?? ""}
-                onChange={(event) => set("category", event.target.value || undefined)}
-                className={inputClass}
-              >
-                <option value="">Select category</option>
-                {CATEGORIES.map((category) => (
-                  <option key={category.value} value={category.value}>
-                    {category.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-        </Section>
-
-        <Section title="SEO & keywords" subtitle="Every keyword listed here must appear verbatim in the finished article.">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-[12px]">
-            <div>
-              <label className={labelClass} htmlFor="blog-focus">
-                Focus keyword
-              </label>
-              <input
-                id="blog-focus"
-                type="text"
-                placeholder="Main keyword to target"
-                value={form.focusKeyword ?? ""}
-                onChange={(event) => set("focusKeyword", event.target.value)}
-                className={inputClass}
-              />
-              <p className={hintClass}>Becomes the content plan&apos;s primary keyword.</p>
-            </div>
-            <div>
-              <label className={labelClass} htmlFor="blog-keywords">
-                Primary keywords
-              </label>
-              <input
-                id="blog-keywords"
-                type="text"
-                placeholder="keyword one, keyword two, keyword three"
-                value={keywordsText}
-                onChange={(event) => setKeywordsText(event.target.value)}
-                className={inputClass}
-              />
-              <p className={hintClass}>Comma-separated.</p>
-            </div>
-          </div>
-
-          <div>
-            <label className={labelClass} htmlFor="blog-secondary">
-              Secondary keywords
-            </label>
-            <input
-              id="blog-secondary"
-              type="text"
-              placeholder="supporting phrases, LSI terms"
-              value={secondaryText}
-              onChange={(event) => setSecondaryText(event.target.value)}
-              className={inputClass}
-            />
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-[12px]">
-            <div>
-              <label className={labelClass} htmlFor="blog-metatitle">
-                Meta title
-              </label>
-              <input
-                id="blog-metatitle"
-                type="text"
-                maxLength={60}
-                value={form.metaTitle ?? ""}
-                onChange={(event) => set("metaTitle", event.target.value)}
-                className={inputClass}
-              />
-              <p className={hintClass}>{(form.metaTitle ?? "").length}/60</p>
-            </div>
-            <div>
-              <label className={labelClass} htmlFor="blog-metadesc">
-                Meta description
-              </label>
-              <textarea
-                id="blog-metadesc"
-                maxLength={160}
-                rows={2}
-                value={form.metaDescription ?? ""}
-                onChange={(event) => set("metaDescription", event.target.value)}
-                className={inputClass}
-              />
-              <p className={hintClass}>{(form.metaDescription ?? "").length}/160</p>
-            </div>
-          </div>
-        </Section>
-
-        <Section title="Content specifications">
-          <div>
-            <label className={labelClass} htmlFor="blog-audience">
-              Target audience
-            </label>
-            <input
-              id="blog-audience"
-              type="text"
-              placeholder="e.g. Junior developers, CTOs, engineering managers"
-              value={form.audience ?? ""}
-              onChange={(event) => set("audience", event.target.value)}
-              className={inputClass}
-            />
-          </div>
-
-          <div>
-            <label className={labelClass} htmlFor="blog-intent">
-              Search intent
-            </label>
-            <textarea
-              id="blog-intent"
-              rows={3}
-              placeholder="What problem does this solve? What should readers walk away knowing?"
-              value={form.searchIntent ?? ""}
-              onChange={(event) => set("searchIntent", event.target.value)}
-              className={inputClass}
-            />
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-[12px]">
-            <div>
-              <span className={labelClass}>Tone</span>
-              <div className="flex gap-[14px] mt-[6px]">
-                {TONES.map((tone) => (
-                  <label key={tone} className="flex items-center gap-[6px] text-[12px] text-[var(--fg2)]">
-                    <input
-                      type="radio"
-                      name="tone"
-                      value={tone}
-                      checked={(form.tone ?? "professional") === tone}
-                      onChange={() => set("tone", tone)}
-                    />
-                    {tone.charAt(0).toUpperCase() + tone.slice(1)}
-                  </label>
-                ))}
-              </div>
-            </div>
-            <div>
-              <label className={labelClass} htmlFor="blog-length">
-                Target word count
-              </label>
-              <input
-                id="blog-length"
-                type="number"
-                min={500}
-                max={5000}
-                step={100}
-                value={form.contentLength ?? 2000}
-                onChange={(event) => set("contentLength", Number(event.target.value))}
-                className={inputClass}
-              />
-              <p className={hintClass}>500-5000. Recommended: 1500-2500.</p>
-            </div>
-          </div>
-        </Section>
-
-        <Section
-          title="Optional: pre-structured outline"
-          subtitle="Supplied outlines are used verbatim - no outline is generated. Only section headings are required."
-        >
-          <label className="flex items-center gap-[7px] text-[12px] text-[var(--fg2)]">
-            <input
-              type="checkbox"
-              checked={showOutlineInput}
-              onChange={(event) => setShowOutlineInput(event.target.checked)}
-            />
-            Provide a custom outline (JSON)
-          </label>
-          {showOutlineInput && (
-            <textarea
-              rows={12}
-              spellCheck={false}
-              placeholder={OUTLINE_PLACEHOLDER}
-              value={outlineText}
-              onChange={(event) => setOutlineText(event.target.value)}
-              className={`${inputClass} font-mono text-[11.5px]`}
-            />
-          )}
-        </Section>
-
-        <Section
-          title="Optional: reference sources"
-          subtitle="Supplying sources switches the pipeline into grounded mode: every factual claim must map to one of them, the draft cites them inline, and QA fact-checks against them."
-        >
-          <label className="flex items-center gap-[7px] text-[12px] text-[var(--fg2)]">
-            <input
-              type="checkbox"
-              checked={showSourcesInput}
-              onChange={(event) => setShowSourcesInput(event.target.checked)}
-            />
-            Provide reference sources (JSON)
-          </label>
-          {showSourcesInput && (
-            <>
-              <textarea
-                rows={10}
-                spellCheck={false}
-                placeholder={SOURCES_PLACEHOLDER}
-                value={sourcesText}
-                onChange={(event) => setSourcesText(event.target.value)}
-                className={`${inputClass} font-mono text-[11.5px]`}
-              />
-              <p className={hintClass}>
-                Each source needs a <code>url</code>, a <code>title</code> and at least one atomic fact in{" "}
-                <code>evidence</code>. A title and URL on their own do not count as evidence.
-              </p>
-            </>
-          )}
-        </Section>
-
-        <Section title="Scheduling">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-[12px]">
-            <div>
-              <label className={labelClass} htmlFor="blog-priority">
-                Backlog priority
-              </label>
-              <select
-                id="blog-priority"
-                value={form.priority ?? "NORMAL"}
-                onChange={(event) => set("priority", event.target.value as BlogInputFormData["priority"])}
-                className={inputClass}
-              >
-                {PRIORITIES.map((priority) => (
-                  <option key={priority} value={priority}>
-                    {priority.charAt(0) + priority.slice(1).toLowerCase()}
-                  </option>
-                ))}
-              </select>
-              <p className={hintClass}>Highest priority drains from the backlog first.</p>
-            </div>
-            <div>
-              <span className={labelClass}>When to run</span>
-              <div className="flex flex-col gap-[6px] mt-[6px]">
-                <label className="flex items-center gap-[6px] text-[12px] text-[var(--fg2)]">
-                  <input
-                    type="radio"
-                    name="startNow"
-                    checked={form.startNow !== false}
-                    onChange={() => set("startNow", true)}
-                  />
-                  Start now
-                </label>
-                <label className="flex items-center gap-[6px] text-[12px] text-[var(--fg2)]">
-                  <input
-                    type="radio"
-                    name="startNow"
-                    checked={form.startNow === false}
-                    onChange={() => set("startNow", false)}
-                  />
-                  Queue for the next publish slot
-                </label>
-              </div>
-            </div>
-          </div>
-        </Section>
-
-        {error && (
-          <div className="p-[12px] rounded-[10px] border border-[rgba(244,63,94,0.3)] bg-[rgba(244,63,94,0.10)] text-[12px] text-[var(--rose)]">
-            {error}
-          </div>
-        )}
-
-        <div className="flex flex-wrap gap-[10px] items-center">
-          <button
-            type="button"
-            onClick={() => setShowJsonPreview((previous) => !previous)}
-            className="px-[14px] py-[8px] rounded-[9px] border border-[var(--bd)] bg-[var(--card)] text-[12px] font-semibold text-[var(--fg2)] hover:bg-[var(--card2)]"
-          >
-            {showJsonPreview ? "Hide JSON" : "Preview JSON"}
-          </button>
-          <button
-            type="submit"
-            disabled={isLoading}
-            className="px-[18px] py-[8px] rounded-[9px] bg-[var(--indigo)] text-white text-[12px] font-semibold disabled:opacity-50"
-          >
-            {isLoading ? "Submitting…" : "Submit for processing"}
-          </button>
+    <div className="flex max-w-[1180px] flex-col gap-[13px]">
+      <div className="flex flex-wrap items-end justify-between gap-[14px]">
+        <div>
+          <h1 className="text-[19px] font-extrabold tracking-tight text-[var(--fg)]">Content Plan</h1>
+          <p className="mt-[3px] text-[12px] text-[var(--mut)]">
+            {planStats.total} plans · {planStats.pending} backlog · {planStats.processing} in progress · {planStats.failed} need attention
+          </p>
         </div>
+        <button
+          type="button"
+          onClick={() => {
+            setModalError(null);
+            setModalVersion((version) => version + 1);
+            setModalOpen(true);
+          }}
+          className="inline-flex h-[34px] items-center gap-[7px] rounded-[8px] bg-[var(--indigo)] px-[13px] text-[12px] font-semibold text-white shadow-sm transition-opacity hover:opacity-90"
+        >
+          <Plus className="size-[14px]" />
+          Add content plan
+        </button>
+      </div>
 
-        {showJsonPreview && (
-          <pre className="p-[12px] rounded-[10px] border border-[var(--bd)] bg-[var(--card2)] text-[11px] font-mono text-[var(--fg2)] overflow-x-auto">
-            {previewJson}
-          </pre>
-        )}
-      </form>
+      <div className="grid grid-cols-1 gap-[10px] md:grid-cols-4">
+        {[
+          { label: "Total plans", value: planStats.total, icon: FolderKanban },
+          { label: "Backlog", value: planStats.pending, icon: ListFilter },
+          { label: "Running", value: planStats.processing, icon: CalendarClock },
+          { label: "Failed", value: planStats.failed, icon: RefreshCcw },
+        ].map((stat) => (
+          <div key={stat.label} className="rounded-[10px] border border-[var(--bd)] bg-[var(--card)] p-[12px]">
+            <div className="flex items-center justify-between gap-[8px] text-[11px] font-semibold text-[var(--mut)]">
+              <span>{stat.label}</span>
+              <stat.icon className="size-[14px]" />
+            </div>
+            <div className="mt-[8px] font-mono text-[22px] font-bold text-[var(--fg)]">{stat.value}</div>
+          </div>
+        ))}
+      </div>
 
-      {/* ---------------------------------------------------------------- */}
-      <section className="border border-[var(--bd)] rounded-[12px] bg-[var(--card)] overflow-hidden">
-        <div className="flex items-center gap-[10px] p-[12px_14px] border-b border-[var(--bd)]">
-          <h2 className="text-[13px] font-bold text-[var(--fg)]">Recent submissions</h2>
-          <span className="ml-auto text-[11px] text-[var(--mut)]">{rows.length} rows</span>
+      <section className="overflow-hidden rounded-[12px] border border-[var(--bd)] bg-[var(--card)] shadow-[var(--shadow)]">
+        <div className="flex flex-wrap items-center gap-[8px] border-b border-[var(--bd)] bg-[var(--card2)] p-[10px_12px]">
+          <div className="flex h-[30px] min-w-[260px] flex-1 items-center gap-[7px] rounded-[8px] border border-[var(--bd)] bg-[var(--card)] px-[10px] text-[var(--faint)]">
+            <Search className="size-[13px]" />
+            <input
+              aria-label="Search content plans"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="Search title, slug, stage, category"
+              className="w-full border-0 bg-transparent text-[11.5px] text-[var(--fg)] outline-none"
+            />
+          </div>
+
+          <label className="inline-flex h-[30px] items-center gap-[6px] rounded-[8px] border border-[var(--bd)] bg-[var(--card)] px-[8px] text-[11.5px] font-semibold text-[var(--fg2)]">
+            <Filter className="size-[13px]" />
+            <select
+              aria-label="Filter by status"
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.target.value)}
+              className="bg-transparent outline-none"
+            >
+              <option value="all">All statuses</option>
+              {statuses.map((status) => (
+                <option key={status} value={status}>
+                  {status}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="inline-flex h-[30px] items-center gap-[6px] rounded-[8px] border border-[var(--bd)] bg-[var(--card)] px-[8px] text-[11.5px] font-semibold text-[var(--fg2)]">
+            <ChevronDown className="size-[13px]" />
+            <select
+              aria-label="Filter by category"
+              value={categoryFilter}
+              onChange={(event) => setCategoryFilter(event.target.value)}
+              className="bg-transparent outline-none"
+            >
+              <option value="all">All categories</option>
+              {categories.map((category) => (
+                <option key={category} value={category}>
+                  {category}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="inline-flex h-[30px] items-center gap-[6px] rounded-[8px] border border-[var(--bd)] bg-[var(--card)] px-[8px] text-[11.5px] font-semibold text-[var(--fg2)]">
+            Group
+            <select
+              aria-label="Group content plans"
+              value={groupBy}
+              onChange={(event) => setGroupBy(event.target.value as GroupKey)}
+              className="bg-transparent outline-none"
+            >
+              <option value="none">None</option>
+              <option value="status">Status</option>
+              <option value="category">Category</option>
+              <option value="priority">Priority</option>
+            </select>
+          </label>
         </div>
 
         {notice && (
-          <div className="p-[10px_14px] text-[11.5px] text-[var(--amber)] border-b border-[var(--bd)]">{notice}</div>
+          <div className="border-b border-[var(--bd)] px-[12px] py-[9px] text-[11.5px] text-[var(--fg2)]">{notice}</div>
         )}
 
         <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-[12px] min-w-[760px]">
+          <table className="w-full min-w-[980px] border-collapse text-[12px]">
             <thead>
-              <tr className="text-[var(--mut)]">
-                {["Title", "Status", "Stage", "Submitted", ""].map((heading, index) => (
-                  <th
-                    key={heading || index}
-                    className="text-left p-[8px_12px] text-[10px] font-bold tracking-wider uppercase border-b border-[var(--bd)]"
-                  >
-                    {heading}
-                  </th>
-                ))}
+              <tr className="border-b border-[var(--bd)] text-[var(--mut)]">
+                <th className="p-[9px_12px] text-left">
+                  <SortButton label="Plan" active={sortKey === "title"} direction={sortDirection} onClick={() => setSort("title")} />
+                </th>
+                <th className="p-[9px_8px] text-left">
+                  <SortButton label="Category" active={sortKey === "category"} direction={sortDirection} onClick={() => setSort("category")} />
+                </th>
+                <th className="p-[9px_8px] text-left">
+                  <SortButton label="Status" active={sortKey === "status"} direction={sortDirection} onClick={() => setSort("status")} />
+                </th>
+                <th className="p-[9px_8px] text-left">
+                  <SortButton label="Stage" active={sortKey === "stage"} direction={sortDirection} onClick={() => setSort("stage")} />
+                </th>
+                <th className="p-[9px_8px] text-left">
+                  <SortButton label="Priority" active={sortKey === "priority"} direction={sortDirection} onClick={() => setSort("priority")} />
+                </th>
+                <th className="p-[9px_8px] text-left">
+                  <SortButton label="Created" active={sortKey === "createdAt"} direction={sortDirection} onClick={() => setSort("createdAt")} />
+                </th>
+                <th className="p-[9px_12px] text-right text-[10px] font-bold uppercase tracking-wider text-[var(--mut)]">Actions</th>
               </tr>
             </thead>
             <tbody>
               {rowsLoading && rows.length === 0 ? (
+                Array.from({ length: 8 }).map((_, index) => (
+                  <tr key={index} className="border-b border-[var(--bd)]">
+                    <td className="p-[10px_12px]">
+                      <Skeleton className="h-[13px] w-[260px]" />
+                      <Skeleton className="mt-[6px] h-[10px] w-[160px]" />
+                    </td>
+                    <td className="p-[10px_8px]">
+                      <Skeleton className="h-[18px] w-[78px] rounded-[6px]" />
+                    </td>
+                    <td className="p-[10px_8px]">
+                      <Skeleton className="h-[18px] w-[86px] rounded-full" />
+                    </td>
+                    <td className="p-[10px_8px]">
+                      <Skeleton className="h-[12px] w-[110px]" />
+                    </td>
+                    <td className="p-[10px_8px]">
+                      <Skeleton className="h-[12px] w-[54px]" />
+                    </td>
+                    <td className="p-[10px_8px]">
+                      <Skeleton className="h-[12px] w-[88px]" />
+                    </td>
+                    <td className="p-[10px_12px]">
+                      <Skeleton className="ml-auto h-[28px] w-[96px] rounded-[7px]" />
+                    </td>
+                  </tr>
+                ))
+              ) : pageRows.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="p-[20px_12px] text-center text-[11.5px] text-[var(--mut)]">
-                    Loading submissions…
-                  </td>
-                </tr>
-              ) : rows.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="p-[20px_12px] text-center text-[11.5px] text-[var(--mut)]">
-                    No submissions yet. Fill in the form above to queue your first article.
+                  <td colSpan={7} className="p-[34px_12px] text-center text-[12px] text-[var(--mut)]">
+                    No content plans match the current filters.
                   </td>
                 </tr>
               ) : (
-                rows.map((row) => {
-                  const style = STATUS_STYLE[row.status] ?? STATUS_STYLE.PENDING;
-                  return (
-                    <tr key={row.id} className="border-b border-[var(--bd)]">
-                      <td className="p-[9px_12px]">
-                        <Link href={`/dashboard/blogs/input/${row.id}`} className="font-semibold text-[var(--fg)] hover:underline">
-                          {row.title}
-                        </Link>
-                        <div className="text-[10.5px] text-[var(--mut)] mt-[2px]">
-                          {row.category ?? "uncategorized"} · {row.priority.toLowerCase()}
-                          {row.failureReason ? ` · ${row.failureReason.slice(0, 80)}` : ""}
-                        </div>
-                      </td>
-                      <td className="p-[9px_12px]">
-                        <span
-                          className="inline-block px-[7px] py-[2px] rounded-[6px] text-[10px] font-bold tracking-wide"
-                          style={{ background: style.bg, color: style.fg }}
-                        >
-                          {row.status}
-                        </span>
-                      </td>
-                      <td className="p-[9px_12px] text-[11px] text-[var(--mut)]">{row.currentStage ?? "-"}</td>
-                      <td className="p-[9px_12px] text-[11px] text-[var(--mut)]">
-                        {new Date(row.createdAt).toLocaleString()}
-                      </td>
-                      <td className="p-[9px_12px] text-right whitespace-nowrap">
-                        {row.blog && (
-                          <Link
-                            href="/dashboard/blogs"
-                            className="text-[11px] font-semibold text-[var(--indigo)] hover:underline mr-[10px]"
-                          >
-                            View blog
-                          </Link>
-                        )}
-                        {row.status === "PENDING" && (
-                          <button
-                            type="button"
-                            onClick={() => rowAction(row.id, "start")}
-                            className="text-[11px] font-semibold text-[var(--indigo)] hover:underline mr-[10px]"
-                          >
-                            Start now
-                          </button>
-                        )}
-                        {row.status === "FAILED" && (
-                          <button
-                            type="button"
-                            onClick={() => rowAction(row.id, "retry")}
-                            className="text-[11px] font-semibold text-[var(--indigo)] hover:underline mr-[10px]"
-                          >
-                            Retry
-                          </button>
-                        )}
-                        {row.status !== "COMPLETED" && row.status !== "CANCELLED" && (
-                          <button
-                            type="button"
-                            onClick={() => rowAction(row.id, "cancel")}
-                            className="text-[11px] font-semibold text-[var(--rose)] hover:underline"
-                          >
-                            Cancel
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })
+                groupedPageRows.map((group) => (
+                  <React.Fragment key={group.label}>
+                    {groupBy !== "none" && (
+                      <tr className="border-b border-[var(--bd)] bg-[var(--card2)]">
+                        <td colSpan={7} className="p-[7px_12px] text-[10.5px] font-bold uppercase tracking-wider text-[var(--fg2)]">
+                          {group.label} · {group.rows.length}
+                        </td>
+                      </tr>
+                    )}
+                    {group.rows.map((row) => {
+                      const style = statusStyle(row.status);
+                      return (
+                        <tr key={row.id} className="border-b border-[var(--bd)] transition-colors hover:bg-[var(--card2)]">
+                          <td className="max-w-[360px] p-[10px_12px]">
+                            <Link href={`/dashboard/blogs/input/${row.id}`} className="font-semibold leading-snug text-[var(--fg)] hover:underline">
+                              {row.title}
+                            </Link>
+                            <div className="mt-[2px] truncate font-mono text-[10px] text-[var(--faint)]">{row.slug}</div>
+                            {row.failureReason && (
+                              <div className="mt-[4px] truncate text-[10.5px] text-[var(--rose)]">{row.failureReason}</div>
+                            )}
+                          </td>
+                          <td className="p-[10px_8px]">
+                            <span className="rounded-[6px] bg-[var(--card2)] px-[7px] py-[2px] text-[10.5px] font-semibold text-[var(--fg2)]">
+                              {row.category ?? "Uncategorized"}
+                            </span>
+                          </td>
+                          <td className="p-[10px_8px]">
+                            <span
+                              className="rounded-full border px-[8px] py-[2px] text-[10.5px] font-bold"
+                              style={{ background: style.bg, color: style.fg, borderColor: style.bd }}
+                            >
+                              {row.status}
+                            </span>
+                          </td>
+                          <td className="p-[10px_8px] text-[11px] text-[var(--mut)]">
+                            <div>{row.currentStage ?? "-"}</div>
+                            <div className="mt-[2px] font-mono text-[9.5px] text-[var(--faint)]">
+                              plan:{row.planStatus} · outline:{row.outlineStatus}
+                            </div>
+                          </td>
+                          <td className="p-[10px_8px] font-mono text-[11px] text-[var(--fg2)]">{row.priority}</td>
+                          <td className="p-[10px_8px] text-[11px] text-[var(--mut)] whitespace-nowrap">{formatDate(row.createdAt)}</td>
+                          <td className="p-[10px_12px]">
+                            <div className="flex justify-end gap-[6px]">
+                              {row.status === "PENDING" && (
+                                <button
+                                  type="button"
+                                  onClick={() => rowAction(row.id, "start")}
+                                  className="h-[27px] rounded-[7px] border border-[var(--bd)] bg-[var(--card)] px-[9px] text-[11px] font-semibold text-[var(--fg2)] hover:border-[var(--indigo)] hover:text-[var(--indigo)]"
+                                >
+                                  Start
+                                </button>
+                              )}
+                              {row.status === "FAILED" && (
+                                <button
+                                  type="button"
+                                  onClick={() => rowAction(row.id, "retry")}
+                                  className="h-[27px] rounded-[7px] border border-[var(--bd)] bg-[var(--card)] px-[9px] text-[11px] font-semibold text-[var(--fg2)] hover:border-[var(--indigo)] hover:text-[var(--indigo)]"
+                                >
+                                  Retry
+                                </button>
+                              )}
+                              {["PENDING", "PROCESSING"].includes(row.status) && (
+                                <button
+                                  type="button"
+                                  onClick={() => rowAction(row.id, "cancel")}
+                                  className="h-[27px] rounded-[7px] border border-[var(--bd)] bg-[var(--card)] px-[9px] text-[11px] font-semibold text-[var(--rose)] hover:border-[var(--rose)]"
+                                >
+                                  Cancel
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </React.Fragment>
+                ))
               )}
             </tbody>
           </table>
         </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-[10px] border-t border-[var(--bd)] p-[9px_12px] text-[11px] text-[var(--mut)]">
+          <div className="flex flex-wrap items-center gap-[9px]">
+            <span>
+              {totalRows > 0
+                ? `Showing ${(currentPage - 1) * pageSize + 1}-${Math.min(currentPage * pageSize, totalRows)} of ${totalRows}`
+                : "No rows"}{" "}
+              · Page {currentPage} of {totalPages}
+            </span>
+            <label className="inline-flex items-center gap-[5px]">
+              Rows
+              <select
+                value={pageSize}
+                onChange={(event) => setPageSize(Number(event.target.value) as (typeof PAGE_SIZES)[number])}
+                className="h-[26px] rounded-[7px] border border-[var(--bd)] bg-[var(--card)] px-[6px] text-[11px] text-[var(--fg2)] outline-none"
+              >
+                {PAGE_SIZES.map((size) => (
+                  <option key={size} value={size}>
+                    {size}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <Pagination className="w-auto justify-end">
+            <PaginationContent>
+              <PaginationItem>
+                <PaginationPrevious disabled={currentPage === 1} onClick={() => setPage((value) => Math.max(1, value - 1))} />
+              </PaginationItem>
+              {getPaginationRange(currentPage, totalPages).map((entry, index) =>
+                entry === "ellipsis" ? (
+                  <PaginationItem key={`ellipsis-${index}`}>
+                    <PaginationEllipsis />
+                  </PaginationItem>
+                ) : (
+                  <PaginationItem key={entry}>
+                    <PaginationLink isActive={entry === currentPage} onClick={() => setPage(entry)}>
+                      {entry}
+                    </PaginationLink>
+                  </PaginationItem>
+                )
+              )}
+              <PaginationItem>
+                <PaginationNext disabled={currentPage === totalPages} onClick={() => setPage((value) => Math.min(totalPages, value + 1))} />
+              </PaginationItem>
+            </PaginationContent>
+          </Pagination>
+        </div>
       </section>
+
+      <ContentPlanModal
+        key={modalVersion}
+        open={modalOpen}
+        saving={saving}
+        error={modalError}
+        onClose={() => setModalOpen(false)}
+        onSubmit={submitPlan}
+      />
     </div>
   );
 }
