@@ -42,7 +42,7 @@ const REACTIVE_WORKERS: { key: string; label: string }[] = [
 ];
 
 /**
- * All seven stages that actually call an LLM through a dashboard-editable
+ * Every stage that actually calls an LLM through a dashboard-editable
  * setting (workers/shared/settings.ts MODEL_SETTING_KEYS). The API returns
  * exactly these keys; the page used to show only four of them, leaving
  * judge/writingSections/writingSelfcheck writable-but-invisible.
@@ -53,7 +53,6 @@ const MODEL_STAGES: { key: string; label: string }[] = [
   { key: "writing", label: "Writing" },
   { key: "writingSections", label: "Writing · sections" },
   { key: "writingSelfcheck", label: "Writing · self-check" },
-  { key: "semantic", label: "Research · semantic" },
   { key: "judge", label: "Quality · judge" },
 ];
 
@@ -65,7 +64,6 @@ const MODEL_LABELS: Record<string, string> = {
 };
 
 type SettingsFlags = {
-  semanticEnabled: boolean;
   imageAiEnabled: boolean;
   judgeEnabled: boolean;
   sectionedWritingEnabled: boolean;
@@ -81,10 +79,8 @@ type SettingsFlags = {
 function noModelStages(flags: SettingsFlags): { label: string; note: string }[] {
   return [
     {
-      label: "Research · heuristic",
-      note: flags.semanticEnabled
-        ? "Scrapes and scores trends by rule; the LLM relevance/dedup pass is the Research · semantic row above."
-        : "Scrapes and scores trends by rule (RESEARCH_SEMANTIC_ENABLED is off, so the semantic pass above is skipped).",
+      label: "Scheduler",
+      note: "Dispatches queued blog submissions on the publish-slot schedule - no AI model call.",
     },
     {
       label: "Image",
@@ -180,7 +176,7 @@ export default function SettingsPage() {
   const [goalMessage, setGoalMessage] = useState<Message>(null);
 
   // Extracted so a Daily Blog Goal save can refresh the schedule cards
-  // immediately (a goal change clears the research schedule server-side)
+  // immediately (a goal change clears the scheduler schedule server-side)
   // instead of waiting for the next 5s poll tick.
   const loadRunContext = React.useCallback(() => {
     fetch("/api/pipeline/run-context", { cache: "no-store" })
@@ -314,7 +310,7 @@ export default function SettingsPage() {
           Settings
         </h1>
         <p className="margin-0 text-[12px] text-[var(--mut)] mt-[3px]">
-          Only research-worker runs on a schedule - the other six workers fire reactively. Schedule edits apply
+          Only scheduler-worker runs on a schedule - the other six workers fire reactively. Schedule edits apply
           instantly and persist across restarts; model and goal changes reach running workers within ~15s.
         </p>
       </div>
@@ -356,8 +352,8 @@ export default function SettingsPage() {
             ) : (
               <div className="text-[11.5px] text-[var(--amber)] p-[12px]">
                 {workersConnected === 0
-                  ? "No schedules registered - the research worker process isn’t running, so nothing registered them."
-                  : "No schedules registered - the research worker may not have booted yet (or SCHEDULER_ENABLED is off)."}
+                  ? "No schedules registered - the scheduler worker process isn’t running, so nothing registered them."
+                  : "No schedules registered - the scheduler worker may not have booted yet (or SCHEDULER_ENABLED is off)."}
               </div>
             )}
           </div>
@@ -389,7 +385,7 @@ export default function SettingsPage() {
             <div className="text-[10.5px] text-[var(--faint)] -mt-[6px]">
               System tick: daily-target reconcile runs <span className="font-mono">{reconcile.pattern ?? "*/30 * * * *"}</span>
               {reconcile.next ? ` · next ${formatCountdown(reconcile.next, now)}` : ""} - it tops today&rsquo;s
-              pipeline up to the Daily Blog Goal from qualified backlog trends.
+              pipeline up to the Daily Blog Goal from the queued submission backlog.
             </div>
           )}
         </div>
@@ -689,10 +685,10 @@ export default function SettingsPage() {
             </div>
             <div className="text-[10.5px] text-[var(--faint)] mt-[4px]">
               Sets how many publish slots the schedule above has - one independent pipeline run per slot
-              (Research → Planning → Outline → Writing → Image → QA → Publish), published at its configured
+              (Planning → Outline → Writing → Image → QA → Publish), published at its configured
               time. A blog only counts once it is PUBLISHED: every stage retries automatically ({retryAttempts}{" "}
               retr{retryAttempts === 1 ? "y" : "ies"} after the first attempt), QA failures regenerate the draft,
-              and anything permanently failed is backfilled from the trend backlog so the day still reaches the
+              and anything permanently failed is backfilled from the submission backlog so the day still reaches the
               goal.
             </div>
             {goalMessage && (
