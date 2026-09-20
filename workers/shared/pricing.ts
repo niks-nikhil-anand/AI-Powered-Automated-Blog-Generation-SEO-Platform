@@ -55,7 +55,7 @@ export type RecordUsageInput = {
   /** Milliseconds from request start to response, measured by the caller. */
   latencyMs: number;
   blogId?: string | null;
-  trendId?: string | null;
+  blogInputId?: string | null;
 };
 
 /**
@@ -70,7 +70,7 @@ export async function recordAIUsage(input: RecordUsageInput): Promise<{ id: stri
         worker: input.worker,
         model: input.model,
         blogId: input.blogId ?? null,
-        trendId: input.trendId ?? null,
+        blogInputId: input.blogInputId ?? null,
         promptTokens: input.usage.promptTokens,
         completionTokens: input.usage.completionTokens,
         cost,
