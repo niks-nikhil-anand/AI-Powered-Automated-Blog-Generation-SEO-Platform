@@ -35,6 +35,18 @@ export type SectionKind =
   | "faq"
   | "cta";
 
+export type SubsectionSpec = {
+  heading: string;
+  discuss?: string[];
+  keywords?: string[];
+};
+
+export type ComparisonTableSpec = {
+  columns: string[];
+  rows: string[];
+  instructions?: string;
+};
+
 export type SectionSpec = {
   /** H2 text; null only for the heading-less intro. */
   heading: string | null;
@@ -42,6 +54,8 @@ export type SectionSpec = {
   intent: string;
   bullets: string[];
   wordTarget: number;
+  subsections?: SubsectionSpec[];
+  comparisonTable?: ComparisonTableSpec;
 };
 
 export type SectionArticleContext = {
@@ -67,7 +81,27 @@ export type SectionArticleContext = {
   tone?: string;
   /** BlogInput.contentLength - the editor's target word count for the article. */
   targetWords?: number;
+  /** Full submission specs (writingInstructions, internalLinks, etc.) */
+  specs?: Record<string, unknown>;
+  internalLinks?: string[];
+  writingInstructions?: string[];
+  mustFollow?: string[];
 };
+
+export const DEFAULT_MUST_FOLLOW_RULES: string[] = [
+  "Generate every section defined in the outline in the exact specified order.",
+  "Do not skip, merge, or rename sections unless explicitly instructed.",
+  "Generate the requested word count for each section within a reasonable tolerance.",
+  "Include every required comparison table, code example, FAQ, and conclusion.",
+  "Do not stop generation until all outline sections have been completed.",
+  "Never end a section or article mid-sentence.",
+  "Ensure every heading in the outline appears in the final article.",
+  "Ensure every FAQ question has a complete answer.",
+  "Verify factual claims against the provided evidence sources.",
+  "Do not invent benchmark results or unsupported technical claims.",
+  "Use SEO keywords naturally without keyword stuffing.",
+  "Before returning the article, verify that all required sections are present and complete.",
+];
 
 export type SectionDraft = {
   heading: string | null;
@@ -77,7 +111,16 @@ export type SectionDraft = {
   fromCache: boolean;
 };
 
-type OutlineSectionLike = { heading?: unknown; intent?: unknown; bullets?: unknown; wordTarget?: unknown; claims?: unknown };
+type OutlineSectionLike = {
+  heading?: unknown;
+  intent?: unknown;
+  bullets?: unknown;
+  wordTarget?: unknown;
+  claims?: unknown;
+  subsections?: unknown;
+  paragraphs?: unknown;
+  comparisonTable?: unknown;
+};
 type OutlineFaqLike = { question?: unknown; answerIntent?: unknown };
 
 /* ------------------------------------------------------------------ */
@@ -116,12 +159,12 @@ const DEFAULT_INTENTS: Record<SectionKind, string> = {
   intro: "Explain the topic, the reader's problem, and the practical value of reading on.",
   toc: "Linked table of contents for the article.",
   generic: "Cover the section topic with practical, specific detail.",
-  subsections: "Break the topic into 2-4 named H3 subsections, each with a useful paragraph.",
+  subsections: "Break the topic into named H3 subsections, each with substantial paragraphs explaining mechanisms, architecture, and practical considerations.",
   steps: "Explain the mechanism as 3-4 named H3 steps.",
-  table: "Balanced pros/cons as a Markdown comparison table plus a short framing paragraph.",
+  table: "Balanced comparison as a Markdown comparison table plus thorough framing and analysis.",
   numbered: "Actionable numbered checklist.",
   bullets: "Common pitfalls as a bullet list with avoidance guidance.",
-  faq: "4-6 H3 questions with concise, direct answers.",
+  faq: "Questions with concise, direct answers.",
   cta: "One short practical call-to-action paragraph related to DevKit Market.",
 };
 
@@ -130,57 +173,122 @@ function normalizeHeading(value: string): string {
 }
 
 /**
- * Build the section plan: mandatory skeleton + outline enrichment. An
- * outline section merges into a skeleton entry when its heading
- * fuzzy-matches (normalized substring in either direction); its bullets,
- * intent and wordTarget then steer that section's generation.
+ * Build the section plan. When the editor supplies an outline, use its
+ * sections as the canonical article structure. When no outline exists,
+ * fall back to the default mandatory skeleton.
  */
 export function buildSectionPlan(context: SectionArticleContext): SectionSpec[] {
-  // The editor's target word count drives the per-section budget; without
-  // one, the BLOG_MIN_WORDS/BLOG_MAX_WORDS midpoint as before.
-  const targetTotal = context.targetWords && context.targetWords > 0
-    ? context.targetWords
-    : Math.round((env.BLOG_MIN_WORDS + env.BLOG_MAX_WORDS) / 2);
-  const skeleton = skeletonWords(targetTotal);
+  const targetTotal =
+    context.targetWords && context.targetWords > 0
+      ? context.targetWords
+      : Math.round((env.BLOG_MIN_WORDS + env.BLOG_MAX_WORDS) / 2);
 
   const outlineSections: OutlineSectionLike[] = Array.isArray(context.outline?.sections)
     ? (context.outline.sections as OutlineSectionLike[])
     : [];
-  const outlineFaqs: OutlineFaqLike[] = Array.isArray(context.outline?.faqs) ? (context.outline.faqs as OutlineFaqLike[]) : [];
+  const outlineFaqs: OutlineFaqLike[] = Array.isArray(context.outline?.faqs)
+    ? (context.outline.faqs as OutlineFaqLike[])
+    : [];
 
+  if (outlineSections.length > 0) {
+    const firstIsIntro = /intro/i.test(String(outlineSections[0]?.heading ?? ""));
+    const plan: SectionSpec[] = [];
+
+    const nonIntroSectionsCount = Math.max(1, outlineSections.length - (firstIsIntro ? 1 : 0));
+    const introBudget = Math.max(100, Math.round(targetTotal * 0.08));
+    const bodyBudgetPerSection = Math.max(
+      120,
+      Math.round((targetTotal - introBudget) / nonIntroSectionsCount)
+    );
+
+    if (firstIsIntro) {
+      const introSec = outlineSections[0];
+      const rawSub = (introSec.subsections ?? introSec.paragraphs) as SubsectionSpec[] | undefined;
+      const bullets = Array.isArray(introSec.bullets) ? introSec.bullets.map(String).filter(Boolean) : [];
+      plan.push({
+        heading: null,
+        kind: "intro",
+        intent: typeof introSec.intent === "string" ? introSec.intent : DEFAULT_INTENTS.intro,
+        bullets,
+        subsections: rawSub,
+        wordTarget: typeof introSec.wordTarget === "number" ? (introSec.wordTarget as number) : introBudget,
+      });
+    } else {
+      plan.push({
+        heading: null,
+        kind: "intro",
+        intent: DEFAULT_INTENTS.intro,
+        bullets: [],
+        wordTarget: introBudget,
+      });
+    }
+
+    // Always include Table of Contents after intro
+    plan.push({
+      heading: "Table of Contents",
+      kind: "toc",
+      intent: DEFAULT_INTENTS.toc,
+      bullets: [],
+      wordTarget: 30,
+    });
+
+    const bodySections = firstIsIntro ? outlineSections.slice(1) : outlineSections;
+    for (const sec of bodySections) {
+      const heading = String(sec.heading ?? "Section");
+      const rawSub = (sec.subsections ?? sec.paragraphs) as SubsectionSpec[] | undefined;
+      const comparisonTable = sec.comparisonTable as ComparisonTableSpec | undefined;
+      const isFaq = /faq|frequently asked/i.test(heading);
+      const isConclusion = /conclusion|summary/i.test(heading);
+
+      let kind: SectionKind = "generic";
+      if (comparisonTable) {
+        kind = "table";
+      } else if (isFaq) {
+        kind = "faq";
+      } else if (rawSub && rawSub.length > 0) {
+        kind = "subsections";
+      } else if (isConclusion) {
+        kind = "generic";
+      }
+
+      let bullets = Array.isArray(sec.bullets) ? sec.bullets.map(String).filter(Boolean) : [];
+      if (isFaq && outlineFaqs.length > 0 && bullets.length === 0) {
+        bullets = outlineFaqs
+          .map((faq) =>
+            typeof faq.question === "string"
+              ? `${faq.question}${typeof faq.answerIntent === "string" ? ` - ${faq.answerIntent}` : ""}`
+              : null
+          )
+          .filter((b): b is string => Boolean(b));
+      }
+
+      plan.push({
+        heading,
+        kind,
+        intent:
+          typeof sec.intent === "string"
+            ? sec.intent
+            : (DEFAULT_INTENTS[kind] ?? `Cover "${heading}" for the reader in depth.`),
+        bullets,
+        subsections: rawSub,
+        comparisonTable,
+        wordTarget: typeof sec.wordTarget === "number" ? (sec.wordTarget as number) : bodyBudgetPerSection,
+      });
+    }
+
+    return plan;
+  }
+
+  // Fallback: skeleton words when no outline is present
+  const skeleton = skeletonWords(targetTotal);
   return skeleton.map(({ heading, kind, wordTarget }) => {
     const resolvedHeading = heading?.replace("{topic}", context.topic) ?? null;
-    const match =
-      resolvedHeading !== null
-        ? outlineSections.find((section) => {
-            if (typeof section.heading !== "string") return false;
-            const a = normalizeHeading(section.heading);
-            const b = normalizeHeading(resolvedHeading);
-            return a.includes(b) || b.includes(a);
-          })
-        : undefined;
-
-    let intent = typeof match?.intent === "string" && match.intent ? match.intent : DEFAULT_INTENTS[kind];
-    let bullets = Array.isArray(match?.bullets) ? match.bullets.map(String).filter(Boolean) : [];
-    if (kind === "faq" && outlineFaqs.length > 0) {
-      const faqBullets = outlineFaqs
-        .map((faq) =>
-          typeof faq.question === "string"
-            ? `${faq.question}${typeof faq.answerIntent === "string" ? ` - ${faq.answerIntent}` : ""}`
-            : null
-        )
-        .filter((bullet): bullet is string => Boolean(bullet));
-      if (faqBullets.length > 0) bullets = faqBullets;
-      intent = "Answer these reader questions concisely (one H3 per question).";
-    }
-    const outlineWordTarget = typeof match?.wordTarget === "number" && match.wordTarget > 0 ? match.wordTarget : undefined;
-
     return {
       heading: resolvedHeading,
       kind,
-      intent,
-      bullets,
-      wordTarget: outlineWordTarget ?? wordTarget,
+      intent: DEFAULT_INTENTS[kind],
+      bullets: [],
+      wordTarget,
     };
   });
 }
@@ -200,19 +308,19 @@ function kindInstruction(kind: SectionKind, heading: string | null): string {
     case "intro":
       return "Write the article introduction (2-4 paragraphs). No heading - start directly with prose.";
     case "generic":
-      return `Start with exactly "## ${heading}" on its own line, then prose.`;
+      return `Start with exactly "## ${heading}" on its own line, then detailed technical prose.`;
     case "subsections":
-      return `Start with "## ${heading}", then 2-4 "### " subsections each with at least one useful paragraph.`;
+      return `Start with "## ${heading}", then create named "### " subsections for each required topic, each with substantial paragraphs explaining mechanisms, architecture, and practical considerations.`;
     case "steps":
       return `Start with "## ${heading}", then 3-4 "### Step N: Name" subsections explaining the mechanism. Include one short fenced code block with a practical command, configuration snippet, or API example.`;
     case "table":
-      return `Start with "## ${heading}", one short framing paragraph, then a Markdown comparison table (| columns |).`;
+      return `Start with "## ${heading}", introductory framing prose, then the Markdown comparison table (| columns |), followed by explanatory analysis.`;
     case "numbered":
-      return `Start with "## ${heading}", then a numbered list ("1. ", "2. ") of actionable practices, each with a sentence of detail.`;
+      return `Start with "## ${heading}", then a numbered list ("1. ", "2. ") of actionable practices, each with a paragraph of detail.`;
     case "bullets":
-      return `Start with "## ${heading}", then a bullet list ("- " only, never "* ") of mistakes with avoidance guidance.`;
+      return `Start with "## ${heading}", then a bullet list ("- " only, never "* ") with avoidance guidance.`;
     case "faq":
-      return `Start with "## FAQs", then 4-6 "### " questions, each answered concisely in 1-2 short paragraphs.`;
+      return `Start with "## ${heading || "FAQs"}", then "### " questions, each answered thoroughly with practical technical answers.`;
     case "cta":
       return `Start with "## Call To Action", then one short practical CTA paragraph.`;
     default:
@@ -225,9 +333,9 @@ function buildSectionPrompt(spec: SectionSpec, context: SectionArticleContext, r
   const sourcesBlock =
     sources.length > 0
       ? `
-SOURCES (ground truth for any specific fact - cite with markers, never URLs):
+SOURCES (ground truth for factual claims - cite with markers, never URLs):
 ${sources.map((source) => `${source.marker} ${source.title}\nFACTS:\n${source.evidence.map((fact) => `- ${fact}`).join("\n")}`).join("\n")}
-Marker rules: every number, percentage, date, version, or benchmark you write MUST end with its source marker (e.g. [S1]). Only ${sources.map((s) => s.marker).join(", ")} exist - never invent markers. If no source covers a specific, write it qualitatively instead of inventing a figure. When the SOURCES are thin on the subject's actual product/mechanics, write this section about the general category/technology instead of presenting invented specifics as confirmed facts about the named subject. Vagueness on uncovered specifics is fine; invented precision is not.`
+Marker rules: Every specific number, percentage, date, version, benchmark, or empirical fact you draw from SOURCES MUST end with its source marker (e.g. [S1]). Only ${sources.map((s) => s.marker).join(", ")} exist - never invent markers. If no source covers a specific figure, describe it qualitatively instead of fabricating numbers.`
       : "";
   const legacyUrls = Array.from(
     new Set((context.evidenceSummary?.match(/https?:\/\/[^\s)]+/g) ?? []).map((url) => url.replace(/[.,)]+$/, "")))
@@ -240,9 +348,79 @@ ${legacyUrls.map((url) => `- ${url}`).join("\n")}
 Citation rules: when this section makes a factual claim about the topic, attach an inline Markdown link to one of the URLs above. Never invent URLs. ${context.preferredEvidenceUrl ? `Use ${context.preferredEvidenceUrl} for at least one supported claim in this section when it fits.` : ""}`
       : "";
 
-  const keywordsBlock = context.keywords.length > 0 ? `\nWeave in these keywords if natural to THIS section (never force): ${context.keywords.join(", ")}.` : "";
-  const bulletsBlock = spec.bullets.length > 0 ? `\nCover these points:\n${spec.bullets.map((bullet) => `- ${bullet}`).join("\n")}` : "";
+  const keywordsBlock =
+    context.keywords.length > 0
+      ? `\nWeave in these keywords naturally into headings and sentences where relevant: ${context.keywords.join(", ")}.`
+      : "";
+
+  let subsectionsBlock = "";
+  if (spec.subsections && spec.subsections.length > 0) {
+    subsectionsBlock = `
+Required Subsections (emit each as "### [Heading]"):
+${spec.subsections
+  .map((sub) => {
+    const discussLines =
+      sub.discuss && sub.discuss.length > 0
+        ? `\n  Points to discuss in detail:\n${sub.discuss.map((d) => `  - ${d}`).join("\n")}`
+        : "";
+    const kwLines =
+      sub.keywords && sub.keywords.length > 0 ? `\n  Subsection keywords: ${sub.keywords.join(", ")}` : "";
+    return `- ### ${sub.heading}${discussLines}${kwLines}`;
+  })
+  .join("\n")}
+`;
+  }
+
+  let tableBlock = "";
+  if (spec.comparisonTable) {
+    tableBlock = `
+Required Comparison Table:
+Render a detailed Markdown table with columns: | ${spec.comparisonTable.columns.join(" | ")} |
+Ensure rows cover: ${spec.comparisonTable.rows.join(", ")}
+${spec.comparisonTable.instructions ? `Table instructions: ${spec.comparisonTable.instructions}` : ""}
+`;
+  }
+
+  const rawSpecs = (context.specs ?? {}) as Record<string, unknown>;
+  const nestedSpecs = (rawSpecs.specs ?? {}) as Record<string, unknown>;
+  const writingInstructions: string[] =
+    context.writingInstructions ??
+    (Array.isArray(rawSpecs.writingInstructions)
+      ? (rawSpecs.writingInstructions as string[])
+      : Array.isArray(nestedSpecs.writingInstructions)
+      ? (nestedSpecs.writingInstructions as string[])
+      : []);
+  const writingInstructionsBlock =
+    writingInstructions.length > 0
+      ? `\nEditorial Writing Instructions:\n${writingInstructions.map((inst) => `- ${inst}`).join("\n")}\n`
+      : "";
+
+  const internalLinks: string[] =
+    context.internalLinks ??
+    (Array.isArray(rawSpecs.internalLinks)
+      ? (rawSpecs.internalLinks as string[])
+      : Array.isArray(nestedSpecs.internalLinks)
+      ? (nestedSpecs.internalLinks as string[])
+      : []);
+  const internalLinksBlock =
+    internalLinks.length > 0
+      ? `\nInternal links to naturally weave into text where contextually appropriate: ${internalLinks.join(", ")}.\n`
+      : "";
+
+  const bulletsBlock = spec.bullets.length > 0 ? `\nKey points to cover:\n${spec.bullets.map((bullet) => `- ${bullet}`).join("\n")}` : "";
   const repairBlock = repairNote ? `\n${repairNote}\nRewrite the section so the issue is fixed while keeping anything that already worked.` : "";
+
+  const rawGenInst = (rawSpecs.generationInstructions ?? nestedSpecs.generationInstructions) as Record<string, unknown> | undefined;
+  const userMustFollow = Array.isArray(rawGenInst?.mustFollow)
+    ? (rawGenInst.mustFollow as string[])
+    : Array.isArray(context.mustFollow)
+    ? context.mustFollow
+    : [];
+  const mustFollowRules = Array.from(new Set([...DEFAULT_MUST_FOLLOW_RULES, ...userMustFollow]));
+  const mustFollowBlock = `
+MANDATORY GENERATION INSTRUCTIONS (MUST FOLLOW):
+${mustFollowRules.map((rule, idx) => `${idx + 1}. ${rule}`).join("\n")}
+`;
 
   return `You are a Staff Technical Writer for DevKit Market, a developer-focused tech blog. You are writing ONE SECTION of a larger article - not the whole article.
 
@@ -252,10 +430,16 @@ ${context.plan ? `Audience: ${context.plan.audience}\nAngle: ${context.plan.angl
 
 Section to write: ${spec.heading ? `"## ${spec.heading}"` : "the introduction"}
 Section intent: ${spec.intent}
-Target length: at least ${spec.wordTarget} words. Paragraphs under 100 words each; sentences average 15-20 words.
-${kindInstruction(spec.kind, spec.heading)}${bulletsBlock}${keywordsBlock}${sourcesBlock}${legacyEvidenceBlock}${repairBlock}
-
-Rules: GitHub Flavored Markdown. Technical, practical, zero fluff. Never turn a feature into an unsupported benefit. Never invent commands, APIs, configuration, architecture, use cases, common problems, or developer behavior. If technical details are absent from FACTS, write a factual overview or clearly label general editorial guidance. Output ONLY this section's Markdown - no H1, no article title, no commentary, no code fence around the whole section.`;
+Target length: at least ${spec.wordTarget} words. Write in depth with rich technical substance. Paragraphs under 100 words each; sentences average 15-20 words.
+${kindInstruction(spec.kind, spec.heading)}${subsectionsBlock}${tableBlock}${bulletsBlock}${keywordsBlock}${internalLinksBlock}${writingInstructionsBlock}${sourcesBlock}${legacyEvidenceBlock}${repairBlock}
+${mustFollowBlock}
+Rules:
+- GitHub Flavored Markdown. Technical, practical, zero fluff.
+- Explain architecture, mechanisms, and developer trade-offs thoroughly.
+- For empirical benchmarks, specific quotes, and external claims, cite the supplied SOURCES with markers (e.g. [S1]).
+- Avoid unsupported speed rankings or declaring an unqualified "best" framework without evidence.
+- Do not invent pricing, adoption statistics, or fake capabilities.
+- Output ONLY this section's Markdown - no H1, no commentary, no code fence around the whole section.`;
 }
 
 export type GenerateSectionOptions = {
@@ -271,11 +455,42 @@ export async function generateSection(
 ): Promise<SectionDraft> {
   if (!isVertexConfigured) throw new Error("Vertex AI is not configured");
   const model = options.modelOverride ?? (await getSetting(MODEL_SETTING_KEYS.writingSections, env.VERTEX_FLASH));
-  const result = await generateVertexText(model, buildSectionPrompt(spec, context, options.repairNote), {
-    maxOutputTokens: Math.max(800, Math.ceil(spec.wordTarget * 2.5)),
+  const maxTokens = Math.max(2048, Math.ceil(spec.wordTarget * 4));
+  const prompt = buildSectionPrompt(spec, context, options.repairNote);
+
+  let result = await generateVertexText(model, prompt, {
+    maxOutputTokens: maxTokens,
     temperature: sectionTemperature(spec.kind),
     timeoutMs: env.WRITING_TIMEOUT_MS,
   });
+
+  // Length check: if generated text is less than 80% of target words
+  // (and target >= 100 words), retry once asking for depth. Anything still
+  // short is caught by the final article contract before persistence.
+  const generatedWords = result.text.trim().split(/\s+/).filter(Boolean).length;
+  if (spec.wordTarget >= 100 && generatedWords < Math.round(spec.wordTarget * 0.8)) {
+    log.warn(
+      `Section "${spec.heading ?? "intro"}" under word target (${generatedWords}/${spec.wordTarget} words) - retrying with expansion`,
+      { heading: spec.heading, generatedWords, wordTarget: spec.wordTarget }
+    );
+    try {
+      const expandedResult = await generateVertexText(
+        model,
+        `${prompt}\n\nIMPORTANT: The previous attempt was too brief (${generatedWords} words). Expand this section with thorough technical analysis, architectural details, and code or comparison points to reach at least ${spec.wordTarget} words.`,
+        {
+          maxOutputTokens: maxTokens,
+          temperature: sectionTemperature(spec.kind),
+          timeoutMs: env.WRITING_TIMEOUT_MS,
+        }
+      );
+      if (expandedResult.text.trim().split(/\s+/).filter(Boolean).length > generatedWords) {
+        result = expandedResult;
+      }
+    } catch {
+      // Keep original result if expansion retry fails
+    }
+  }
+
   return {
     heading: spec.heading,
     markdown: result.text.trim(),
@@ -327,9 +542,16 @@ async function mapWithConcurrency<T, R>(items: T[], concurrency: number, fn: (it
 }
 
 function cacheKey(blogInputId: string): string {
-  // Versioned after the citation protocol changed. Existing cached sections
-  // may contain raw/foreign links and must not be replayed into a retry.
-  return `sections:v2:${blogInputId}`;
+  // Versioned after custom outline support and rich section prompts.
+  return `sections:v3:${blogInputId}`;
+}
+
+export async function clearSectionCache(blogInputId: string): Promise<void> {
+  try {
+    await redis.del(cacheKey(blogInputId));
+  } catch (error) {
+    log.warn("Section cache invalidation failed", { blogInputId, error: error instanceof Error ? error.message : String(error) });
+  }
 }
 
 /** Inputs that must match for a cached section to be reused on retry. */
