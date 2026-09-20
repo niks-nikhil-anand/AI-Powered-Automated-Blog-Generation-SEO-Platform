@@ -7,7 +7,6 @@ import { Sidebar } from "../../components/shared/Sidebar";
 import { Navbar } from "../../components/shared/Navbar";
 import { GlobalSearchModal } from "../../components/shared/GlobalSearchModal";
 import { BlogDetailModal, BlogItem } from "../../components/shared/BlogDetailModal";
-import { ManualTopicModal } from "../../components/shared/ManualTopicModal";
 import { RunPipelineModal } from "../../components/shared/RunPipelineModal";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -15,7 +14,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [cmdkOpen, setCmdkOpen] = useState(false);
   const [selectedBlog, setSelectedBlog] = useState<BlogItem | null>(null);
   const [blogModalOpen, setBlogModalOpen] = useState(false);
-  const [manualTopicOpen, setManualTopicOpen] = useState(false);
   const [runPipelineOpen, setRunPipelineOpen] = useState(false);
 
   const handleOpenBlogDetail = (blog: BlogItem) => {
@@ -46,11 +44,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               {React.isValidElement(children)
                 ? React.cloneElement(children as React.ReactElement<{
                   onOpenBlogModal?: (blog: BlogItem) => void;
-                  onOpenManualTopic?: () => void;
                   onOpenRunPipeline?: () => void;
                 }>, {
                   onOpenBlogModal: handleOpenBlogDetail,
-                  onOpenManualTopic: () => setManualTopicOpen(true),
                   onOpenRunPipeline: () => setRunPipelineOpen(true),
                 })
                 : children}
@@ -64,17 +60,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           blog={selectedBlog}
           isOpen={blogModalOpen}
           onClose={() => setBlogModalOpen(false)}
-        />
-        <ManualTopicModal
-          isOpen={manualTopicOpen}
-          onClose={() => setManualTopicOpen(false)}
-          onSubmit={(topic) => {
-            fetch("/api/topics-pool", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(topic),
-            }).catch(() => {});
-          }}
         />
         {runPipelineOpen && <RunPipelineModal onClose={() => setRunPipelineOpen(false)} />}
       </div>
