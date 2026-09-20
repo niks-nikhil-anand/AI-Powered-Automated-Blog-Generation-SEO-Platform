@@ -80,7 +80,7 @@ export type WritingContext = {
     faqs: unknown;
     claims?: unknown;
   };
-  /** Trend.evidenceSummary - the research source material this article should cite. See IMPLEMENTATION_PLAN.md Phase 2.2. */
+  /** BlogInput.evidenceSummary - the reference material this article should cite. Empty for unsourced submissions. See IMPLEMENTATION_PLAN.md Phase 2.2. */
   evidenceSummary?: string;
   /**
    * Full-text evidence sources with [S1]-style markers
@@ -91,8 +91,28 @@ export type WritingContext = {
   evidenceSources?: GroundedSource[];
   /** Set when this is a quality-worker-triggered rewrite - see workers/quality-worker/index.ts's recoveryContext. */
   priorAttempt?: { score: number; reasons: string[] };
-  /** Needed by sectioned writing (Task 5) for the per-trend section cache key. */
-  trendId?: string;
+  /** Needed by sectioned writing (Task 5) for the per-submission section cache key. */
+  blogInputId?: string;
+  /** BlogInput.tone - professional | casual | technical. */
+  tone?: string;
+  /** BlogInput.contentLength - the editor's target word count for the article. */
+  targetWords?: number;
+};
+
+/**
+ * The editor's target word count wins over the BLOG_MIN_WORDS/BLOG_MAX_WORDS
+ * env defaults, with a +-10% band so the model has room to land naturally.
+ * Falls back to the env range when the submission didn't specify one.
+ */
+export function wordRange(targetWords?: number): { min: number; max: number } {
+  if (!targetWords || targetWords <= 0) return { min: env.BLOG_MIN_WORDS, max: env.BLOG_MAX_WORDS };
+  return { min: Math.round(targetWords * 0.9), max: Math.round(targetWords * 1.1) };
+}
+
+const TONE_GUIDANCE: Record<string, string> = {
+  professional: "Tone: professional and authoritative - plain, confident prose, zero fluff.",
+  casual: "Tone: conversational and approachable - second person, short sentences, still precise. Zero fluff.",
+  technical: "Tone: technical and precise - assume an engineering reader, favour mechanism over metaphor. Zero fluff.",
 };
 
 function buildPrompt(topic: string, description: string, context: WritingContext = {}): string {
@@ -104,7 +124,7 @@ function buildPrompt(topic: string, description: string, context: WritingContext
 
   // Task 2: when full-text evidence sources are available, the prompt
   // grounds on them with a [S1]-marker citation protocol, and rules 8/10
-  // switch from "paste URLs" to "emit markers". Legacy trends (no
+  // switch from "paste URLs" to "emit markers". Unsourced submissions (no
   // evidenceArticles) keep the original titles-only evidence block.
   const sources = context.evidenceSources ?? [];
   const grounded = sources.length > 0;
@@ -131,9 +151,11 @@ Citation protocol (mandatory):
     ? `10. Only state a specific number, percentage, date, version, or named benchmark result if it explicitly appears in the SOURCES above (with its marker attached per the protocol). For anything the SOURCES don't cover, describe it qualitatively instead of inventing a figure (e.g. "adds noticeable memory overhead", not a fabricated "uses 40% more memory"). This also applies to specific product features, architecture, or deployment/technical capabilities of the article's subject (a company, product, or service) - don't assert a specific capability unless a source says so, and don't state what it "is" or "does" as if confirmed when no source covers it. When the SOURCES are thin on the subject's actual product/mechanics, write Key Features, How it Works, and Real World Use Cases about the general category/technology instead, rather than presenting invented specifics as confirmed facts about the named subject. Vagueness on uncovered specifics is fine; invented precision is not.`
     : `10. Only state a specific number, percentage, date, version, or named benchmark result if it is explicitly present in the Evidence above. For anything the Evidence doesn't cover, describe it qualitatively instead of inventing a figure (e.g. "adds noticeable memory overhead", not a fabricated "uses 40% more memory"). This also applies to specific product features, architecture, or deployment/technical capabilities of the article's subject (a company, product, or service) - don't assert a specific capability (e.g. "offers an on-premise deployment option") unless it's in the Evidence, and don't state what it "is" or "does" as if confirmed (e.g. not "Superblocks is a programmable platform for workflows and scheduled jobs" when the Evidence never says that). When the Evidence is thin and doesn't describe the subject's actual product/mechanics (common for fresh news items), write Key Features, How it Works, and Real World Use Cases about the general category/technology instead (e.g. "low-code internal-tooling platforms in this category typically let teams...") rather than presenting invented specifics as confirmed facts about the named subject. Vagueness on uncovered specifics is fine; invented precision is not.`;
 
+  const { min: minWords, max: maxWords } = wordRange(context.targetWords);
+
   return `You are a Staff Technical Writer for DevKit Market, a developer-focused tech blog.
 
-Write a ${env.BLOG_MIN_WORDS}-${env.BLOG_MAX_WORDS} word technical blog post in GitHub Flavored Markdown.
+Write a ${minWords}-${maxWords} word technical blog post in GitHub Flavored Markdown.
 
 Topic: "${topic}"
 Context: ${description || "No additional context provided."}
@@ -158,7 +180,7 @@ Fix the weak areas listed above. Preserve anything that was already working - th
 }
 
 Guidelines:
-1. Tone: technical, practical, zero fluff.
+1. ${TONE_GUIDANCE[context.tone ?? "professional"] ?? TONE_GUIDANCE.professional}
 2. Use the approved outline as factual/source context, but reshape the final article into the mandatory structure below.
 3. Always include the Table of Contents section below, regardless of article length.
 4. Include at least one Markdown comparison table in Pros and Cons.
@@ -275,7 +297,7 @@ async function generateMock(topic: string, description: string, context: Writing
   const title = context.outline?.title ?? topic;
   const markdown = `## Draft unavailable\n\nWriter credentials are not configured for this environment.${
     description ? `\n\nTopic note: ${description}` : ""
-  }\n\nSet \`GOOGLE_CLOUD_PROJECT\`, \`VERTEX_LOCATION\`, and \`GOOGLE_APPLICATION_CREDENTIALS\` in \`.env\` to generate a full ${env.BLOG_MIN_WORDS}-${env.BLOG_MAX_WORDS} word article with Vertex AI.`;
+  }\n\nSet \`GOOGLE_CLOUD_PROJECT\`, \`VERTEX_LOCATION\`, and \`GOOGLE_APPLICATION_CREDENTIALS\` in \`.env\` to generate a full ${wordRange(context.targetWords).min}-${wordRange(context.targetWords).max} word article with Vertex AI.`;
 
   return {
     title,
@@ -341,10 +363,12 @@ async function generateSectionedDraft(topic: string, description: string, contex
     sources: context.evidenceSources,
     evidenceSummary: context.evidenceSummary,
     keywords,
+    tone: context.tone,
+    targetWords: context.targetWords,
   };
 
   const plan = buildSectionPlan(sectionContext);
-  const { drafts, usage, models } = await generateAllSections(plan, sectionContext, context.trendId ?? "unknown");
+  const { drafts, usage, models } = await generateAllSections(plan, sectionContext, context.blogInputId ?? "unknown");
 
   const usageRecords = drafts
     .filter((draft) => !draft.fromCache)
