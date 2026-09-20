@@ -1,9 +1,9 @@
 import { z } from "zod";
 
 /**
- * Shared type + parser for Trend.evidenceArticles
+ * Shared type + parser for BlogInput.evidenceArticles
  * (ENHANCEMENT_IMPLEMENTATION_PLAN.md Task 1). Lives in workers/shared so
- * research-worker (writes it), writing-worker (Task 2 grounding) and
+ * the submit API (writes it), writing-worker (Task 2 grounding) and
  * quality-worker (Task 3 fact-check) all parse the same Prisma Json column
  * through one Zod schema - a shape change can't drift between the producer
  * and the consumers.
