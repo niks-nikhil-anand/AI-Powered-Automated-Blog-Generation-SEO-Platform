@@ -6,25 +6,21 @@ import { prisma } from "./prisma";
  * pattern already used for workers/shared/queues) so a key typo can't make
  * the two sides silently disagree.
  *
- * Four pipeline stages call an LLM through a dashboard-editable setting:
- * planning-worker and outline-worker both call env.VERTEX_FLASH,
- * writing-worker calls env.VERTEX_MODEL, and research-worker calls
- * env.VERTEX_FLASH for the semantic relevance/dedup pass (see
- * workers/research-worker/pipeline/semantic.ts - this is on top of, not
- * instead of, its heuristic scraping/scoring). image-worker also calls
- * Vertex (Imagen, via env.VERTEX_IMAGE_MODEL) and quality-worker calls
- * Vertex (Gemini vision, via env.VERTEX_FLASH) for a featured-image
- * relevance/appeal check, but neither is exposed as a MODEL_SETTING_KEYS
- * entry - swapping the image model or the vision model isn't a like-for-like
- * choice the way swapping a text model is, so it stays an env var rather
- * than a dashboard dropdown. publish-worker still calls no AI model at all
- * - it's a DB status flip.
+ * Three pipeline stages call an LLM through a dashboard-editable setting:
+ * planning-worker and outline-worker both call env.VERTEX_FLASH, and
+ * writing-worker calls env.VERTEX_MODEL (plus the per-section and
+ * self-check keys below). image-worker also calls Vertex (Imagen, via
+ * env.VERTEX_IMAGE_MODEL) and quality-worker calls Vertex (Gemini vision,
+ * via env.VERTEX_FLASH) for a featured-image relevance/appeal check, but
+ * neither is exposed as a MODEL_SETTING_KEYS entry - swapping the image
+ * model or the vision model isn't a like-for-like choice the way swapping a
+ * text model is, so it stays an env var rather than a dashboard dropdown.
+ * scheduler-worker and publish-worker call no AI model at all.
  */
 export const MODEL_SETTING_KEYS = {
   planning: "model:planning",
   outline: "model:outline",
   writing: "model:writing",
-  semantic: "model:semantic",
   /** Quality-worker's LLM editorial judge (Task 4). */
   judge: "model:judge",
   /** Per-section draft generation when sectioned writing is on (Task 5). */
