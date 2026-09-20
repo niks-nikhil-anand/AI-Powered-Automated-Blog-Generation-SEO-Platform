@@ -52,8 +52,8 @@ Return ONLY JSON in this exact shape:
 }
 
 /**
- * One Vertex Flash call per blog, comparing the draft against the research
- * evidence persisted on its Trend (Trend.evidenceSummary - see
+ * One Vertex Flash call per blog, comparing the draft against the reference
+ * material persisted on its submission (BlogInput.evidenceSummary - see
  * IMPLEMENTATION_PLAN.md Phase 2.1). Returns null - never throws - when
  * there's nothing to check against or the call/parse itself fails, so a
  * Vertex hiccup degrades this one score dimension instead of failing the
