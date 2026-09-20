@@ -29,13 +29,13 @@ function objectKey(slug: string, fileName: string) {
 export async function generateImageForBlog(payload: ImageJobPayload) {
   const attempt = await startWorkerAttempt({
     worker: "image-worker",
-    trendId: payload.trendId,
+    blogInputId: payload.blogInputId,
     blogId: payload.blogId,
     input: payload,
   });
   const blog = await prisma.blog.findUnique({
     where: { id: payload.blogId },
-    include: { featuredImage: true, trend: { include: { plan: true } } },
+    include: { featuredImage: true, blogInput: { include: { plan: true } } },
   });
   if (!blog) throw new Error(`Blog ${payload.blogId} not found`);
   if (blog.featuredImageId) {
@@ -55,9 +55,11 @@ export async function generateImageForBlog(payload: ImageJobPayload) {
   let uploadedKey: string | null = null;
 
   try {
-    // ContentPlan.primaryKeyword names the central visual subject; Trend.topic
-    // is the fallback for when planning-worker hasn't attached a plan yet.
-    const subject = blog.trend?.plan?.primaryKeyword || blog.trend?.topic || payload.title;
+    // ContentPlan.primaryKeyword names the central visual subject; the
+    // submission's own focus keyword/title is the fallback for when
+    // planning-worker hasn't attached a plan yet.
+    const subject =
+      blog.blogInput?.plan?.primaryKeyword || blog.blogInput?.focusKeyword || blog.blogInput?.title || payload.title;
     const recentHashes = await recentImageHashes();
     const { image, styleDirection, imageHash } = await selectHeroImage(payload, subject, recentHashes);
     const key = objectKey(payload.slug, image.fileName);
