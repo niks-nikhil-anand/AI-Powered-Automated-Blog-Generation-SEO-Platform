@@ -154,13 +154,34 @@ function ContentPlanModal({
   saving: boolean;
   error: string | null;
   onClose: () => void;
-  onSubmit: (data: { title: string; category: string; json: string }) => void;
+  onSubmit: (data: { title: string; category: string; json: string; startNow: boolean }) => void;
 }) {
   const [title, setTitle] = useState(initialValues?.title ?? "");
   const [category, setCategory] = useState(initialValues?.category ?? "");
   const [json, setJson] = useState(initialValues?.json ?? "");
+  const [startNow, setStartNow] = useState(mode === "create");
 
   if (!open) return null;
+
+  const handleJsonChange = (val: string) => {
+    setJson(val);
+    try {
+      const parsed = JSON.parse(val);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        if (!title && typeof parsed.title === "string" && parsed.title.trim()) {
+          setTitle(parsed.title.trim());
+        }
+        if (!category && typeof parsed.category === "string" && parsed.category.trim()) {
+          setCategory(parsed.category.trim());
+        }
+      }
+    } catch {
+      // JSON still being typed/pasted
+    }
+  };
+
+  const knownCategories = CATEGORIES.map((c) => c.value);
+  const isCustomCategory = category && !knownCategories.includes(category as typeof knownCategories[number]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-[16px]">
@@ -185,7 +206,7 @@ function ContentPlanModal({
         <form
           onSubmit={(event) => {
             event.preventDefault();
-            onSubmit({ title, category, json });
+            onSubmit({ title, category, json, startNow });
           }}
           className="flex flex-col gap-[13px] p-[16px]"
         >
@@ -221,6 +242,7 @@ function ContentPlanModal({
                     {item.label}
                   </option>
                 ))}
+                {isCustomCategory && <option value={category}>{category}</option>}
               </select>
             </div>
           </div>
@@ -234,7 +256,7 @@ function ContentPlanModal({
               rows={13}
               spellCheck={false}
               value={json}
-              onChange={(event) => setJson(event.target.value)}
+              onChange={(event) => handleJsonChange(event.target.value)}
               placeholder={JSON_PLACEHOLDER}
               className="w-full resize-y rounded-[8px] border border-[var(--bd)] bg-[var(--card)] p-[10px] font-mono text-[11.5px] leading-[1.55] text-[var(--fg)] outline-none transition-colors focus:border-[var(--indigo)]"
             />
@@ -242,6 +264,16 @@ function ContentPlanModal({
               Optional. Add any valid content-plan fields such as keywords, outlineJson, audience, tone, priority, or sources.
             </p>
           </div>
+
+          <label className="flex items-center gap-[8px] text-[11.5px] font-semibold text-[var(--fg2)] cursor-pointer">
+            <input
+              type="checkbox"
+              checked={startNow}
+              onChange={(e) => setStartNow(e.target.checked)}
+              className="size-[14px] rounded border-[var(--bd)] text-[var(--indigo)] focus:ring-0"
+            />
+            <span>Start generation immediately (dispatch to workers now)</span>
+          </label>
 
           {error && (
             <div className="rounded-[9px] border border-[rgba(244,63,94,0.28)] bg-[rgba(244,63,94,0.1)] p-[10px] text-[11.5px] text-[var(--rose)]">
@@ -436,7 +468,17 @@ export default function NewBlogPage() {
     }
   };
 
-  const submitPlan = async ({ title, category, json }: { title: string; category: string; json: string }) => {
+  const submitPlan = async ({
+    title,
+    category,
+    json,
+    startNow,
+  }: {
+    title: string;
+    category: string;
+    json: string;
+    startNow: boolean;
+  }) => {
     setModalError(null);
     setNotice(null);
 
@@ -455,6 +497,9 @@ export default function NewBlogPage() {
       }
     }
 
+    const finalTitle = title.trim() || (typeof jsonData.title === "string" ? jsonData.title.trim() : "");
+    const finalCategory = (category && category.trim()) || (typeof jsonData.category === "string" ? jsonData.category.trim() : undefined);
+
     const payload = {
       tone: "professional",
       contentLength: 2000,
@@ -462,10 +507,10 @@ export default function NewBlogPage() {
       primaryKeywords: [],
       secondaryKeywords: [],
       ...jsonData,
-      title,
-      slug: typeof jsonData.slug === "string" ? jsonData.slug : slugifyTitle(title),
-      category: category || undefined,
-      startNow: false,
+      title: finalTitle,
+      slug: typeof jsonData.slug === "string" ? jsonData.slug : slugifyTitle(finalTitle),
+      category: finalCategory,
+      startNow,
     };
 
     const parsed = blogInputSchema.safeParse(payload);
@@ -491,7 +536,7 @@ export default function NewBlogPage() {
       setNotice(
         editTarget
           ? `Content plan updated with status ${result.status}.`
-          : `Content plan saved to BlogInput with status ${result.status}.`
+          : `Content plan ${startNow ? "queued and processing" : "saved to BlogInput"} with status ${result.status}.`
       );
       loadRows();
     } catch (error) {
