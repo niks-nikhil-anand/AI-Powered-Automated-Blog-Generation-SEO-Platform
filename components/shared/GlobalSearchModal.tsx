@@ -33,7 +33,7 @@ export function GlobalSearchModal({ isOpen, onClose }: GlobalSearchModalProps) {
 
   const quickLinks = [
     { label: "Content Pipeline", href: "/dashboard/blogs", category: "Blogs" },
-    { label: "Trend Research", href: "/dashboard/trends", category: "Trends" },
+    { label: "New Blog Submission", href: "/dashboard/blogs/new", category: "Blogs" },
     { label: "Queue Operations", href: "/dashboard/workers", category: "Workers" },
     { label: "Asset Library", href: "/dashboard/assets", category: "Assets" },
     { label: "System Logs", href: "/dashboard/logs", category: "Logs" },
@@ -65,7 +65,7 @@ export function GlobalSearchModal({ isOpen, onClose }: GlobalSearchModalProps) {
             autoFocus
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search blogs, trends, workers, assets..."
+            placeholder="Search blogs, submissions, workers, assets..."
             className="flex-1 bg-transparent border-0 outline-none text-[13px] text-[var(--fg)] placeholder-[var(--faint)]"
           />
           <button
