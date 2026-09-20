@@ -10,9 +10,11 @@ import {
   Filter,
   FolderKanban,
   ListFilter,
+  Pencil,
   Plus,
   RefreshCcw,
   Search,
+  Trash2,
   X,
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -44,6 +46,7 @@ type SubmissionRow = {
   outlineStatus: string;
   blogStatus: string | null;
   currentStage: string | null;
+  specs: unknown;
 };
 
 type ContentPlanListResponse = {
@@ -138,20 +141,24 @@ function SortButton({
 
 function ContentPlanModal({
   open,
+  mode,
+  initialValues,
   saving,
   error,
   onClose,
   onSubmit,
 }: {
   open: boolean;
+  mode: "create" | "edit";
+  initialValues?: { title: string; category: string; json: string };
   saving: boolean;
   error: string | null;
   onClose: () => void;
   onSubmit: (data: { title: string; category: string; json: string }) => void;
 }) {
-  const [title, setTitle] = useState("");
-  const [category, setCategory] = useState("");
-  const [json, setJson] = useState("");
+  const [title, setTitle] = useState(initialValues?.title ?? "");
+  const [category, setCategory] = useState(initialValues?.category ?? "");
+  const [json, setJson] = useState(initialValues?.json ?? "");
 
   if (!open) return null;
 
@@ -160,7 +167,9 @@ function ContentPlanModal({
       <div className="w-full max-w-[720px] rounded-[12px] border border-[var(--bd)] bg-[var(--card)] shadow-[0_24px_80px_rgba(15,23,42,0.35)]">
         <div className="flex items-center justify-between gap-[12px] border-b border-[var(--bd)] p-[14px_16px]">
           <div>
-            <h2 className="text-[15px] font-bold text-[var(--fg)]">Create content plan</h2>
+            <h2 className="text-[15px] font-bold text-[var(--fg)]">
+              {mode === "edit" ? "Update content plan" : "Create content plan"}
+            </h2>
             <p className="mt-[2px] text-[11px] text-[var(--mut)]">Save a plan to the backlog without leaving this page.</p>
           </div>
           <button
@@ -254,13 +263,89 @@ function ContentPlanModal({
               className="inline-flex h-[32px] items-center gap-[6px] rounded-[8px] bg-[var(--indigo)] px-[13px] text-[11.5px] font-semibold text-white disabled:opacity-50"
             >
               <Check className="size-[13px]" />
-              {saving ? "Saving..." : "Save plan"}
+              {saving ? (mode === "edit" ? "Updating..." : "Saving...") : mode === "edit" ? "Update plan" : "Save plan"}
             </button>
           </div>
         </form>
       </div>
     </div>
   );
+}
+
+function DeletePlanModal({
+  row,
+  deleting,
+  onClose,
+  onConfirm,
+}: {
+  row: SubmissionRow | null;
+  deleting: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  if (!row) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-[16px]">
+      <div className="w-full max-w-[460px] rounded-[12px] border border-[var(--bd)] bg-[var(--card)] shadow-[0_24px_80px_rgba(15,23,42,0.35)]">
+        <div className="flex items-center justify-between gap-[12px] border-b border-[var(--bd)] p-[14px_16px]">
+          <div>
+            <h2 className="text-[15px] font-bold text-[var(--fg)]">Delete content plan</h2>
+            <p className="mt-[2px] text-[11px] text-[var(--mut)]">This removes the saved plan from the backlog.</p>
+          </div>
+          <button
+            type="button"
+            aria-label="Close delete confirmation"
+            disabled={deleting}
+            onClick={onClose}
+            className="inline-flex size-[30px] items-center justify-center rounded-[8px] border border-[var(--bd)] bg-[var(--card)] text-[var(--fg2)] hover:border-[var(--bd2)] disabled:opacity-50"
+          >
+            <X className="size-[15px]" />
+          </button>
+        </div>
+
+        <div className="flex flex-col gap-[12px] p-[16px]">
+          <div className="rounded-[9px] border border-[rgba(244,63,94,0.28)] bg-[rgba(244,63,94,0.08)] p-[11px]">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--rose)]">Plan</div>
+            <div className="mt-[4px] text-[12.5px] font-semibold leading-snug text-[var(--fg)]">{row.title}</div>
+            <div className="mt-[3px] truncate font-mono text-[10px] text-[var(--faint)]">{row.slug}</div>
+          </div>
+          <p className="text-[11.5px] leading-relaxed text-[var(--mut)]">
+            Delete is allowed only before this submission has produced a blog. If a blog already exists, the API will keep it and show an error.
+          </p>
+        </div>
+
+        <div className="flex items-center justify-end gap-[8px] border-t border-[var(--bd)] p-[13px_16px]">
+          <button
+            type="button"
+            disabled={deleting}
+            onClick={onClose}
+            className="h-[32px] rounded-[8px] border border-[var(--bd)] bg-[var(--card)] px-[12px] text-[11.5px] font-semibold text-[var(--fg2)] hover:border-[var(--bd2)] disabled:opacity-50"
+          >
+            Keep plan
+          </button>
+          <button
+            type="button"
+            disabled={deleting}
+            onClick={onConfirm}
+            className="inline-flex h-[32px] items-center gap-[6px] rounded-[8px] bg-[var(--rose)] px-[13px] text-[11.5px] font-semibold text-white disabled:opacity-50"
+          >
+            <Trash2 className="size-[13px]" />
+            {deleting ? "Deleting..." : "Delete"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function editableJsonForRow(row: SubmissionRow): string {
+  const specs = row.specs && typeof row.specs === "object" && !Array.isArray(row.specs) ? { ...(row.specs as Record<string, unknown>) } : {};
+  delete specs.title;
+  delete specs.slug;
+  delete specs.category;
+  delete specs.startNow;
+  return JSON.stringify(specs, null, 2);
 }
 
 export default function NewBlogPage() {
@@ -272,7 +357,10 @@ export default function NewBlogPage() {
   const [rowsLoading, setRowsLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const [modalVersion, setModalVersion] = useState(0);
+  const [editTarget, setEditTarget] = useState<SubmissionRow | null>(null);
   const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<SubmissionRow | null>(null);
   const [modalError, setModalError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -388,21 +476,26 @@ export default function NewBlogPage() {
 
     setSaving(true);
     try {
-      const response = await fetch("/api/blogs/input", {
-        method: "POST",
+      const response = await fetch(editTarget ? `/api/blogs/input/${editTarget.id}` : "/api/blogs/input", {
+        method: editTarget ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(parsed.data),
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok || !result.success) {
-        setModalError(result.error ?? "Failed to save content plan");
+        setModalError(result.error ?? (editTarget ? "Failed to update content plan" : "Failed to save content plan"));
         return;
       }
       setModalOpen(false);
-      setNotice(`Content plan saved to BlogInput with status ${result.status}.`);
+      setEditTarget(null);
+      setNotice(
+        editTarget
+          ? `Content plan updated with status ${result.status}.`
+          : `Content plan saved to BlogInput with status ${result.status}.`
+      );
       loadRows();
     } catch (error) {
-      setModalError(error instanceof Error ? error.message : "Failed to save content plan");
+      setModalError(error instanceof Error ? error.message : editTarget ? "Failed to update content plan" : "Failed to save content plan");
     } finally {
       setSaving(false);
     }
@@ -418,6 +511,23 @@ export default function NewBlogPage() {
     const data = await response.json().catch(() => ({}));
     setNotice(response.ok ? `Plan ${action === "start" ? "started" : `${action}ed`}.` : data.error ?? `Failed to ${action} plan`);
     loadRows();
+  };
+
+  const deletePlan = async () => {
+    if (!deleteTarget) return;
+    setNotice(null);
+    setDeletingId(deleteTarget.id);
+    try {
+      const response = await fetch(`/api/blogs/input/${deleteTarget.id}`, { method: "DELETE" });
+      const data = await response.json().catch(() => ({}));
+      setNotice(response.ok ? "Content plan deleted." : data.error ?? "Failed to delete content plan");
+      if (response.ok) setDeleteTarget(null);
+      loadRows();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Failed to delete content plan");
+    } finally {
+      setDeletingId(null);
+    }
   };
 
   const planStats = {
@@ -441,6 +551,7 @@ export default function NewBlogPage() {
           type="button"
           onClick={() => {
             setModalError(null);
+            setEditTarget(null);
             setModalVersion((version) => version + 1);
             setModalOpen(true);
           }}
@@ -667,6 +778,30 @@ export default function NewBlogPage() {
                                   Cancel
                                 </button>
                               )}
+                              <button
+                                type="button"
+                                aria-label={`Edit ${row.title}`}
+                                title="Edit content plan"
+                                onClick={() => {
+                                  setModalError(null);
+                                  setEditTarget(row);
+                                  setModalVersion((version) => version + 1);
+                                  setModalOpen(true);
+                                }}
+                                className="inline-flex h-[27px] w-[27px] items-center justify-center rounded-[7px] border border-[var(--bd)] bg-[var(--card)] text-[var(--fg2)] transition-colors hover:border-[var(--indigo)] hover:text-[var(--indigo)]"
+                              >
+                                <Pencil className="size-[13px]" />
+                              </button>
+                              <button
+                                type="button"
+                                aria-label={`Delete ${row.title}`}
+                                title="Delete content plan"
+                                disabled={deletingId === row.id}
+                                onClick={() => setDeleteTarget(row)}
+                                className="inline-flex h-[27px] w-[27px] items-center justify-center rounded-[7px] border border-[var(--bd)] bg-[var(--card)] text-[var(--rose)] transition-colors hover:border-[var(--rose)] disabled:opacity-50"
+                              >
+                                <Trash2 className="size-[13px]" />
+                              </button>
                             </div>
                           </td>
                         </tr>
@@ -731,10 +866,31 @@ export default function NewBlogPage() {
       <ContentPlanModal
         key={modalVersion}
         open={modalOpen}
+        mode={editTarget ? "edit" : "create"}
+        initialValues={
+          editTarget
+            ? {
+                title: editTarget.title,
+                category: editTarget.category ?? "",
+                json: editableJsonForRow(editTarget),
+              }
+            : undefined
+        }
         saving={saving}
         error={modalError}
-        onClose={() => setModalOpen(false)}
+        onClose={() => {
+          setModalOpen(false);
+          setEditTarget(null);
+        }}
         onSubmit={submitPlan}
+      />
+      <DeletePlanModal
+        row={deleteTarget}
+        deleting={Boolean(deleteTarget && deletingId === deleteTarget.id)}
+        onClose={() => {
+          if (!deletingId) setDeleteTarget(null);
+        }}
+        onConfirm={deletePlan}
       />
     </div>
   );
