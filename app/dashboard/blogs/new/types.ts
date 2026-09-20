@@ -1,0 +1,121 @@
+import { z } from "zod";
+
+/**
+ * The manual blog specification - the single entry point of the pipeline.
+ * Shared verbatim by the form (client), the server action and
+ * POST /api/blogs/input, so the browser and the API can never disagree
+ * about what a valid submission is.
+ */
+export const TONES = ["professional", "casual", "technical"] as const;
+export const PRIORITIES = ["LOW", "NORMAL", "HIGH", "URGENT"] as const;
+
+export const CATEGORIES = [
+  { value: "tech", label: "Technology" },
+  { value: "business", label: "Business" },
+  { value: "lifestyle", label: "Lifestyle" },
+  { value: "education", label: "Education" },
+  { value: "security", label: "Security" },
+  { value: "ai", label: "AI & ML" },
+] as const;
+
+/**
+ * Optional pre-structured outline. Only section headings are required - the
+ * outline worker fills in intents and bullets it wasn't given (see
+ * workers/outline-worker/user-outline.ts, which owns the same contract on
+ * the worker side).
+ */
+export const outlineJsonSchema = z.object({
+  sections: z
+    .array(
+      z.object({
+        heading: z.string().min(1),
+        intent: z.string().optional(),
+        bullets: z.array(z.string()).optional(),
+        wordTarget: z.number().optional(),
+      })
+    )
+    .min(1),
+  faqs: z
+    .array(
+      z.object({
+        question: z.string().min(1),
+        answer: z.string().optional(),
+        answerIntent: z.string().optional(),
+      })
+    )
+    .optional(),
+});
+
+/**
+ * Optional reference sources. Supplying these switches the whole pipeline
+ * into "sourced" mode: planning/outline must map every factual claim to one
+ * of these sources, the writer cites them with [S1]-markers, and QA
+ * fact-checks the draft against them. Leave it out for an unsourced brief
+ * and those gates are skipped instead of failed.
+ */
+export const sourceSchema = z.object({
+  url: z.string().url(),
+  title: z.string().min(1),
+  /** Atomic, quotable facts. A title and URL alone are not evidence. */
+  evidence: z.array(z.string().min(1)).min(1),
+  excerpt: z.string().min(1).optional(),
+  publisher: z.string().optional(),
+  publishedAt: z.string().optional(),
+});
+
+export const blogInputSchema = z.object({
+  title: z.string().min(10).max(200),
+  slug: z.string().min(3).max(100).optional(),
+  category: z.string().optional(),
+
+  // SEO
+  focusKeyword: z.string().optional(),
+  primaryKeywords: z.array(z.string()).default([]),
+  secondaryKeywords: z.array(z.string()).default([]),
+  metaTitle: z.string().max(60).optional(),
+  metaDescription: z.string().max(160).optional(),
+
+  // Content specs
+  audience: z.string().optional(),
+  searchIntent: z.string().optional(),
+  tone: z.enum(TONES).default("professional"),
+  contentLength: z.number().min(500).max(5000).default(2000),
+
+  // Optional: custom outline + reference sources
+  outlineJson: outlineJsonSchema.optional(),
+  sources: z.array(sourceSchema).optional(),
+
+  // Scheduling
+  priority: z.enum(PRIORITIES).default("NORMAL"),
+  /**
+   * true  - dispatch to the planning queue immediately on submit.
+   * false - leave the row PENDING so the next publish slot (or the
+   *         daily-target reconcile tick) picks it up at its scheduled time.
+   */
+  startNow: z.boolean().default(true),
+});
+
+export type BlogInputFormData = z.infer<typeof blogInputSchema>;
+
+export type SubmitResult =
+  | { success: true; id: string; status: string; message: string }
+  | { success: false; error: string };
+
+/** Mirrors workers/shared/blog-input.ts's slugifyTitle - keep the two in step. */
+export function slugifyTitle(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, "")
+    .trim()
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/(^-|-$)/g, "");
+}
+
+/** "a, b , c" -> ["a","b","c"], dropping blanks so a trailing comma is harmless. */
+export function splitKeywords(value: string): string[] {
+  return value
+    .split(",")
+    .map((keyword) => keyword.trim())
+    .filter(Boolean);
+}
