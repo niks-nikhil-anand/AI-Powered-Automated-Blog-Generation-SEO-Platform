@@ -4,7 +4,7 @@ import { PrismaTransport } from "./log-transport";
 
 /**
  * Shared Winston logger for all workers. Each worker should call
- * `logger.child({ worker: "research-worker" })` so log lines are
+ * `logger.child({ worker: "writing-worker" })` so log lines are
  * attributable, matching the README's "Worker logs and error traces"
  * dashboard requirement.
  */
