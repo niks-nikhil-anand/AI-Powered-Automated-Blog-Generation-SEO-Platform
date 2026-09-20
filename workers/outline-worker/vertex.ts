@@ -20,7 +20,27 @@ function asStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.map(String) : [];
 }
 
-function buildPrompt(topic: string, category: string, plan: PlanInput): string {
+export type OutlineSpec = {
+  metaTitle?: string | null;
+  metaDescription?: string | null;
+  contentLength?: number | null;
+  /** True when the submission carries reference sources to ground claims in. */
+  sourced: boolean;
+};
+
+function buildPrompt(topic: string, category: string, plan: PlanInput, spec: OutlineSpec): string {
+  const claimsKey = spec.sourced
+    ? `, "claims": [{"text":"exact factual claim","evidenceSourceIds":["S1"]}]`
+    : "";
+  const claimsRule = spec.sourced
+    ? `Every factual section must include claims drawn from the supplied planned claims, each mapped to its evidence source id.`
+    : `This submission has no reference sources: omit "claims" entirely and keep every bullet conceptual or instructional rather than a checkable factual assertion.`;
+  const editorMeta = [
+    spec.metaTitle ? `Meta title (editor-specified, use verbatim): ${spec.metaTitle}` : null,
+    spec.metaDescription ? `Meta description (editor-specified, use verbatim): ${spec.metaDescription}` : null,
+    spec.contentLength ? `Target article length: ${spec.contentLength} words - size the section count accordingly` : null,
+  ].filter(Boolean).join("\n");
+
   return `You are a senior technical editor creating an SEO article outline.
 
 Topic: ${topic}
@@ -32,6 +52,7 @@ Primary keyword: ${plan.primaryKeyword}
 Secondary keywords: ${asStringArray(plan.secondaryKeywords).join(", ")}
 Competitor notes: ${asStringArray(plan.competitorNotes).join("; ")}
 Evidence-backed planned claims: ${JSON.stringify(plan.plannedClaims ?? [])}
+${editorMeta}
 
 Return ONLY a JSON object with these keys:
 {
@@ -40,23 +61,23 @@ Return ONLY a JSON object with these keys:
   "metaTitle": "under 60 characters",
   "metaDescription": "under 160 characters",
   "sections": [
-    { "heading": "H2 heading", "intent": "what this section achieves", "bullets": ["3-5 evidence-bounded bullet points"], "claims": [{"text":"exact factual claim","evidenceSourceIds":["S1"]}] }
+    { "heading": "H2 heading", "intent": "what this section achieves", "bullets": ["3-5 evidence-bounded bullet points"]${claimsKey} }
   ],
   "faqs": [
     { "question": "reader question", "answerIntent": "what the answer should cover" }
   ]
 }
 
-Create 5-8 sections and 3-5 FAQs. Every factual section must include sourceMarkers from the supplied planned claims. Never invent benefits, common problems, recommendations, commands, APIs, or implementation details. If evidence is narrow, make the section narrower.`;
+Create 5-8 sections and 3-5 FAQs. ${claimsRule} Never invent benefits, common problems, recommendations, commands, APIs, or implementation details you cannot justify from the brief above.`;
 }
 
-function fallbackOutline(topic: string, plan: PlanInput): OutlineResult {
+function fallbackOutline(topic: string, plan: PlanInput, spec: OutlineSpec): OutlineResult {
   const title = topic.length > 70 ? `${topic.slice(0, 67)}...` : topic;
   return {
     title,
     slug: slugify(title),
-    metaTitle: title.slice(0, 60),
-    metaDescription: `${plan.angle || `A practical developer guide to ${topic}`}`.slice(0, 160),
+    metaTitle: (spec.metaTitle || title).slice(0, 60),
+    metaDescription: (spec.metaDescription || plan.angle || `A practical developer guide to ${topic}`).slice(0, 160),
     sections: [
       {
         heading: "Why This Matters",
@@ -94,23 +115,24 @@ function fallbackOutline(topic: string, plan: PlanInput): OutlineResult {
 export async function generateContentOutline(
   topic: string,
   category: string,
-  plan: PlanInput
+  plan: PlanInput,
+  spec: OutlineSpec
 ): Promise<{ outline: OutlineResult; usage: { promptTokens: number; completionTokens: number }; model: string }> {
   if (!isVertexConfigured) {
     return {
-      outline: fallbackOutline(topic, plan),
+      outline: fallbackOutline(topic, plan, spec),
       usage: { promptTokens: 0, completionTokens: 0 },
       model: "fallback",
     };
   }
 
   const model = await getSetting(MODEL_SETTING_KEYS.outline, env.VERTEX_FLASH);
-  const result = await generateVertexJson<unknown>(model, buildPrompt(topic, category, plan));
+  const result = await generateVertexJson<unknown>(model, buildPrompt(topic, category, plan, spec));
   const parsed = OutlineResultSchema.safeParse(result.data);
   if (!parsed.success) {
     log.warn(`Outline response failed schema validation, using fallback: ${parsed.error.message}`);
     return {
-      outline: fallbackOutline(topic, plan),
+      outline: fallbackOutline(topic, plan, spec),
       usage: result.usage,
       model: "fallback",
     };
