@@ -10,7 +10,7 @@ const log = logger.child({ worker: "vertex", stage: "rate-limit" });
  *
  * Workers run as SEPARATE Docker containers, so the in-process semaphore
  * in shared/vertex.ts can only smooth one process - it cannot stop the
- * research container's semantic burst from 429-ing the planning
+ * writing container's section burst from 429-ing the planning
  * container. This module coordinates through Redis instead:
  *
  *  - acquireModelSlot(): fixed-window (60s) per-model-class request
