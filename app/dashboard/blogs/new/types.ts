@@ -55,6 +55,31 @@ const outlineClaimSchema = z.preprocess((value) => {
   evidenceSourceIds: evidenceIdsSchema,
 }));
 
+export const outlineParagraphSchema = z.object({
+  heading: z.string().min(1),
+  discuss: z.array(z.string()).optional().default([]),
+  keywords: z.array(z.string()).optional().default([]),
+}).passthrough();
+
+export const outlineComparisonTableSchema = z.object({
+  columns: z.array(z.string()),
+  rows: z.array(z.string()),
+  instructions: z.string().optional(),
+}).passthrough();
+
+export const outlineSectionSchema = z.object({
+  heading: z.string().min(1),
+  intent: z.string().optional(),
+  description: z.string().optional(),
+  bullets: z.array(z.string()).optional(),
+  wordTarget: z.number().optional(),
+  targetWords: z.number().optional(),
+  claims: z.array(outlineClaimSchema).optional(),
+  paragraphs: z.array(outlineParagraphSchema).optional(),
+  subsections: z.array(outlineParagraphSchema).optional(),
+  comparisonTable: outlineComparisonTableSchema.optional(),
+}).passthrough();
+
 /**
  * Optional pre-structured outline. Only section headings are required - the
  * outline worker fills in intents and bullets it wasn't given (see
@@ -62,27 +87,17 @@ const outlineClaimSchema = z.preprocess((value) => {
  * the worker side).
  */
 export const outlineJsonSchema = z.object({
-  sections: z
-    .array(
-      z.object({
-        heading: z.string().min(1),
-        intent: z.string().optional(),
-        bullets: z.array(z.string()).optional(),
-        wordTarget: z.number().optional(),
-        claims: z.array(outlineClaimSchema).optional(),
-      })
-    )
-    .min(1),
+  sections: z.array(outlineSectionSchema).min(1),
   faqs: z
     .array(
       z.object({
         question: z.string().min(1),
         answer: z.string().optional(),
         answerIntent: z.string().optional(),
-      })
+      }).passthrough()
     )
     .optional(),
-});
+}).passthrough();
 
 /**
  * Optional reference sources. Supplying these switches the whole pipeline
@@ -123,7 +138,46 @@ const sourcesSchema = z.preprocess((value) => {
   });
 }, z.array(sourceSchema));
 
-export const blogInputSchema = z.object({
+export const generationInstructionsSchema = z
+  .object({
+    mustFollow: z.array(z.string()).optional(),
+  })
+  .passthrough();
+
+export const blogInputSchema = z.preprocess((raw: unknown) => {
+  if (raw && typeof raw === "object") {
+    const obj = { ...(raw as Record<string, unknown>) };
+    if (!obj.outlineJson && obj.outline && typeof obj.outline === "object") {
+      obj.outlineJson = obj.outline;
+    }
+    if (!obj.focusKeyword && typeof obj.targetKeyword === "string") {
+      obj.focusKeyword = obj.targetKeyword;
+    }
+    if (!obj.primaryKeywords && typeof obj.targetKeyword === "string") {
+      obj.primaryKeywords = [obj.targetKeyword];
+    }
+    if (!obj.contentLength && typeof obj.targetWordCount === "number") {
+      obj.contentLength = obj.targetWordCount;
+    }
+    if (!obj.audience && obj.generationInstructions && typeof obj.generationInstructions === "object") {
+      const generationInstructions = obj.generationInstructions as Record<string, unknown>;
+      if (typeof generationInstructions.audience === "string") obj.audience = generationInstructions.audience;
+    }
+    if (!obj.writingInstructions && obj.generationInstructions && typeof obj.generationInstructions === "object") {
+      const generationInstructions = obj.generationInstructions as Record<string, unknown>;
+      const instructions = [
+        generationInstructions.writingStyle,
+        ...(Array.isArray(generationInstructions.requirements) ? generationInstructions.requirements : []),
+      ]
+        .map(String)
+        .map((item) => item.trim())
+        .filter(Boolean);
+      if (instructions.length > 0) obj.writingInstructions = instructions;
+    }
+    return obj;
+  }
+  return raw;
+}, z.object({
   title: z.string().min(10).max(200),
   slug: z.string().min(3).max(100).optional(),
   category: z.string().optional(),
@@ -132,6 +186,9 @@ export const blogInputSchema = z.object({
   focusKeyword: z.string().optional(),
   primaryKeywords: z.array(z.string()).default([]),
   secondaryKeywords: z.array(z.string()).default([]),
+  competitorKeywords: z.array(z.string()).optional(),
+  longTailKeywords: z.array(z.string()).optional(),
+  semanticKeywords: z.array(z.string()).optional(),
   metaTitle: z.string().max(60).optional(),
   metaDescription: z.string().max(160).optional(),
 
@@ -140,6 +197,15 @@ export const blogInputSchema = z.object({
   searchIntent: z.string().optional(),
   tone: z.enum(TONES).default("professional"),
   contentLength: z.number().min(500).max(5000).default(2000),
+  contentGoal: z.string().optional(),
+  contentAngle: z.string().optional(),
+  uniqueValueProposition: z.string().optional(),
+  specs: z.record(z.string(), z.unknown()).optional(),
+  internalLinks: z.array(z.string()).optional(),
+  writingInstructions: z.array(z.string()).optional(),
+  generationInstructions: generationInstructionsSchema.optional(),
+  seoRequirements: z.record(z.string(), z.unknown()).optional(),
+  publishing: z.record(z.string(), z.unknown()).optional(),
 
   // Optional: custom outline + reference sources
   outlineJson: outlineJsonSchema.optional(),
@@ -154,7 +220,7 @@ export const blogInputSchema = z.object({
    *         daily-target reconcile tick) picks it up at its scheduled time.
    */
   startNow: z.boolean().default(true),
-});
+}).passthrough());
 
 export type BlogInputFormData = z.infer<typeof blogInputSchema>;
 
