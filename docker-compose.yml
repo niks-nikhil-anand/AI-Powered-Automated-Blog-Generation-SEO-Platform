@@ -1,17 +1,4 @@
 services:
-  postgres:
-    image: postgres:16-alpine
-    container_name: blog-agent-postgres
-    ports:
-      - "5432:5432"
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgrespassword
-      POSTGRES_DB: blogdb
-    volumes:
-      - auto_blog_postgres_data:/var/lib/postgresql/data
-    restart: always
-
   redis:
     image: redis:7-alpine
     container_name: blog-agent-redis
@@ -36,10 +23,8 @@ services:
     environment:
       - NODE_ENV=production
       - REDIS_URL=redis://redis:6379
-      - DATABASE_URL=postgresql://postgres:postgrespassword@postgres:5432/blogdb?schema=public
     depends_on:
       - redis
-      - postgres
     restart: always
 
   # Vertex credentials are supplied as GCP_* environment variables. The
@@ -57,10 +42,8 @@ services:
     environment:
       - NODE_ENV=production
       - REDIS_URL=redis://redis:6379
-      - DATABASE_URL=postgresql://postgres:postgrespassword@postgres:5432/blogdb?schema=public
     depends_on:
       - redis
-      - postgres
     restart: always
 
   planning-worker:
@@ -72,10 +55,8 @@ services:
     environment:
       - NODE_ENV=production
       - REDIS_URL=redis://redis:6379
-      - DATABASE_URL=postgresql://postgres:postgrespassword@postgres:5432/blogdb?schema=public
     depends_on:
       - redis
-      - postgres
     restart: always
 
   outline-worker:
@@ -87,10 +68,8 @@ services:
     environment:
       - NODE_ENV=production
       - REDIS_URL=redis://redis:6379
-      - DATABASE_URL=postgresql://postgres:postgrespassword@postgres:5432/blogdb?schema=public
     depends_on:
       - redis
-      - postgres
     restart: always
 
   writing-worker:
@@ -102,10 +81,8 @@ services:
     environment:
       - NODE_ENV=production
       - REDIS_URL=redis://redis:6379
-      - DATABASE_URL=postgresql://postgres:postgrespassword@postgres:5432/blogdb?schema=public
     depends_on:
       - redis
-      - postgres
     restart: always
 
   image-worker:
@@ -117,10 +94,8 @@ services:
     environment:
       - NODE_ENV=production
       - REDIS_URL=redis://redis:6379
-      - DATABASE_URL=postgresql://postgres:postgrespassword@postgres:5432/blogdb?schema=public
     depends_on:
       - redis
-      - postgres
     restart: always
 
   # quality-worker calls Vertex (Gemini vision) for the featured-image
@@ -136,10 +111,8 @@ services:
     environment:
       - NODE_ENV=production
       - REDIS_URL=redis://redis:6379
-      - DATABASE_URL=postgresql://postgres:postgrespassword@postgres:5432/blogdb?schema=public
     depends_on:
       - redis
-      - postgres
     restart: always
 
   publish-worker:
@@ -151,12 +124,9 @@ services:
     environment:
       - NODE_ENV=production
       - REDIS_URL=redis://redis:6379
-      - DATABASE_URL=postgresql://postgres:postgrespassword@postgres:5432/blogdb?schema=public
     depends_on:
       - redis
-      - postgres
     restart: always
 
 volumes:
   redis_data:
-  auto_blog_postgres_data:
