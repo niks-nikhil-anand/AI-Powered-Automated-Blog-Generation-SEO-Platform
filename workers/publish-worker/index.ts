@@ -12,6 +12,7 @@ import {
   QualityGateError,
 } from "../shared/recovery";
 import { reconcileDailyTarget } from "../shared/daily-target";
+import { completeBlogInput, failBlogInput } from "../shared/blog-input";
 import { logVertexRuntimeConfig } from "../shared/vertex";
 import { withPipelineRetryPolicy } from "../shared/pipeline-retry-policy";
 import { withVertexTelemetryContext } from "../shared/vertex-telemetry-context";
@@ -52,6 +53,7 @@ export async function publishBlog(payload: PublishJobPayload) {
     });
     if (count === 0) {
       log.info(`Blog ${blog.id} already published, skipping`);
+      await completeBlogInput(blog.blogInputId);
       await passWorkerAttempt({
         workflowRunId: attempt.workflow.id,
         attemptId: attempt.attempt.id,
@@ -60,6 +62,9 @@ export async function publishBlog(payload: PublishJobPayload) {
       });
       return { blogId: blog.id, status: "PUBLISHED", score: blog.qualityReport.overallScore, published: true };
     }
+    // The submission is done: this is the one place the whole pipeline
+    // agrees a BlogInput reached COMPLETED.
+    await completeBlogInput(blog.blogInputId);
     const published = { ...blog, status: "PUBLISHED" as const };
     await passWorkerAttempt({
       workflowRunId: attempt.workflow.id,
@@ -86,6 +91,7 @@ export async function publishBlog(payload: PublishJobPayload) {
     };
   } catch (err) {
     await prisma.blog.update({ where: { id: blog.id }, data: { status: "PENDING_REVIEW" } });
+    await failBlogInput(blog.blogInputId, err);
     await failWorkerAttempt({
       workflowRunId: attempt.workflow.id,
       attemptId: attempt.attempt.id,
