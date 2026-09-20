@@ -84,7 +84,7 @@
 | **Database** | PostgreSQL + Prisma ORM (v7.9.1) |
 | **AI/LLM** | Vertex AI (Google Gemini 2.5 Pro/Flash) |
 | **Image Generation** | SVG rendering (local, $0 cost) |
-| **Logging** | Winston + Langfuse analytics |
+| **Logging** | Winston logging |
 | **Environment** | Docker Compose for local dev |
 
 ---
