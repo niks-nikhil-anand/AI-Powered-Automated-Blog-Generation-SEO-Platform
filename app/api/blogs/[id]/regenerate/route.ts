@@ -66,7 +66,7 @@ export async function POST(_request: Request, context: RouteContext) {
     // Epoch-keyed jobId: double-clicking "Regenerate" before the job runs
     // dedupes on the same attempt count; once it runs, the count moves and
     // the next click is a fresh job. Never collides with the fresh write
-    // (write-${trendId}) or QA requeues (write-${trendId}-qaN).
+    // (write-${blogInputId}) or QA requeues (write-${blogInputId}-qaN).
     const job = await writingQueue.add(
       "write_blog",
       {
@@ -75,7 +75,7 @@ export async function POST(_request: Request, context: RouteContext) {
           reason: "manual_regenerate_requested",
         },
       },
-      { jobId: JOB_IDS.writeManualRegen(lastWritingInput.trendId, writingAttemptCount) }
+      { jobId: JOB_IDS.writeManualRegen(lastWritingInput.blogInputId, writingAttemptCount) }
     );
 
     await prisma.blog.update({
