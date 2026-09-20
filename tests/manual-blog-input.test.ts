@@ -3,6 +3,7 @@ import { blogInputSchema, slugifyTitle, splitKeywords } from "../app/dashboard/b
 import { outlineFromUserInput, parseUserOutline } from "../workers/outline-worker/user-outline";
 import { OutlineResultSchema, OutlineSectionSchema } from "../workers/outline-worker/types";
 import { wordRange } from "../workers/writing-worker/vertex";
+import { canonicalEvidenceSources } from "../workers/shared/evidence";
 
 /* ---------------------------------------------------------------- */
 /* Submission schema                                                 */
@@ -138,6 +139,10 @@ assert.deepEqual(faqOutline.sections[0].claims, [
   { text: "Setup requires installing the package.", evidenceSourceIds: ["S1"] },
 ]);
 
+import { buildSectionPlan, DEFAULT_MUST_FOLLOW_RULES } from "../workers/writing-worker/sections";
+import { scoreBlogQuality } from "../workers/quality-worker/scorer";
+import { validateArticleContract } from "../workers/shared/article-contract";
+
 /* ---------------------------------------------------------------- */
 /* Word budget                                                       */
 /* ---------------------------------------------------------------- */
@@ -150,4 +155,587 @@ const fallback = wordRange(undefined);
 assert.ok(fallback.min > 0 && fallback.max >= fallback.min);
 assert.deepEqual(wordRange(0), fallback);
 
-console.log("manual-blog-input tests passed");
+const postgresMongoInput = blogInputSchema.parse({
+  title: "PostgreSQL vs MongoDB for Next.js Applications in 2026",
+  slug: "postgresql-vs-mongodb-nextjs-2026",
+  targetKeyword: "PostgreSQL vs MongoDB",
+  secondaryKeywords: [
+    "PostgreSQL vs MongoDB for Next.js",
+    "Next.js database comparison",
+    "MongoDB with Next.js",
+    "PostgreSQL with Next.js",
+    "Next.js database selection",
+  ],
+  metaTitle: "PostgreSQL vs MongoDB for Next.js in 2026",
+  metaDescription:
+    "Compare PostgreSQL and MongoDB for Next.js applications. Explore data modeling, performance, scalability, and how to choose the right database.",
+  targetWordCount: 1800,
+  internalLinks: [
+    "/blog/nextjs-app-router-guide",
+    "/blog/prisma-orm-guide",
+    "/blog/nextjs-full-stack-architecture",
+  ],
+  generationInstructions: {
+    tone: "Practical, technical, and developer-friendly",
+    audience: "Next.js developers building full-stack applications",
+    language: "English",
+    writingStyle: "Use clear explanations, concise paragraphs, technical examples, and balanced comparisons.",
+    requirements: [
+      "Explain the core differences between PostgreSQL and MongoDB.",
+      "Compare relational and document-based data modeling.",
+      "Discuss querying, indexing, transactions, and schema evolution.",
+      "Explain how both databases integrate with Next.js.",
+      "Include practical TypeScript examples where useful.",
+      "Discuss Prisma and MongoDB or PostgreSQL integration considerations.",
+      "Compare common application use cases.",
+      "Explain scalability and performance trade-offs without unsupported benchmarks.",
+      "Provide a practical database selection checklist.",
+      "Use the primary keyword naturally without keyword stuffing.",
+      "Avoid repetitive content and generic filler.",
+      "End with a concise decision framework rather than declaring one database universally better.",
+    ],
+  },
+  outlineJson: {
+    sections: [
+      {
+        heading: "Introduction",
+        level: 2,
+        description: "Introduce the database choice and why it matters for full-stack Next.js applications.",
+        targetWords: 150,
+      },
+      {
+        heading: "PostgreSQL vs MongoDB: Core Differences",
+        level: 2,
+        description: "Explain relational tables, document collections, data structure, and query models.",
+        targetWords: 250,
+      },
+      {
+        heading: "Data Modeling and Schema Flexibility",
+        level: 2,
+        description: "Compare relational modeling, document modeling, relationships, and schema evolution.",
+        targetWords: 250,
+      },
+      {
+        heading: "Performance, Indexing, and Transactions",
+        level: 2,
+        description: "Compare indexing, query patterns, transactional capabilities, and performance considerations.",
+        targetWords: 250,
+      },
+      {
+        heading: "Using PostgreSQL and MongoDB with Next.js",
+        level: 2,
+        description: "Explain integration patterns with Next.js server-side code and database clients.",
+        targetWords: 300,
+      },
+      {
+        heading: "Real-World Use Cases",
+        level: 2,
+        description: "Compare suitability for SaaS platforms, dashboards, content systems, and flexible data applications.",
+        targetWords: 250,
+      },
+      {
+        heading: "How to Choose the Right Database",
+        level: 2,
+        description: "Provide a practical checklist based on relationships, query patterns, consistency, and team expertise.",
+        targetWords: 200,
+      },
+      {
+        heading: "Conclusion",
+        level: 2,
+        description: "Summarize the trade-offs and provide a concise decision framework for developers.",
+        targetWords: 150,
+      },
+    ],
+  },
+});
+
+assert.equal(postgresMongoInput.focusKeyword, "PostgreSQL vs MongoDB");
+assert.deepEqual(postgresMongoInput.primaryKeywords, ["PostgreSQL vs MongoDB"]);
+assert.equal(postgresMongoInput.contentLength, 1800);
+assert.equal(postgresMongoInput.audience, "Next.js developers building full-stack applications");
+assert.ok(postgresMongoInput.writingInstructions?.some((item) => item.includes("database selection checklist")));
+const postgresMongoOutline = parseUserOutline(postgresMongoInput.outlineJson);
+assert.notEqual(postgresMongoOutline, null);
+const postgresMongoGeneratedOutline = outlineFromUserInput(postgresMongoOutline!, {
+  title: postgresMongoInput.title,
+  metaTitle: postgresMongoInput.metaTitle ?? null,
+  metaDescription: postgresMongoInput.metaDescription ?? null,
+  angle: "Next.js database comparison",
+  slug: postgresMongoInput.slug ?? "postgresql-vs-mongodb-nextjs-2026",
+});
+assert.equal(postgresMongoGeneratedOutline.sections[0].intent, "Introduce the database choice and why it matters for full-stack Next.js applications.");
+assert.equal(postgresMongoGeneratedOutline.sections[0].wordTarget, 150);
+const postgresMongoSectionPlan = buildSectionPlan({
+  title: postgresMongoInput.title,
+  topic: postgresMongoInput.title,
+  description: "Next.js database comparison",
+  outline: { sections: postgresMongoGeneratedOutline.sections, faqs: postgresMongoGeneratedOutline.faqs },
+  keywords: postgresMongoInput.primaryKeywords,
+  targetWords: postgresMongoInput.contentLength,
+  specs: postgresMongoInput as Record<string, unknown>,
+});
+assert.equal(postgresMongoSectionPlan[0].kind, "intro");
+assert.equal(postgresMongoSectionPlan[0].wordTarget, 150);
+assert.equal(postgresMongoSectionPlan[2].heading, "PostgreSQL vs MongoDB: Core Differences");
+
+/* ---------------------------------------------------------------- */
+/* Full custom user specification with subsections & comparisonTable*/
+/* ---------------------------------------------------------------- */
+
+const userFullInput = {
+  title: "Next.js vs Nuxt vs SvelteKit: Which Framework Should You Choose in 2026?",
+  slug: "nextjs-vs-nuxt-vs-sveltekit-2026",
+  category: "Web Development",
+  focusKeyword: "Next.js vs Nuxt vs SvelteKit",
+  primaryKeywords: [
+    "Next.js vs Nuxt",
+    "Next.js vs SvelteKit",
+    "Nuxt vs SvelteKit",
+  ],
+  secondaryKeywords: [
+    "Next.js alternatives",
+    "Nuxt framework",
+    "SvelteKit framework",
+  ],
+  competitorKeywords: [
+    "Next.js vs Remix",
+    "Next.js vs Astro",
+  ],
+  contentGoal: "Help developers choose the right framework",
+  contentAngle: "Pragmatic, real-world comparison",
+  uniqueValueProposition: "Unbiased benchmarked guide",
+  contentLength: 2500,
+  tone: "technical" as const,
+  writingInstructions: [
+    "Use deep technical explanations",
+    "Compare SSR and hydration strategies",
+  ],
+  generationInstructions: {
+    mustFollow: [
+      "Generate every section defined in the outline in the exact specified order.",
+      "Do not skip, merge, or rename sections unless explicitly instructed.",
+      "Generate the requested word count for each section within a reasonable tolerance.",
+      "Include every required comparison table, code example, FAQ, and conclusion.",
+      "Do not stop generation until all outline sections have been completed.",
+      "Never end a section or article mid-sentence.",
+      "Ensure every heading in the outline appears in the final article.",
+      "Ensure every FAQ question has a complete answer.",
+      "Verify factual claims against the provided evidence sources.",
+      "Do not invent benchmark results or unsupported technical claims.",
+      "Use SEO keywords naturally without keyword stuffing.",
+      "Before returning the article, verify that all required sections are present and complete.",
+    ],
+  },
+  internalLinks: [
+    "https://example.com/react-guide",
+    "https://example.com/vue-guide",
+  ],
+  outlineJson: {
+    sections: [
+      {
+        heading: "The Modern Full-Stack JavaScript Landscape in 2026",
+        intent: "Set context on modern web frameworks",
+        paragraphs: [
+          {
+            heading: "The Shift Towards Hybrid Rendering",
+            discuss: ["Server components", "Edge computing"],
+            keywords: ["SSR", "hybrid rendering"],
+          },
+          {
+            heading: "Developer Experience vs Runtime Performance",
+            discuss: ["Build times", "Bundle size"],
+          },
+        ],
+      },
+      {
+        heading: "Next.js vs Nuxt vs SvelteKit: Quick Comparison",
+        intent: "Provide a quick comparison table",
+        comparisonTable: {
+          columns: ["Feature", "Next.js", "Nuxt", "SvelteKit"],
+          rows: [
+            "Ecosystem Size | Massive | Large | Growing",
+            "Performance | Great | Great | Exceptional",
+          ],
+          instructions: "Render a comprehensive Markdown table comparing all three.",
+        },
+      },
+      {
+        heading: "Deep Dive: Architectural Differences",
+        intent: "Analyze React vs Vue vs Svelte compilation models",
+        subsections: [
+          {
+            heading: "Next.js and React Server Components",
+            discuss: ["RSC execution model", "Streaming SSR"],
+          },
+          {
+            heading: "Nuxt and Vue 3 Reactivity",
+            discuss: ["Pinia integration", "Nitro engine"],
+          },
+          {
+            heading: "SvelteKit and Runes",
+            discuss: ["Compiler approach", "Zero virtual DOM overhead"],
+          },
+        ],
+      },
+      {
+        heading: "Frequently Asked Questions",
+        isFaq: true,
+        subsections: [
+          {
+            heading: "Which framework is easiest for beginners?",
+            discuss: ["SvelteKit has the gentlest learning curve"],
+          },
+          {
+            heading: "Which is best for enterprise SaaS?",
+            discuss: ["Next.js due to massive ecosystem and talent pool"],
+          },
+        ],
+      },
+      {
+        heading: "Final Verdict: Making the Right Choice in 2026",
+        intent: "Summary and recommendations",
+        bullets: ["Decision matrix based on team and requirements"],
+      },
+    ],
+  },
+};
+
+const parsedInput = blogInputSchema.parse(userFullInput);
+assert.equal(parsedInput.contentLength, 2500);
+assert.equal(parsedInput.category, "Web Development");
+assert.equal(parsedInput.tone, "technical");
+assert.deepEqual(parsedInput.writingInstructions, userFullInput.writingInstructions);
+assert.deepEqual(parsedInput.internalLinks, userFullInput.internalLinks);
+assert.deepEqual(parsedInput.competitorKeywords, userFullInput.competitorKeywords);
+assert.deepEqual(
+  parsedInput.generationInstructions?.mustFollow,
+  userFullInput.generationInstructions.mustFollow
+);
+
+// Outline alias support
+const outlineAliasInput = blogInputSchema.parse({
+  title: "Test Blog With Outline Alias",
+  outline: {
+    sections: [{ heading: "Introduction" }, { heading: "Conclusion" }],
+  },
+});
+assert.ok(outlineAliasInput.outlineJson !== undefined);
+assert.equal(parseUserOutline(outlineAliasInput.outlineJson)?.sections.length, 2);
+
+// Verify outline preservation
+const userOutline = parseUserOutline(parsedInput.outlineJson);
+assert.notEqual(userOutline, null);
+
+const generatedOutline = outlineFromUserInput(userOutline!, {
+  title: parsedInput.title,
+  metaTitle: parsedInput.metaTitle ?? null,
+  metaDescription: parsedInput.metaDescription ?? null,
+  angle: parsedInput.contentAngle ?? "Comprehensive comparison",
+  slug: parsedInput.slug ?? "nextjs-vs-nuxt-vs-sveltekit-2026",
+});
+
+assert.equal(generatedOutline.sections.length, 5);
+assert.equal(generatedOutline.sections[0].heading, "The Modern Full-Stack JavaScript Landscape in 2026");
+assert.equal(generatedOutline.sections[0].subsections?.length, 2);
+assert.equal(generatedOutline.sections[0].subsections?.[0].heading, "The Shift Towards Hybrid Rendering");
+assert.deepEqual(generatedOutline.sections[0].subsections?.[0].discuss, ["Server components", "Edge computing"]);
+
+assert.equal(generatedOutline.sections[1].comparisonTable?.columns.length, 4);
+assert.equal(generatedOutline.sections[1].comparisonTable?.rows.length, 2);
+
+// Auto-extracted FAQs from FAQ section
+assert.equal(generatedOutline.faqs.length, 2);
+assert.equal(generatedOutline.faqs[0].question, "Which framework is easiest for beginners?");
+
+// Build Section Plan
+const sectionPlan = buildSectionPlan({
+  title: parsedInput.title,
+  topic: parsedInput.title,
+  description: "Comprehensive comparison",
+  outline: { sections: generatedOutline.sections, faqs: generatedOutline.faqs },
+  keywords: parsedInput.primaryKeywords,
+  targetWords: 2500,
+  specs: parsedInput as Record<string, unknown>,
+});
+
+// The plan MUST follow the user's custom outline, not the generic 14-section skeleton!
+assert.equal(sectionPlan[0].kind, "intro");
+assert.equal(sectionPlan[1].kind, "toc"); // Table of contents inserted after intro
+assert.equal(sectionPlan[2].heading, "The Modern Full-Stack JavaScript Landscape in 2026");
+assert.equal(sectionPlan[2].kind, "subsections");
+assert.equal(sectionPlan[2].subsections?.length, 2);
+
+assert.equal(sectionPlan[3].heading, "Next.js vs Nuxt vs SvelteKit: Quick Comparison");
+assert.equal(sectionPlan[3].kind, "table");
+assert.ok(sectionPlan[3].comparisonTable !== undefined);
+
+assert.equal(sectionPlan[4].heading, "Deep Dive: Architectural Differences");
+assert.equal(sectionPlan[4].subsections?.length, 3);
+
+assert.equal(sectionPlan[5].heading, "Frequently Asked Questions");
+assert.equal(sectionPlan[5].kind, "faq");
+
+assert.equal(sectionPlan[6].heading, "Final Verdict: Making the Right Choice in 2026");
+
+// Total word targets must sum to approximately 2500 words
+const totalBudgetedWords = sectionPlan.reduce((sum, s) => sum + s.wordTarget, 0);
+assert.ok(
+  totalBudgetedWords >= 2300 && totalBudgetedWords <= 2700,
+  `Budgeted words ${totalBudgetedWords} should be around 2500`
+);
+
+const shortContract = validateArticleContract({
+  content: `# ${parsedInput.title}
+
+Short intro.
+
+## The Modern Full-Stack JavaScript Landscape in 2026
+Tiny section.`,
+  targetWords: parsedInput.contentLength,
+  outlineSections: generatedOutline.sections,
+  focusKeyword: parsedInput.focusKeyword,
+  primaryKeywords: parsedInput.primaryKeywords,
+  secondaryKeywords: parsedInput.secondaryKeywords,
+  metaTitle: parsedInput.title.slice(0, 60),
+  metaDescription: "Too short.",
+  internalLinks: parsedInput.internalLinks,
+});
+assert.equal(shortContract.passed, false);
+assert.ok(shortContract.reasons.some((reason) => reason.startsWith("Word count")));
+assert.ok(shortContract.reasons.some((reason) => reason.includes("Missing outline section")));
+assert.ok(shortContract.reasons.some((reason) => reason.includes("SEO meta description")));
+
+const completeContractContent = `# ${parsedInput.title}
+
+Next.js vs Nuxt vs SvelteKit is the central decision for teams choosing a modern full-stack JavaScript framework in 2026. This guide compares the frameworks through architecture, rendering strategy, ecosystem maturity, and team fit. Developers weighing Next.js vs Nuxt, Next.js vs SvelteKit, and Nuxt vs SvelteKit need a practical view of trade-offs, not a generic ranking.
+
+## Table of Contents
+- [The Modern Full-Stack JavaScript Landscape in 2026](#the-modern-full-stack-javascript-landscape-in-2026)
+- [Next.js vs Nuxt vs SvelteKit: Quick Comparison](#nextjs-vs-nuxt-vs-sveltekit-quick-comparison)
+- [Deep Dive: Architectural Differences](#deep-dive-architectural-differences)
+- [Frequently Asked Questions](#frequently-asked-questions)
+- [Final Verdict: Making the Right Choice in 2026](#final-verdict-making-the-right-choice-in-2026)
+
+## The Modern Full-Stack JavaScript Landscape in 2026
+The modern JavaScript landscape is shaped by SSR, hybrid rendering, routing conventions, deployment adapters, and developer experience. Teams compare Next.js alternatives because each framework makes different choices about compilation, data loading, caching, and runtime placement.
+
+### The Shift Towards Hybrid Rendering
+Server components and edge computing changed how teams split work between servers, clients, and deployment platforms.
+
+### Developer Experience vs Runtime Performance
+Build times, bundle size, and local feedback loops matter because developer experience eventually affects production quality.
+
+## Next.js vs Nuxt vs SvelteKit: Quick Comparison
+The quick comparison shows where each framework tends to fit.
+
+| Feature | Next.js | Nuxt | SvelteKit |
+| --- | --- | --- | --- |
+| Ecosystem Size | Massive | Large | Growing |
+| Performance | Great | Great | Exceptional |
+
+## Deep Dive: Architectural Differences
+Architecture is the real difference between the three frameworks.
+
+### Next.js and React Server Components
+Next.js uses React Server Components, streaming SSR, and file-system routing to support large React applications.
+
+### Nuxt and Vue 3 Reactivity
+Nuxt framework applications build on Vue 3 reactivity, Nitro server routes, and convention-driven modules.
+
+### SvelteKit and Runes
+SvelteKit framework applications lean on compilation and fine-grained reactivity instead of a virtual DOM.
+
+## Frequently Asked Questions
+These questions cover common framework selection concerns.
+
+### Which framework is easiest for beginners?
+SvelteKit has a smaller conceptual surface for many teams, though Vue developers may prefer Nuxt.
+
+### Which is best for enterprise SaaS?
+Next.js is often practical for enterprise SaaS because the React ecosystem and hiring pool are broad.
+
+## Final Verdict: Making the Right Choice in 2026
+Choose based on team skill, rendering needs, deployment model, and long-term maintenance. Review related guides at https://example.com/react-guide and https://example.com/vue-guide. ` + "Next.js vs Nuxt vs SvelteKit architecture trade-offs help teams choose wisely. ".repeat(190);
+
+const completeContract = validateArticleContract({
+  content: completeContractContent,
+  targetWords: parsedInput.contentLength,
+  outlineSections: generatedOutline.sections,
+  focusKeyword: parsedInput.focusKeyword,
+  primaryKeywords: parsedInput.primaryKeywords,
+  secondaryKeywords: parsedInput.secondaryKeywords,
+  metaTitle: parsedInput.title.slice(0, 60),
+  metaDescription: "A practical technical comparison of Next.js, Nuxt, and SvelteKit for developers choosing a full-stack JavaScript framework in 2026.",
+  internalLinks: parsedInput.internalLinks,
+});
+assert.equal(completeContract.passed, true, completeContract.reasons.join("; "));
+
+// Quality Scorer with Custom Outline
+const sampleContent = `# ${parsedInput.title}
+
+In 2026, choosing a JavaScript framework is harder than ever.
+
+## Table of Contents
+- [The Modern Full-Stack JavaScript Landscape in 2026](#the-modern-full-stack-javascript-landscape-in-2026)
+- [Next.js vs Nuxt vs SvelteKit: Quick Comparison](#nextjs-vs-nuxt-vs-sveltekit-quick-comparison)
+- [Deep Dive: Architectural Differences](#deep-dive-architectural-differences)
+- [Frequently Asked Questions](#frequently-asked-questions)
+- [Final Verdict: Making the Right Choice in 2026](#final-verdict-making-the-right-choice-in-2026)
+
+## The Modern Full-Stack JavaScript Landscape in 2026
+Modern web development demands agility and speed.
+
+### The Shift Towards Hybrid Rendering
+Edge rendering and server components dominate.
+
+### Developer Experience vs Runtime Performance
+DX and user performance must be balanced.
+
+## Next.js vs Nuxt vs SvelteKit: Quick Comparison
+| Feature | Next.js | Nuxt | SvelteKit |
+| :--- | :--- | :--- | :--- |
+| Ecosystem | Massive | Large | Growing |
+
+## Deep Dive: Architectural Differences
+Let us examine the compilation paradigms.
+
+### Next.js and React Server Components
+React Server Components minimize client bundles.
+
+### Nuxt and Vue 3 Reactivity
+Reactivity in Vue 3 is powered by Proxies.
+
+### SvelteKit and Runes
+Runes provide granular compiler-driven reactivity.
+
+## Frequently Asked Questions
+Common queries from developers.
+
+### Which framework is easiest for beginners?
+SvelteKit has the gentlest learning curve.
+
+### Which is best for enterprise SaaS?
+Next.js offers the widest tooling support.
+
+## Final Verdict: Making the Right Choice in 2026
+Select based on your team's background and project requirements.
+` + "word ".repeat(1800);
+
+async function runAsyncTests() {
+  const qualityReport = await scoreBlogQuality({
+    id: "test-blog",
+    title: parsedInput.title,
+    slug: parsedInput.slug ?? "nextjs-vs-nuxt-vs-sveltekit-2026",
+    content: sampleContent,
+    excerpt: "Comparison of top frameworks",
+    blogInputId: "test-input",
+    outline: { sections: generatedOutline.sections },
+    seo: {
+      metaTitle: parsedInput.title,
+      metaDescription: "Guide to Next.js vs Nuxt vs SvelteKit in 2026",
+      keywords: parsedInput.primaryKeywords,
+      schema: {},
+    },
+  });
+  assert.ok(qualityReport.checks.some((check) => check.label === "Article Contract"));
+
+  assert.equal(DEFAULT_MUST_FOLLOW_RULES.length, 12);
+  assert.ok(
+    DEFAULT_MUST_FOLLOW_RULES.includes(
+      "Generate every section defined in the outline in the exact specified order."
+    )
+  );
+
+  const defaultSectionsContent = `# A Complete Guide to Modern Web Tools
+
+Introduction text.
+
+## Table of Contents
+- [What is Web Tools](#what-is-web-tools)
+- [Why it matters](#why-it-matters)
+- [Key Features](#key-features)
+- [Benefits](#benefits)
+- [How it Works](#how-it-works)
+- [Real World Use Cases](#real-world-use-cases)
+- [Pros and Cons](#pros-and-cons)
+- [Best Practices](#best-practices)
+- [Common Mistakes](#common-mistakes)
+- [FAQs](#faqs)
+- [Conclusion](#conclusion)
+- [Call To Action](#call-to-action)
+
+## What is Web Tools
+Definition.
+
+## Why it matters
+Importance.
+
+## Key Features
+Features.
+
+## Benefits
+Benefits.
+
+## How it Works
+Workflow.
+
+## Real World Use Cases
+Use cases.
+
+## Pros and Cons
+| Pro | Con |
+| --- | --- |
+| Fast | Complex |
+
+## Best Practices
+1. Practice 1.
+
+## Common Mistakes
+- Mistake 1.
+
+## FAQs
+### Question 1?
+Answer 1.
+
+## Conclusion
+Wrap up.
+
+## Call To Action
+CTA paragraph.
+` + "word ".repeat(1800);
+
+  const defaultReport = await scoreBlogQuality({
+    id: "test-default-blog",
+    title: "A Complete Guide to Modern Web Tools",
+    slug: "a-complete-guide-to-modern-web-tools",
+    content: defaultSectionsContent,
+    excerpt: "Overview of modern web tools",
+    blogInputId: "default-input",
+    seo: {
+      metaTitle: "A Complete Guide to Modern Web Tools",
+      metaDescription: "Guide to modern web tools",
+      keywords: ["web tools"],
+      schema: {},
+    },
+  });
+  const defaultCompleteness = defaultReport.checks.find((c) => c.label === "Content Completeness");
+  assert.ok(defaultCompleteness !== undefined);
+  assert.equal(
+    defaultCompleteness.score,
+    10,
+    `Standard 12 sections should score 10/10, got ${defaultCompleteness.score} (${defaultCompleteness.notes.join(", ")})`
+  );
+  // Verify that an unsourced submission (evidenceArticles: null/undefined) does not trigger evidence gate
+  const unsourcedSources = canonicalEvidenceSources(null);
+  assert.equal(unsourcedSources.length, 0);
+  const isSourced = unsourcedSources.length > 0;
+  assert.equal(isSourced, false);
+
+  console.log("All manual-blog-input tests passed successfully!");
+  process.exit(0);
+}
+
+runAsyncTests().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
