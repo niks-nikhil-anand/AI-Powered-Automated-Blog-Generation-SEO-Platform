@@ -1,13 +1,14 @@
 import { env } from "./env";
 import { redis } from "./redis";
-import { researchQueue } from "./queues";
+import { schedulerQueue } from "./queues";
 import { DAILY_TARGET_KEY, deleteSetting, getAllSettings, getSetting, setSetting } from "./settings";
 
 /**
  * Dynamic publish slots - one per Daily Blog Goal (docs: settings page).
  *
  * The goal N means "publish N blogs per day, each at its own configured
- * target publish time". Slot n's canonical value is its PUBLISH time, stored
+ * target publish time". A slot fires by pulling the next PENDING BlogInput
+ * off the submission backlog. Slot n's canonical value is its PUBLISH time, stored
  * in AppSetting as `schedule:blog-slot-<n>` = "M H * * *" (a plain daily
  * cron of the wall-clock publish time in env.TIMEZONE). The BullMQ job
  * scheduler registered in Redis fires GENERATION earlier than that by
@@ -158,7 +159,7 @@ export async function getPublishSlotView(): Promise<PublishSlotView[]> {
   const target = await readDailyTarget();
   const keys = Array.from({ length: target }, (_, i) => slotSettingKey(i + 1));
   const stored = await getAllSettings(keys);
-  const schedulers = await researchQueue.getJobSchedulers().catch(() => []);
+  const schedulers = await schedulerQueue.getJobSchedulers().catch(() => []);
   const nextByKey = new Map(
     schedulers.map((scheduler) => [scheduler.key, typeof scheduler.next === "number" ? scheduler.next : null])
   );
@@ -186,7 +187,7 @@ async function registerSlot(n: number): Promise<boolean> {
   const parsed = parseSlotTime(await getSetting<string | null>(slotSettingKey(n), null));
   if (!parsed) return false;
   const fire = fireClockTime(parsed.hour, parsed.minute, env.SLOT_GENERATION_LEAD_MINUTES);
-  await researchQueue.upsertJobScheduler(
+  await schedulerQueue.upsertJobScheduler(
     blogSlotId(n),
     { pattern: `${fire.minute} ${fire.hour} * * *`, tz: env.TIMEZONE },
     { name: "scheduled-slot", data: { slot: n } }
@@ -208,10 +209,10 @@ export async function reconcilePublishSlots(): Promise<number> {
     if (await registerSlot(n)) wanted.add(blogSlotId(n));
   }
 
-  const existing = await researchQueue.getJobSchedulers();
+  const existing = await schedulerQueue.getJobSchedulers();
   for (const scheduler of existing) {
     if (scheduler.key && scheduler.key.startsWith(BLOG_SLOT_PREFIX) && !wanted.has(scheduler.key)) {
-      await researchQueue.removeJobScheduler(scheduler.key);
+      await schedulerQueue.removeJobScheduler(scheduler.key);
     }
   }
   return target;
@@ -226,7 +227,7 @@ export async function reconcilePublishSlots(): Promise<number> {
 export async function upsertSlotTime(n: number, hour: number, minute: number): Promise<PublishSlotView> {
   await setSetting(slotSettingKey(n), `${minute} ${hour} * * *`);
   await registerSlot(n);
-  const schedulers = await researchQueue.getJobSchedulers();
+  const schedulers = await schedulerQueue.getJobSchedulers();
   const registered = schedulers.find((scheduler) => scheduler.key === blogSlotId(n));
   const fire = fireClockTime(hour, minute, env.SLOT_GENERATION_LEAD_MINUTES);
   return {
@@ -244,11 +245,11 @@ export async function upsertSlotTime(n: number, hour: number, minute: number): P
 /** Clears one slot's publish time (AppSetting row + Redis scheduler). */
 export async function clearSlotTime(n: number) {
   await deleteSetting(slotSettingKey(n));
-  await researchQueue.removeJobScheduler(blogSlotId(n)).catch(() => false);
+  await schedulerQueue.removeJobScheduler(blogSlotId(n)).catch(() => false);
 }
 
 // ---------------------------------------------------------------------------
-// Per-trend publish target (the "hold until" timestamp a slot's blog carries)
+// Per-input publish target (the "hold until" timestamp a slot's blog carries)
 // ---------------------------------------------------------------------------
 
 const PUBLISH_TARGET_PREFIX = "publish-target:";
@@ -260,18 +261,18 @@ const PUBLISH_TARGET_PREFIX = "publish-target:";
 const PUBLISH_TARGET_TTL_S = 36 * 60 * 60;
 
 /**
- * Recorded at dispatch time (slot run or backlog fallback) keyed by trendId.
- * The quality-worker looks it up via blog.trendId when queueing the publish
- * job, so the target flows Research -> ... -> Publish without threading an
- * extra field through every intermediate job payload.
+ * Recorded at dispatch time (slot run or backlog fallback) keyed by
+ * blogInputId. The quality-worker looks it up via blog.blogInputId when
+ * queueing the publish job, so the target flows Input -> ... -> Publish
+ * without threading an extra field through every intermediate job payload.
  */
-export async function setPublishTarget(trendId: string, targetPublishAtMs: number) {
-  await redis.set(PUBLISH_TARGET_PREFIX + trendId, String(targetPublishAtMs), "EX", PUBLISH_TARGET_TTL_S);
+export async function setPublishTarget(blogInputId: string, targetPublishAtMs: number) {
+  await redis.set(PUBLISH_TARGET_PREFIX + blogInputId, String(targetPublishAtMs), "EX", PUBLISH_TARGET_TTL_S);
 }
 
 /** Null when no slot context exists (manual runs, reconcile dispatches) - publish immediately. */
-export async function getPublishTarget(trendId: string): Promise<number | null> {
-  const raw = await redis.get(PUBLISH_TARGET_PREFIX + trendId).catch(() => null);
+export async function getPublishTarget(blogInputId: string): Promise<number | null> {
+  const raw = await redis.get(PUBLISH_TARGET_PREFIX + blogInputId).catch(() => null);
   const ts = raw ? Number(raw) : Number.NaN;
   return Number.isFinite(ts) ? ts : null;
 }
