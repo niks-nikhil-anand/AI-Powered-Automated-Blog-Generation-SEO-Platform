@@ -10,7 +10,7 @@ import {
   planningQueue,
   publishQueue,
   qualityQueue,
-  researchQueue,
+  schedulerQueue,
   writingQueue,
   QUEUE_NAMES,
 } from "@/workers/shared/queues";
@@ -24,7 +24,7 @@ export type QueueCounts = {
 };
 
 export type StageKey =
-  | "research"
+  | "scheduler"
   | "planning"
   | "outline"
   | "writing"
@@ -33,7 +33,7 @@ export type StageKey =
   | "publish";
 
 export const STAGE_QUEUES = {
-  research: researchQueue,
+  scheduler: schedulerQueue,
   planning: planningQueue,
   outline: outlineQueue,
   writing: writingQueue,
@@ -43,7 +43,7 @@ export const STAGE_QUEUES = {
 } as const;
 
 export const STAGE_ORDER: StageKey[] = [
-  "research",
+  "scheduler",
   "planning",
   "outline",
   "writing",
@@ -55,10 +55,10 @@ export const STAGE_ORDER: StageKey[] = [
 /** Queue instances keyed by BullMQ queue name (e.g. "writing_queue") - used by /api/workers/actions. */
 export const QUEUE_BY_NAME: Record<string, (typeof STAGE_QUEUES)[StageKey]> =
   Object.fromEntries(
-    STAGE_ORDER.map((stage) => [QUEUE_NAMES[stage], STAGE_QUEUES[stage]])
+    STAGE_ORDER.map((stage) => [QUEUE_NAMES[stage], STAGE_QUEUES[stage]] as const)
   );
 
-export async function queueCounts(queue: typeof researchQueue): Promise<QueueCounts> {
+export async function queueCounts(queue: typeof writingQueue): Promise<QueueCounts> {
   const counts = await queue.getJobCounts("active", "waiting", "delayed", "failed", "completed");
   return {
     active: counts.active ?? 0,
@@ -69,7 +69,7 @@ export async function queueCounts(queue: typeof researchQueue): Promise<QueueCou
   };
 }
 
-/** Counts for all seven stages, fetched in parallel. */
+/** Counts for every queue in STAGE_ORDER, fetched in parallel. */
 export async function allQueueCounts(): Promise<Record<StageKey, QueueCounts>> {
   const entries = await Promise.all(
     STAGE_ORDER.map(async (stage) => [stage, await queueCounts(STAGE_QUEUES[stage])] as const)
@@ -93,7 +93,7 @@ export type QueueHealth = {
  * means no process is consuming that queue right now, which is the honest
  * core of "worker health" and needs no heartbeat code in the workers.
  */
-export async function queueHealth(queue: typeof researchQueue): Promise<QueueHealth> {
+export async function queueHealth(queue: typeof writingQueue): Promise<QueueHealth> {
   const [workers, paused] = await Promise.all([queue.getWorkers(), queue.isPaused()]);
   return { consumers: workers.length, paused };
 }
@@ -108,7 +108,7 @@ export type QueueMetrics = {
  * per-minute *counts* only (no durations), so duration stats (avg/p95) are
  * computed from WorkerAttempt rows in /api/dashboard instead of here.
  */
-export async function queueMetrics(queue: typeof researchQueue): Promise<QueueMetrics> {
+export async function queueMetrics(queue: typeof writingQueue): Promise<QueueMetrics> {
   const [completed, failed] = await Promise.all([
     queue.getMetrics("completed", 0, 14).catch(() => null),
     queue.getMetrics("failed", 0, 14).catch(() => null),
@@ -131,7 +131,7 @@ export type FailedJobSnapshot = {
 };
 
 /**
- * Recently-failed BullMQ jobs across all seven queues (newest first). These
+ * Recently-failed BullMQ jobs across every queue (newest first). These
  * are the rows the job inspector can actually retry - unlike DB audit rows,
  * a failed BullMQ job accepts `job.retry()`.
  */
