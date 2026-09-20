@@ -20,7 +20,7 @@ function pct(hour: number, minute: number) {
   return ((hour * 60 + minute) / 1440) * 100;
 }
 
-/** 24h horizontal strip with the real research-worker slots plotted on it, plus a live "now" marker for the given timezone. */
+/** 24h horizontal strip with the real publish slots plotted on it, plus a live "now" marker for the given timezone. */
 export function ScheduleTimeline({ slots, tz }: ScheduleTimelineProps) {
   const now = useLiveNow();
   // Same hydration guard as WorldClocks: keep the live "now" marker out of
