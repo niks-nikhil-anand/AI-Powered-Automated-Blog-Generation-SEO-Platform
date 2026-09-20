@@ -50,7 +50,7 @@ export async function selectHeroImage(
   subject: string,
   recentHashes: string[]
 ): Promise<SelectedHeroImage> {
-  const seed = payload.trendId ?? payload.blogId;
+  const seed = payload.blogInputId ?? payload.blogId;
 
   if (env.IMAGE_AI_GENERATION_ENABLED && isVertexConfigured) {
     const usedStyles: string[] = [];
