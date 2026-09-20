@@ -89,8 +89,8 @@ export default function AssetLibraryPage() {
     currentPage * ASSETS_PAGE_SIZE
   );
 
-  // Render-time reset (not an effect) - see the comment in the Trends page
-  // for why: setState-in-effect is a lint error in this repo's config.
+  // Render-time reset rather than an effect: setState-in-effect is a lint
+  // error in this repo's config.
   const filterKey = `${selectedMonth}|${selectedType}|${viewMode}`;
   const [prevFilterKey, setPrevFilterKey] = useState(filterKey);
   if (filterKey !== prevFilterKey) {
