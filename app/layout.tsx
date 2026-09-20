@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "DevKit Market - AI Daily Blog Generator",
+  title: "DevKit Blogs - AI Daily Blog Generator",
   description: "Enterprise Automated AI Content Generation Pipeline & Operations Dashboard",
 };
 
