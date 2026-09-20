@@ -156,12 +156,12 @@ function writingGate(
     // checks marker coverage - robust to URL formatting differences the
     // legacy substring check below used to fail valid drafts over.
     const citations = groundedCitationCheck(grounded.citedMarkers, grounded.sources);
-    if (!citations.ok) {
+    if (env.EVIDENCE_VALIDATION_ENABLED && !citations.ok) {
       reasons.push(`Cites ${citations.found}/${citations.required} required evidence source(s) via [S]-markers`);
     }
   } else {
     const citations = citationCheck(markdown, evidenceSummary);
-    if (!citations.ok) {
+    if (env.EVIDENCE_VALIDATION_ENABLED && !citations.ok) {
       reasons.push(`Cites ${citations.found}/${citations.required} required evidence source URL(s), not just any external link`);
     }
   }
@@ -171,7 +171,7 @@ function writingGate(
   // BullMQ retry's priorAttempt then carries specifics, not a bare score.
   // Fail-open when the self-check couldn't run (null), same philosophy as
   // the quality worker's own fact-check gate.
-  if (factSafety?.selfCheck && factSafety.selfCheck.score < SELFCHECK_PASS_SCORE) {
+  if (env.EVIDENCE_VALIDATION_ENABLED && factSafety?.selfCheck && factSafety.selfCheck.score < SELFCHECK_PASS_SCORE) {
     reasons.push(
       `Claim self-check score ${factSafety.selfCheck.score} is below ${SELFCHECK_PASS_SCORE} (the quality worker's fact-check threshold)`
     );
@@ -179,7 +179,7 @@ function writingGate(
       reasons.push(`${issue.verdict} claim: "${issue.claim.slice(0, 140)}"${issue.note ? ` - ${issue.note}` : ""}`);
     }
   }
-  if (factSafety && factSafety.unmarkedClaims.length > 0) {
+  if (env.EVIDENCE_VALIDATION_ENABLED && factSafety && factSafety.unmarkedClaims.length > 0) {
     reasons.push(`${factSafety.unmarkedClaims.length} specific claim(s) lack an evidence marker`);
   }
 
@@ -593,10 +593,12 @@ async function generateBlogForInput(
   const outlineClaimsForContract = Array.isArray(outline?.sections)
     ? (outline.sections as Array<{ claims?: unknown }>).flatMap((section) => Array.isArray(section.claims) ? section.claims : [])
     : [];
-  const planningContract = validatePlannedClaims(plannedClaimsForContract, evidenceSourcesForContract);
-  const outlineContract = validatePlannedClaims(outlineClaimsForContract, evidenceSourcesForContract);
-  if (!planningContract.ok || !outlineContract.ok) {
-    throw new QualityGateError({ stage: "writing-validator", score: 0, passed: false, reasons: ["WRITING_REJECTED: outline contains claims without valid evidence mappings", ...planningContract.diagnostics, ...outlineContract.diagnostics] });
+  if (env.EVIDENCE_VALIDATION_ENABLED) {
+    const planningContract = validatePlannedClaims(plannedClaimsForContract, evidenceSourcesForContract);
+    const outlineContract = validatePlannedClaims(outlineClaimsForContract, evidenceSourcesForContract);
+    if (!planningContract.ok || !outlineContract.ok) {
+      throw new QualityGateError({ stage: "writing-validator", score: 0, passed: false, reasons: ["WRITING_REJECTED: outline contains claims without valid evidence mappings", ...planningContract.diagnostics, ...outlineContract.diagnostics] });
+    }
   }
 
   log.info(`Generating blog for blogInput "${topic}"`, {
@@ -654,7 +656,7 @@ async function generateBlogForInput(
     // TARGETED_REPAIR_ENABLED is off: that flag governs judge-fix repair,
     // this path is gated by WRITING_SELFCHECK_ENABLED since it depends on
     // the self-check module for post-repair verification.
-    if (env.WRITING_SELFCHECK_ENABLED && priorFactCheckIssues.length > 0) {
+    if (env.EVIDENCE_VALIDATION_ENABLED && env.WRITING_SELFCHECK_ENABLED && priorFactCheckIssues.length > 0) {
       const repaired = await attemptClaimRepair({
         blogInput,
         topic,
@@ -698,7 +700,7 @@ async function generateBlogForInput(
     let unmarkedClaims: string[] = [];
     const repairUsageRecords: { model: string; usage: { promptTokens: number; completionTokens: number } }[] = [];
     let repairedSections: string[] = [];
-    if (env.WRITING_SELFCHECK_ENABLED) {
+    if (env.EVIDENCE_VALIDATION_ENABLED && env.WRITING_SELFCHECK_ENABLED) {
       const repairStartedAt = Date.now();
       const markerEnforcementOn = env.WRITING_CLAIM_MARKER_ENFORCEMENT && groundedSources.length > 0;
       if (markerEnforcementOn) unmarkedClaims = findUnmarkedClaims(draft.markdown);

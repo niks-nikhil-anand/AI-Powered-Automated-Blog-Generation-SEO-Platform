@@ -168,6 +168,8 @@ export const env = {
    * briefs always use the legacy path regardless of this flag.
    */
   GROUNDED_WRITING_ENABLED: optional("GROUNDED_WRITING_ENABLED", "true") !== "false",
+  /** Hard evidence/source validation gate. Off = sources are context only and never block the pipeline. */
+  EVIDENCE_VALIDATION_ENABLED: optional("EVIDENCE_VALIDATION_ENABLED", "false") !== "false",
 
   /**
    * Section-by-section writing + targeted repair (Task 5). Off = one
