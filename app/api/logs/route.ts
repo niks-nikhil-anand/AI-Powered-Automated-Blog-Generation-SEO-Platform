@@ -74,7 +74,7 @@ export async function GET(request: NextRequest) {
         stack: row.stack,
         meta: row.meta,
         workflowRunId: row.workflowRunId,
-        trendId: row.trendId,
+        blogInputId: row.blogInputId,
         blogId: row.blogId,
       })),
       nextCursor: hasMore ? page[page.length - 1].id : null,
