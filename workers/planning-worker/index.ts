@@ -165,12 +165,19 @@ async function planTopic(payload: PlanningJobPayload) {
       blogInputId: payload.blogInputId,
     });
 
-    // Deterministic jobId: a retried planning job can never enqueue a second
-    // outline job for the same submission (duplicate-spend guard).
+    // Deterministic jobId: remove stale finished jobs on re-run so BullMQ doesn't drop the new job
+    const outlineJobId = JOB_IDS.outline(payload.blogInputId);
+    const existingOutlineJob = await outlineQueue.getJob(outlineJobId);
+    if (existingOutlineJob) {
+      const state = await existingOutlineJob.getState();
+      if (state === "completed" || state === "failed") {
+        await existingOutlineJob.remove().catch(() => {});
+      }
+    }
     await outlineQueue.add(
       "outline_blog",
       { blogInputId: payload.blogInputId, planId: saved.id },
-      { jobId: JOB_IDS.outline(payload.blogInputId) }
+      { jobId: outlineJobId }
     );
     await prisma.blogInput.update({ where: { id: payload.blogInputId }, data: { status: "PROCESSING" } });
     await passWorkerAttempt({
