@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { VertexTelemetryContext } from "./langfuse";
+import type { VertexTelemetryContext } from "./vertex-telemetry";
 
 type VertexJobTelemetryContext = Omit<VertexTelemetryContext, "requestId">;
 
