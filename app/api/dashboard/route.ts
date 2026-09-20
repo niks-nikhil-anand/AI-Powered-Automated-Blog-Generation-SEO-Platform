@@ -7,7 +7,7 @@ import {
   planningQueue,
   publishQueue,
   qualityQueue,
-  researchQueue,
+  schedulerQueue,
   writingQueue,
 } from "@/workers/shared/queues";
 import {
@@ -19,11 +19,6 @@ import {
   STAGE_QUEUES,
   type StageKey,
 } from "@/lib/queues";
-import {
-  trendSourceLabel,
-  trendSourceInitial,
-  trendSourceColor,
-} from "@/lib/research-sources";
 import { getDailyTargetStatus } from "@/workers/shared/daily-target";
 import { getRetryAttempts } from "@/workers/shared/retry-config";
 import { env } from "@/workers/shared/env";
@@ -82,7 +77,7 @@ function modelColor(model: string) {
 }
 
 const WORKER_COLORS: Record<string, string> = {
-  "research-worker": "var(--emerald)",
+  "scheduler-worker": "var(--emerald)",
   "planning-worker": "var(--indigo)",
   "outline-worker": "var(--sky)",
   "writing-worker": "var(--amber)",
@@ -172,22 +167,15 @@ function blogStatusLabel(status: string) {
   return "Draft";
 }
 
-function recommendation(score: number) {
-  if (score >= 85) return "Highly Recommended";
-  if (score >= 70) return "Recommended";
-  if (score >= 50) return "Consider Topic";
-  return "Low Priority";
-}
-
 function statusStyle(status: string) {
-  if (status === "Published" || status === "PROCESSED" || status === "PASSED") {
+  if (status === "Published" || status === "COMPLETED" || status === "PASSED") {
     return {
       sBg: "rgba(16,185,129,0.12)",
       sFg: "var(--emerald)",
       sBd: "rgba(16,185,129,0.3)",
     };
   }
-  if (status === "Failed QA" || status === "FAILED" || status === "REJECTED") {
+  if (status === "Failed QA" || status === "FAILED" || status === "CANCELLED") {
     return {
       sBg: "rgba(244,63,94,0.12)",
       sFg: "var(--rose)",
@@ -229,14 +217,14 @@ export async function GET() {
     publishedCount,
     failedCount,
     todayPublishedCount,
-    trends,
+    blogInputs,
     outlines,
     assets,
     aiUsage,
     plansCount,
     outlinesCount,
     recentAttempts,
-    researchCounts,
+    schedulerCounts,
     planningCounts,
     outlineCounts,
     writingCounts,
@@ -253,11 +241,11 @@ export async function GET() {
     prisma.blog.count({ where: { status: "PUBLISHED" } }),
     prisma.blog.count({ where: { status: "FAILED" } }),
     prisma.blog.count({ where: { status: "PUBLISHED", updatedAt: { gte: today } } }),
-    prisma.trend.findMany({ orderBy: { createdAt: "desc" }, take: 50 }),
+    prisma.blogInput.findMany({ orderBy: { createdAt: "desc" }, take: 50, include: { blog: { select: { id: true, slug: true, status: true } } } }),
     prisma.contentOutline.findMany({
       orderBy: { updatedAt: "desc" },
       take: 50,
-      include: { trend: true, plan: true },
+      include: { blogInput: true, plan: true },
     }),
     prisma.asset.findMany({ orderBy: { createdAt: "desc" }, take: 50 }),
     prisma.aIUsage.findMany({
@@ -287,7 +275,7 @@ export async function GET() {
         finishedAt: true,
       },
     }),
-    queueCounts(researchQueue),
+    queueCounts(schedulerQueue),
     queueCounts(planningQueue),
     queueCounts(outlineQueue),
     queueCounts(writingQueue),
@@ -404,7 +392,6 @@ export async function GET() {
       slug: blog.slug,
       cat: blog.category?.name ?? "General",
       words: wordCount(blog.content).toLocaleString(),
-      trend: "-",
       quality: quality !== null ? String(quality) : "Pending",
       cost: formatUsd(spend?.cost ?? 0),
       costValue: spend?.cost ?? 0,
@@ -475,7 +462,6 @@ export async function GET() {
   });
 
   const outlineRows = outlines.map((outline) => {
-    const quality = Math.round(outline.trend.score);
     const markdown = outlineMarkdown(outline);
     const keywords = [
       outline.plan.primaryKeyword,
@@ -485,10 +471,10 @@ export async function GET() {
       id: outline.id,
       title: outline.title,
       slug: outline.slug,
-      cat: outline.trend.category,
+      cat: outline.blogInput.category ?? "General",
       words: wordCount(markdown).toLocaleString(),
-      trend: String(Math.round(outline.trend.score)),
-      quality: String(quality),
+      // An outline is pre-writing: there is no scored article to rate yet.
+      quality: "Pending",
       cost: "$0.00",
       status: "Review",
       updated: formatAgo(outline.updatedAt),
@@ -496,8 +482,8 @@ export async function GET() {
       updatedAt: outline.updatedAt.toISOString(),
       createdAtLabel: outline.createdAt.toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
       updatedAtLabel: outline.updatedAt.toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }),
-      qBg: quality >= 90 ? "rgba(16,185,129,0.14)" : quality > 0 ? "rgba(245,158,11,0.14)" : "var(--card2)",
-      qFg: quality >= 90 ? "var(--emerald)" : quality > 0 ? "var(--amber)" : "var(--fg2)",
+      qBg: "var(--card2)",
+      qFg: "var(--fg2)",
       ...statusStyle("Review"),
       content: markdown,
       metaTitle: outline.metaTitle,
@@ -516,41 +502,36 @@ export async function GET() {
     };
   });
 
-  const trendRows = trends.map((trend) => {
-    const score = Math.round(trend.score);
-    const rec = recommendation(score);
-    return {
-      id: trend.id,
-      srcInitial: trendSourceInitial(trend.source),
-      source: trendSourceLabel(trend.source),
-      srcColor: trendSourceColor(trend.source),
-      score: String(score),
-      scoreBg: score >= 70 ? "rgba(16,185,129,0.14)" : "var(--card2)",
-      scoreFg: score >= 70 ? "var(--emerald)" : "var(--fg2)",
-      title: trend.topic,
-      cat: trend.category,
-      rec,
-      recBg: score >= 70 ? "rgba(16,185,129,0.12)" : "var(--card2)",
-      recFg: score >= 70 ? "var(--emerald)" : "var(--fg2)",
-      volume: `${trend.status} · ${formatAgo(trend.createdAt)}`,
-      scorePct: `${Math.min(100, Math.max(0, score))}%`,
-      // Detail-modal payloads (TrendDetailModal): raw status + timestamps for
-      // the overview grid, evidenceSummary for the research summary/evidence
-      // fallback, scoreBreakdown for the signal bars, and evidenceArticles
-      // (Task 1) for the rich [S1]-style source cards. All optional/nullable -
-      // legacy rows just render fewer sections.
-      status: trend.status,
-      createdAt: trend.createdAt.toISOString(),
-      evidenceSummary: trend.evidenceSummary ?? null,
-      scoreBreakdown: trend.scoreBreakdown ?? null,
-      evidenceArticles: Array.isArray(trend.evidenceArticles) ? trend.evidenceArticles : null,
-      // Research-engine detail (docs/RESEARCH_ENGINE_UPGRADE.md): the 9-dimension
-      // final score, tier, novelty verdict, evidence/topic quality and query
-      // provenance. Null for legacy-path trends - the modal renders the new
-      // section only when this is present. Additive/backward-compatible.
-      researchDetail: trend.researchDetail ?? null,
-    };
-  });
+  /**
+   * The submission backlog/queue: one row per BlogInput, for the dashboard's
+   * "Submissions" panel. Replaces the old trend list now that topics are
+   * editor-supplied rather than discovered.
+   */
+  const submissionRows = blogInputs.map((input) => ({
+    id: input.id,
+    title: input.title,
+    slug: input.slug,
+    cat: input.category ?? "General",
+    status: input.status,
+    priority: input.priority,
+    tone: input.tone,
+    contentLength: input.contentLength,
+    focusKeyword: input.focusKeyword,
+    keywords: input.keywords,
+    audience: input.audience,
+    searchIntent: input.searchIntent,
+    failureReason: input.failureReason,
+    /** Grounded = the editor supplied reference sources for claims to cite. */
+    sourced: Array.isArray(input.evidenceArticles) && input.evidenceArticles.length > 0,
+    blogId: input.blog?.id ?? null,
+    blogSlug: input.blog?.slug ?? null,
+    blogStatus: input.blog?.status ?? null,
+    createdAt: input.createdAt.toISOString(),
+    dispatchedAt: input.dispatchedAt?.toISOString() ?? null,
+    processedAt: input.processedAt?.toISOString() ?? null,
+    age: formatAgo(input.createdAt),
+    ...statusStyle(input.status),
+  }));
 
   const assetRows = assets.map((asset) => ({
     id: asset.id,
@@ -770,7 +751,7 @@ export async function GET() {
       : 1;
 
   const stageTotals = {
-    research: trends.length,
+    scheduler: blogInputs.filter((input) => input.status === "PENDING").length,
     planning: plansCount,
     outline: outlinesCount,
     writing: blogs.filter((blog) => blog.status === "DRAFT").length,
@@ -779,7 +760,7 @@ export async function GET() {
     publish: publishedCount,
   };
   const queueSnapshots = [
-    { key: "research", name: "research_queue", counts: researchCounts, total: stageTotals.research, doneColor: "var(--emerald)" },
+    { key: "scheduler", name: "scheduler_queue", counts: schedulerCounts, total: stageTotals.scheduler, doneColor: "var(--emerald)" },
     { key: "planning", name: "planning_queue", counts: planningCounts, total: stageTotals.planning, doneColor: "var(--indigo)" },
     { key: "outline", name: "outline_queue", counts: outlineCounts, total: stageTotals.outline, doneColor: "var(--indigo)" },
     { key: "writing", name: "writing_queue", counts: writingCounts, total: blogCount, doneColor: "var(--indigo)" },
@@ -825,7 +806,7 @@ export async function GET() {
       lastStatus: last?.status ?? null,
       avgDurationMs,
       p95DurationMs,
-      scheduled: snap.key === "research",
+      scheduled: snap.key === "scheduler",
     };
   });
 
@@ -946,7 +927,7 @@ export async function GET() {
     blogs: [...outlineRows, ...blogRows].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
     blogRows,
     outlineRows,
-    trends: trendRows,
+    submissions: submissionRows,
     assets: assetRows,
     usage: aiUsage.slice(0, 100).map((row) => ({
       id: row.id,
@@ -1025,7 +1006,7 @@ export async function GET() {
     workflows: workflowRuns.map((run) => ({
       id: run.id,
       blogId: run.blogId,
-      trendId: run.trendId,
+      blogInputId: run.blogInputId,
       status: run.status,
       currentStage: run.currentStage,
       failureReason: run.failureReason,
@@ -1033,11 +1014,11 @@ export async function GET() {
       updatedAt: run.updatedAt.toISOString(),
     })),
     logs: [
-      ...trends.slice(0, 8).map((trend) => ({
-        time: trend.createdAt.toISOString().slice(11, 19),
+      ...blogInputs.slice(0, 8).map((input) => ({
+        time: input.createdAt.toISOString().slice(11, 19),
         level: "INFO",
-        worker: "research_worker",
-        msg: `Research candidate ${trend.status}: ${trend.topic}`,
+        worker: "scheduler_worker",
+        msg: `Blog submission ${input.status}: ${input.title}`,
         color: "var(--emerald)",
       })),
       ...aiUsage.slice(0, 8).map((usage) => ({
