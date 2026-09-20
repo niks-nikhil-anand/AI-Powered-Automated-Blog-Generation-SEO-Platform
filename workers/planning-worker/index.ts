@@ -15,9 +15,16 @@ import {
   startWorkerAttempt,
   QualityGateError,
 } from "../shared/recovery";
+import { env } from "../shared/env";
 import { logVertexRuntimeConfig } from "../shared/vertex";
 import { canonicalEvidenceSources } from "../shared/evidence";
 import { validatePlannedClaims, validateEvidencePackage } from "../shared/evidence-validator";
+import {
+  derivePlannedClaimsFromEvidence,
+  normalizePlannedClaims,
+  readManualPlannedClaims,
+  resolveEvidenceBackedPlannedClaims,
+} from "../shared/evidence-claims";
 import { failBlogInput } from "../shared/blog-input";
 
 const log = logger.child({ worker: "planning-worker" });
@@ -49,7 +56,7 @@ async function planTopic(payload: PlanningJobPayload) {
     // BlogInput.evidenceArticles in prisma/schema.prisma).
     const evidenceSources = canonicalEvidenceSources(blogInput.evidenceArticles);
     const sourced = evidenceSources.length > 0;
-    if (sourced) {
+    if (sourced && env.EVIDENCE_VALIDATION_ENABLED) {
       const evidenceGate = validateEvidencePackage(evidenceSources);
       if (!evidenceGate.ok) {
         throw new QualityGateError({ stage: "evidence-validator", score: 0, passed: false, reasons: evidenceGate.diagnostics });
@@ -72,18 +79,42 @@ async function planTopic(payload: PlanningJobPayload) {
       blogInput.evidenceSummary ?? payload.evidenceSummary ?? "",
       evidenceSources
     );
-    const plannedClaims = plan.plannedClaims;
+    let plannedClaims = plan.plannedClaims;
     if (sourced) {
-      const claimGate = validatePlannedClaims(plannedClaims, evidenceSources);
-      if (!claimGate.ok) {
-        throw new QualityGateError({ stage: "evidence-validator", score: 0, passed: false, reasons: claimGate.diagnostics });
+      if (env.EVIDENCE_VALIDATION_ENABLED) {
+        const resolvedClaims = resolveEvidenceBackedPlannedClaims({
+          modelClaims: plan.plannedClaims,
+          manualClaims: readManualPlannedClaims(blogInput.specs),
+          evidenceSources,
+        });
+        plannedClaims = resolvedClaims.claims;
+        const claimGate = validatePlannedClaims(plannedClaims, evidenceSources);
+        if (!claimGate.ok) {
+          throw new QualityGateError({
+            stage: "evidence-validator",
+            score: 0,
+            passed: false,
+            reasons: [...resolvedClaims.diagnostics, ...claimGate.diagnostics],
+          });
+        }
+        log.info("Planning evidence contract passed", {
+          blogInputId: payload.blogInputId,
+          claimSource: resolvedClaims.source,
+          claimResolutionDiagnostics: resolvedClaims.diagnostics,
+          plannedClaims: plannedClaims.length,
+          claimsWithEvidence: claimGate.supportedClaims.length,
+          researchSufficiencyScore: claimGate.researchSufficiencyScore,
+        });
+      } else {
+        const modelClaims = normalizePlannedClaims(plan.plannedClaims, evidenceSources);
+        const manualClaims = normalizePlannedClaims(readManualPlannedClaims(blogInput.specs), evidenceSources);
+        plannedClaims = modelClaims.length > 0 ? modelClaims : manualClaims.length > 0 ? manualClaims : derivePlannedClaimsFromEvidence(evidenceSources);
+        log.info("Planning evidence validation disabled - sources are context only", {
+          blogInputId: payload.blogInputId,
+          plannedClaims: plannedClaims.length,
+          evidenceSources: evidenceSources.length,
+        });
       }
-      log.info("Planning evidence contract passed", {
-        blogInputId: payload.blogInputId,
-        plannedClaims: plannedClaims.length,
-        claimsWithEvidence: claimGate.supportedClaims.length,
-        researchSufficiencyScore: claimGate.researchSufficiencyScore,
-      });
     } else {
       log.info("Planning ran in unsourced mode - no evidence contract to enforce", {
         blogInputId: payload.blogInputId,
