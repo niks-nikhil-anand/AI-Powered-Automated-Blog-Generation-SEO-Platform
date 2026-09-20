@@ -204,6 +204,7 @@ export async function GET(req: NextRequest) {
       blogStatus: input.blog?.status ?? null,
       currentStage: stageForInput(input),
       workflowStatus: input.workflowRuns[0]?.status ?? null,
+      specs: input.specs,
     }));
 
   if (!paged) return NextResponse.json(rows);

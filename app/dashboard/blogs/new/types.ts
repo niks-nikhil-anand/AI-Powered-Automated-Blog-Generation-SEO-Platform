@@ -18,6 +18,43 @@ export const CATEGORIES = [
   { value: "ai", label: "AI & ML" },
 ] as const;
 
+const evidenceIdsSchema = z.preprocess((value) => {
+  if (!Array.isArray(value)) return value;
+  return value.map(String).map((id) => id.trim()).filter(Boolean);
+}, z.array(z.string().min(1)).min(1));
+
+export const plannedClaimSchema = z.preprocess((value) => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const record = value as Record<string, unknown>;
+  return {
+    claim: typeof record.claim === "string" ? record.claim : record.text,
+    evidenceSourceIds: Array.isArray(record.evidenceSourceIds) ? record.evidenceSourceIds : record.sourceIds,
+    supportLevel: record.supportLevel ?? "direct",
+  };
+}, z.object({
+  claim: z.string().min(1),
+  evidenceSourceIds: evidenceIdsSchema,
+  supportLevel: z.enum(["direct", "supported"]).default("direct"),
+}));
+
+function plainUrl(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  const markdownLink = value.match(/^\[(https?:\/\/[^\]]+)\]\((https?:\/\/[^)]+)\)$/);
+  return markdownLink?.[2] ?? value;
+}
+
+const outlineClaimSchema = z.preprocess((value) => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const record = value as Record<string, unknown>;
+  return {
+    text: typeof record.text === "string" ? record.text : record.claim,
+    evidenceSourceIds: Array.isArray(record.evidenceSourceIds) ? record.evidenceSourceIds : record.sourceIds,
+  };
+}, z.object({
+  text: z.string().min(1),
+  evidenceSourceIds: evidenceIdsSchema,
+}));
+
 /**
  * Optional pre-structured outline. Only section headings are required - the
  * outline worker fills in intents and bullets it wasn't given (see
@@ -32,6 +69,7 @@ export const outlineJsonSchema = z.object({
         intent: z.string().optional(),
         bullets: z.array(z.string()).optional(),
         wordTarget: z.number().optional(),
+        claims: z.array(outlineClaimSchema).optional(),
       })
     )
     .min(1),
@@ -54,14 +92,36 @@ export const outlineJsonSchema = z.object({
  * and those gates are skipped instead of failed.
  */
 export const sourceSchema = z.object({
-  url: z.string().url(),
+  url: z.preprocess(plainUrl, z.string().url()),
   title: z.string().min(1),
   /** Atomic, quotable facts. A title and URL alone are not evidence. */
-  evidence: z.array(z.string().min(1)).min(1),
+  evidence: z.array(z.string().min(1)).default([]),
   excerpt: z.string().min(1).optional(),
   publisher: z.string().optional(),
   publishedAt: z.string().optional(),
 });
+
+function titleFromUrl(value: string): string {
+  try {
+    const url = new URL(value);
+    return url.hostname.replace(/^www\./, "");
+  } catch {
+    return value;
+  }
+}
+
+const sourcesSchema = z.preprocess((value) => {
+  if (!Array.isArray(value)) return value;
+  return value.map((source) => {
+    if (typeof source !== "string") return source;
+    const url = source.trim();
+    return {
+      url,
+      title: titleFromUrl(url),
+      evidence: [`Reference URL supplied by the editor: ${url}`],
+    };
+  });
+}, z.array(sourceSchema));
 
 export const blogInputSchema = z.object({
   title: z.string().min(10).max(200),
@@ -83,7 +143,8 @@ export const blogInputSchema = z.object({
 
   // Optional: custom outline + reference sources
   outlineJson: outlineJsonSchema.optional(),
-  sources: z.array(sourceSchema).optional(),
+  sources: sourcesSchema.optional(),
+  plannedClaims: z.array(plannedClaimSchema).optional(),
 
   // Scheduling
   priority: z.enum(PRIORITIES).default("NORMAL"),
