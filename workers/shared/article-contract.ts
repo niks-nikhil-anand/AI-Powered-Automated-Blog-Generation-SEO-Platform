@@ -1,3 +1,5 @@
+import { containsKeyword } from "./seo-keyword";
+
 export type ArticleOutlineSection = {
   heading?: unknown;
   subsections?: unknown;
@@ -15,6 +17,16 @@ export type ArticleContractInput = {
   metaTitle?: string | null;
   metaDescription?: string | null;
   internalLinks?: unknown;
+  /**
+   * Explicit word bounds from the submission brief. When supplied they
+   * replace the range derived from targetWords, and an explicit maximum is
+   * enforced - a brief that names a ceiling means it (R4: no padding).
+   */
+  wordBounds?: { min?: number; max?: number } | null;
+  /** outlineJson.h1: the article's H1 must match it, not merely exist. */
+  requiredH1?: string | null;
+  /** Briefed FAQ questions; each one must appear as a heading in the article. */
+  faqQuestions?: unknown;
 };
 
 export type ArticleContractResult = {
@@ -48,7 +60,7 @@ function stringArray(value: unknown): string[] {
 }
 
 function includesText(content: string, needle: string): boolean {
-  return content.toLowerCase().includes(needle.trim().toLowerCase());
+  return containsKeyword(content, needle);
 }
 
 function extractOutlineSections(value: unknown): ArticleOutlineSection[] {
@@ -84,18 +96,24 @@ function headingIndex(actual: string[], expected: string): number {
   });
 }
 
-export function articleWordRange(targetWords?: number | null): { min: number; max: number } {
-  if (!targetWords || targetWords <= 0) return { min: 1200, max: 2200 };
+export function articleWordRange(
+  targetWords?: number | null,
+  bounds?: { min?: number; max?: number } | null
+): { min: number; max: number } {
+  const derived =
+    !targetWords || targetWords <= 0
+      ? { min: 1200, max: 2200 }
+      : { min: Math.round(targetWords * 0.9), max: Math.round(targetWords * 1.75) };
   return {
-    min: Math.round(targetWords * 0.9),
-    max: Math.round(targetWords * 1.75),
+    min: bounds?.min && bounds.min > 0 ? bounds.min : derived.min,
+    max: bounds?.max && bounds.max > 0 ? bounds.max : derived.max,
   };
 }
 
 export function validateArticleContract(input: ArticleContractInput): ArticleContractResult {
   const content = input.content.trim();
   const wordCount = countWords(content);
-  const { min: minWords, max: maxWords } = articleWordRange(input.targetWords);
+  const { min: minWords, max: maxWords } = articleWordRange(input.targetWords, input.wordBounds);
   const h1 = markdownHeadings(content, 1);
   const h2 = markdownHeadings(content, 2);
   const h3 = markdownHeadings(content, 3);
@@ -103,7 +121,15 @@ export function validateArticleContract(input: ArticleContractInput): ArticleCon
 
   if (!content) reasons.push("Article content is empty");
   if (wordCount < minWords) reasons.push(`Word count ${wordCount}/${minWords} minimum for requested length`);
+  // Only an explicitly briefed ceiling gates; the derived maximum stays advisory.
+  if (input.wordBounds?.max && wordCount > input.wordBounds.max) {
+    reasons.push(`Word count ${wordCount} exceeds the briefed maximum of ${input.wordBounds.max}`);
+  }
   if (h1.length !== 1) reasons.push(`Expected exactly one H1, found ${h1.length}`);
+  const requiredH1 = input.requiredH1?.trim();
+  if (requiredH1 && h1.length > 0 && normalizeHeading(h1[0]) !== normalizeHeading(requiredH1)) {
+    reasons.push(`H1 does not match the briefed H1: expected "${requiredH1}", found "${h1[0]}"`);
+  }
   if (/todo|placeholder|draft unavailable|lorem ipsum/i.test(content)) {
     reasons.push("Article contains placeholder or draft-only text");
   }
@@ -135,6 +161,24 @@ export function validateArticleContract(input: ArticleContractInput): ArticleCon
         reasons.push(`Missing required comparison table for section: ${heading}`);
       }
     }
+  }
+
+  // Briefed FAQ questions must actually be answered in the article. Headings
+  // are matched loosely (punctuation/case) because a writer may phrase the
+  // question slightly differently as a heading.
+  const faqQuestions = stringArray(
+    Array.isArray(input.faqQuestions)
+      ? input.faqQuestions.map((faq) =>
+          faq && typeof faq === "object" && "question" in faq ? String((faq as { question: unknown }).question) : String(faq)
+        )
+      : []
+  );
+  if (faqQuestions.length > 0) {
+    const candidates = [...h2, ...h3];
+    const missingFaqs = faqQuestions.filter(
+      (question) => !candidates.some((heading) => hasMatchingHeading([heading], question)) && !includesText(content, question)
+    );
+    if (missingFaqs.length > 0) reasons.push(`Missing briefed FAQ question(s): ${missingFaqs.join(" | ")}`);
   }
 
   const focusKeyword = input.focusKeyword?.trim();
