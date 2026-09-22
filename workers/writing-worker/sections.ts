@@ -6,6 +6,9 @@ import { logger } from "../shared/logger";
 import { redis } from "../shared/redis";
 import { QualityGateError } from "../shared/recovery";
 import type { GroundedSource } from "./citations";
+import { buildGlobalRulesBlock } from "../shared/editorial-rules";
+import { buildBriefDirectivesBlock, readBriefSpecs } from "../shared/brief";
+import { DEFAULT_EDITORIAL_POLICY, resolveEditorialPolicy, type EditorialPolicy } from "../shared/editorial-policy";
 
 const log = logger.child({ worker: "writing-worker", stage: "sections" });
 
@@ -56,6 +59,19 @@ export type SectionSpec = {
   wordTarget: number;
   subsections?: SubsectionSpec[];
   comparisonTable?: ComparisonTableSpec;
+  /**
+   * Brief-supplied section directives (outlineJson.sections[]): the question
+   * this section answers, what it must not do, extra requirements, the
+   * evidence bar, an illustrative scenario, a required output format, and a
+   * link the section has to carry.
+   */
+  readerQuestion?: string;
+  avoid?: string[];
+  requirements?: string[];
+  evidenceRequirements?: string[];
+  practicalExample?: string;
+  format?: string;
+  requiredInternalLink?: { url: string; anchor?: string };
 };
 
 export type SectionArticleContext = {
@@ -77,6 +93,18 @@ export type SectionArticleContext = {
   /** Rotated per section so legacy articles cite more than one source. */
   preferredEvidenceUrl?: string;
   keywords: string[];
+  /**
+   * BlogInput.focusKeyword. The article contract requires it verbatim in the
+   * introduction, and the intro is written as its own section here, so the
+   * requirement has to travel with the section context.
+   */
+  focusKeyword?: string;
+  /** Resolved editorial policy - see shared/editorial-policy.ts. */
+  policy?: EditorialPolicy;
+  /** Brief requirements with no column of their own - see shared/brief.ts. */
+  briefDirectives?: string[];
+  /** generationConfig.maxSectionRetries - attempts per section (default 2). */
+  maxSectionRetries?: number;
   /** BlogInput.tone - professional | casual | technical. */
   tone?: string;
   /** BlogInput.contentLength - the editor's target word count for the article. */
@@ -91,7 +119,7 @@ export type SectionArticleContext = {
 export const DEFAULT_MUST_FOLLOW_RULES: string[] = [
   "Generate every section defined in the outline in the exact specified order.",
   "Do not skip, merge, or rename sections unless explicitly instructed.",
-  "Generate the requested word count for each section within a reasonable tolerance.",
+  "Treat the requested word count as a guide, not a quota - never pad a section with filler or repeated explanation to reach it.",
   "Include every required comparison table, code example, FAQ, and conclusion.",
   "Do not stop generation until all outline sections have been completed.",
   "Never end a section or article mid-sentence.",
@@ -120,7 +148,38 @@ type OutlineSectionLike = {
   subsections?: unknown;
   paragraphs?: unknown;
   comparisonTable?: unknown;
+  readerQuestion?: unknown;
+  avoid?: unknown;
+  requirements?: unknown;
+  evidenceRequirements?: unknown;
+  practicalExample?: unknown;
+  format?: unknown;
+  requiredInternalLink?: unknown;
 };
+
+/** The brief's per-section directives, as the section plan carries them. */
+function sectionDirectives(section: OutlineSectionLike): Partial<SectionSpec> {
+  const list = (value: unknown): string[] | undefined => {
+    if (!Array.isArray(value)) return undefined;
+    const items = value.map(String).map((item) => item.trim()).filter(Boolean);
+    return items.length > 0 ? items : undefined;
+  };
+  const text = (value: unknown): string | undefined => (typeof value === "string" && value.trim() ? value.trim() : undefined);
+  const link =
+    section.requiredInternalLink && typeof section.requiredInternalLink === "object"
+      ? (section.requiredInternalLink as { url?: unknown; anchor?: unknown })
+      : null;
+
+  return {
+    readerQuestion: text(section.readerQuestion),
+    avoid: list(section.avoid),
+    requirements: list(section.requirements),
+    evidenceRequirements: list(section.evidenceRequirements),
+    practicalExample: text(section.practicalExample),
+    format: text(section.format),
+    requiredInternalLink: link && text(link.url) ? { url: String(link.url), anchor: text(link.anchor) } : undefined,
+  };
+}
 type OutlineFaqLike = { question?: unknown; answerIntent?: unknown };
 
 /* ------------------------------------------------------------------ */
@@ -128,25 +187,22 @@ type OutlineFaqLike = { question?: unknown; answerIntent?: unknown };
 /* ------------------------------------------------------------------ */
 
 /**
- * The mandatory skeleton scaled so word targets sum inside
- * BLOG_MIN_WORDS..BLOG_MAX_WORDS. Intro is a heading-less pseudo-section.
+ * Fallback spine, used only when no outline reached the writer. Deliberately
+ * short: the old 14-section skeleton forced "Key Features", "Benefits",
+ * "Pros and Cons" and "Real World Use Cases" into every article, which is
+ * where most duplicate-explanation and padding came from. An outline-driven
+ * article never uses this - buildSectionPlan follows the outline instead.
  */
-function skeletonWords(total: number) {
+function skeletonWords(total: number, policy: EditorialPolicy) {
   const weights: [string | null, SectionKind, number][] = [
-    [null, "intro", 0.09],
-    ["Table of Contents", "toc", 0.03],
-    ["What is {topic}?", "generic", 0.09],
-    ["Why it matters", "generic", 0.07],
-    ["Key Features", "subsections", 0.11],
-    ["Benefits", "subsections", 0.08],
-    ["How it Works", "steps", 0.13],
-    ["Real World Use Cases", "subsections", 0.1],
-    ["Pros and Cons", "table", 0.08],
-    ["Best Practices", "numbered", 0.08],
-    ["Common Mistakes", "bullets", 0.07],
+    [null, "intro", 0.1],
+    ...(policy.tableOfContents ? ([["Table of Contents", "toc", 0.02]] as [string, SectionKind, number][]) : []),
+    ["What is {topic}?", "generic", 0.16],
+    ["How it works", "steps", 0.22],
+    ["Implementation guidance", "subsections", 0.22],
+    ["Trade-offs and common mistakes", "bullets", 0.14],
     ["FAQs", "faq", 0.1],
-    ["Conclusion", "generic", 0.05],
-    ["Call To Action", "cta", 0.02],
+    ["Conclusion", "generic", 0.06],
   ];
   return weights.map(([heading, kind, share]) => ({
     heading,
@@ -178,6 +234,7 @@ function normalizeHeading(value: string): string {
  * fall back to the default mandatory skeleton.
  */
 export function buildSectionPlan(context: SectionArticleContext): SectionSpec[] {
+  const policy = context.policy ?? resolveEditorialPolicy(context.specs);
   const targetTotal =
     context.targetWords && context.targetWords > 0
       ? context.targetWords
@@ -212,6 +269,7 @@ export function buildSectionPlan(context: SectionArticleContext): SectionSpec[] 
         bullets,
         subsections: rawSub,
         wordTarget: typeof introSec.wordTarget === "number" ? (introSec.wordTarget as number) : introBudget,
+        ...sectionDirectives(introSec),
       });
     } else {
       plan.push({
@@ -223,14 +281,16 @@ export function buildSectionPlan(context: SectionArticleContext): SectionSpec[] 
       });
     }
 
-    // Always include Table of Contents after intro
-    plan.push({
-      heading: "Table of Contents",
-      kind: "toc",
-      intent: DEFAULT_INTENTS.toc,
-      bullets: [],
-      wordTarget: 30,
-    });
+    // R9: a table of contents only when the submission asked for one.
+    if (policy.tableOfContents) {
+      plan.push({
+        heading: "Table of Contents",
+        kind: "toc",
+        intent: DEFAULT_INTENTS.toc,
+        bullets: [],
+        wordTarget: 30,
+      });
+    }
 
     const bodySections = firstIsIntro ? outlineSections.slice(1) : outlineSections;
     for (const sec of bodySections) {
@@ -273,14 +333,15 @@ export function buildSectionPlan(context: SectionArticleContext): SectionSpec[] 
         subsections: rawSub,
         comparisonTable,
         wordTarget: typeof sec.wordTarget === "number" ? (sec.wordTarget as number) : bodyBudgetPerSection,
+        ...sectionDirectives(sec),
       });
     }
 
     return plan;
   }
 
-  // Fallback: skeleton words when no outline is present
-  const skeleton = skeletonWords(targetTotal);
+  // Fallback: the short spine when no outline is present
+  const skeleton = skeletonWords(targetTotal, policy);
   return skeleton.map(({ heading, kind, wordTarget }) => {
     const resolvedHeading = heading?.replace("{topic}", context.topic) ?? null;
     return {
@@ -353,6 +414,17 @@ Citation rules: when this section makes a factual claim about the topic, attach 
       ? `\nWeave in these keywords naturally into headings and sentences where relevant: ${context.keywords.join(", ")}.`
       : "";
 
+  // Only the intro section can satisfy the contract's "focus keyword in the
+  // introduction" rule - every other section just uses the phrase where it
+  // fits. The H1 is not this prompt's job (sections never emit one); vertex.ts
+  // enforces it on the assembled article.
+  const focusKeyword = context.focusKeyword?.trim();
+  const focusKeywordBlock = !focusKeyword
+    ? ""
+    : spec.kind === "intro"
+      ? `\nFocus keyword (mandatory): the FIRST paragraph of this introduction MUST contain the exact phrase "${focusKeyword}", verbatim. A reworded variant does not count.`
+      : `\nFocus keyword: "${focusKeyword}" - use the exact phrase where it reads naturally, without keyword stuffing.`;
+
   let subsectionsBlock = "";
   if (spec.subsections && spec.subsections.length > 0) {
     subsectionsBlock = `
@@ -408,6 +480,29 @@ ${spec.comparisonTable.instructions ? `Table instructions: ${spec.comparisonTabl
       : "";
 
   const bulletsBlock = spec.bullets.length > 0 ? `\nKey points to cover:\n${spec.bullets.map((bullet) => `- ${bullet}`).join("\n")}` : "";
+
+  // The brief's per-section directives. Each is stated separately so the model
+  // can act on them individually rather than parsing one long note.
+  const directiveLines: string[] = [];
+  if (spec.readerQuestion) directiveLines.push(`This section must answer the reader question: "${spec.readerQuestion}"`);
+  for (const requirement of spec.requirements ?? []) directiveLines.push(`Requirement: ${requirement}`);
+  for (const evidence of spec.evidenceRequirements ?? []) directiveLines.push(`Evidence: ${evidence}`);
+  if (spec.practicalExample) directiveLines.push(`Include this practical example: ${spec.practicalExample}`);
+  if (spec.format) directiveLines.push(`Format: ${spec.format}`);
+  if (spec.requiredInternalLink) {
+    directiveLines.push(
+      `Include exactly one Markdown link to ${spec.requiredInternalLink.url}${
+        spec.requiredInternalLink.anchor ? ` with anchor text "${spec.requiredInternalLink.anchor}"` : ""
+      }, placed where it genuinely helps the reader.`
+    );
+  }
+  for (const avoid of spec.avoid ?? []) directiveLines.push(`Do NOT: ${avoid}`);
+  const sectionDirectivesBlock =
+    directiveLines.length > 0
+      ? `\nSection directives (from the brief - binding):\n${directiveLines.map((line) => `- ${line}`).join("\n")}\n`
+      : "";
+
+  const briefBlock = buildBriefDirectivesBlock(context.briefDirectives ?? readBriefSpecs(context.specs).directives);
   const repairBlock = repairNote ? `\n${repairNote}\nRewrite the section so the issue is fixed while keeping anything that already worked.` : "";
 
   const rawGenInst = (rawSpecs.generationInstructions ?? nestedSpecs.generationInstructions) as Record<string, unknown> | undefined;
@@ -417,6 +512,7 @@ ${spec.comparisonTable.instructions ? `Table instructions: ${spec.comparisonTabl
     ? context.mustFollow
     : [];
   const mustFollowRules = Array.from(new Set([...DEFAULT_MUST_FOLLOW_RULES, ...userMustFollow]));
+  const globalRulesBlock = buildGlobalRulesBlock(context.policy ?? resolveEditorialPolicy(context.specs), context.focusKeyword);
   const mustFollowBlock = `
 MANDATORY GENERATION INSTRUCTIONS (MUST FOLLOW):
 ${mustFollowRules.map((rule, idx) => `${idx + 1}. ${rule}`).join("\n")}
@@ -431,8 +527,8 @@ ${context.plan ? `Audience: ${context.plan.audience}\nAngle: ${context.plan.angl
 Section to write: ${spec.heading ? `"## ${spec.heading}"` : "the introduction"}
 Section intent: ${spec.intent}
 Target length: at least ${spec.wordTarget} words. Write in depth with rich technical substance. Paragraphs under 100 words each; sentences average 15-20 words.
-${kindInstruction(spec.kind, spec.heading)}${subsectionsBlock}${tableBlock}${bulletsBlock}${keywordsBlock}${internalLinksBlock}${writingInstructionsBlock}${sourcesBlock}${legacyEvidenceBlock}${repairBlock}
-${mustFollowBlock}
+${kindInstruction(spec.kind, spec.heading)}${subsectionsBlock}${tableBlock}${bulletsBlock}${sectionDirectivesBlock}${keywordsBlock}${focusKeywordBlock}${internalLinksBlock}${writingInstructionsBlock}${briefBlock}${sourcesBlock}${legacyEvidenceBlock}${repairBlock}
+${mustFollowBlock}${globalRulesBlock}
 Rules:
 - GitHub Flavored Markdown. Technical, practical, zero fluff.
 - Explain architecture, mechanisms, and developer trade-offs thoroughly.
@@ -508,11 +604,15 @@ function anchorFor(heading: string): string {
   return `#${heading.toLowerCase().replace(/[^a-z0-9\s-]/g, "").replace(/\s+/g, "-")}`;
 }
 
-/** The ToC is pure structure - generating it with a model is wasted tokens. */
-export function buildTableOfContents(plan: SectionSpec[]): SectionDraft {
+/**
+ * The ToC is pure structure - generating it with a model is wasted tokens.
+ * Anchor links are opt-in (R9): without them the ToC is a plain list of
+ * section names, which is what the global rules ask for.
+ */
+export function buildTableOfContents(plan: SectionSpec[], policy: EditorialPolicy = DEFAULT_EDITORIAL_POLICY): SectionDraft {
   const links = plan
     .filter((spec): spec is SectionSpec & { heading: string } => spec.heading !== null && spec.kind !== "toc")
-    .map((spec) => `- [${spec.heading}](${anchorFor(spec.heading)})`)
+    .map((spec) => (policy.anchorLinks ? `- [${spec.heading}](${anchorFor(spec.heading)})` : `- ${spec.heading}`))
     .join("\n");
   return {
     heading: "Table of Contents",
@@ -606,7 +706,7 @@ export async function generateAllSections(
     new Set((context.evidenceSummary?.match(/https?:\/\/[^\s)]+/g) ?? []).map((url) => url.replace(/[.,)]+$/, "")))
   );
   const drafts = await mapWithConcurrency(plan, env.WRITING_SECTION_CONCURRENCY, async (spec, index): Promise<SectionDraft> => {
-    if (spec.kind === "toc") return buildTableOfContents(plan);
+    if (spec.kind === "toc") return buildTableOfContents(plan, context.policy ?? resolveEditorialPolicy(context.specs));
 
     const cacheId = spec.heading ?? "__intro__";
     const hit = cached?.sections[cacheId];
@@ -616,7 +716,8 @@ export async function generateAllSections(
     }
 
     let lastError: unknown;
-    for (let attempt = 1; attempt <= 2; attempt += 1) {
+    const maxAttempts = context.maxSectionRetries ?? readBriefSpecs(context.specs).maxSectionRetries ?? 2;
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       try {
         const draft = await generateSection(spec, {
           ...context,
