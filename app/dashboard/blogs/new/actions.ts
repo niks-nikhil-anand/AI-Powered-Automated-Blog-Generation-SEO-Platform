@@ -75,7 +75,9 @@ export async function submitBlogInput(data: BlogInputFormData): Promise<SubmitRe
         evidenceSummary,
         priority: validated.priority,
         status: "PENDING",
-        specs: (data as any) ?? validated,
+        // Workers read the normalized submission; the original payload is kept
+        // under `brief` (same contract as POST /api/blogs/input).
+        specs: { ...(validated as Record<string, unknown>), brief: (data as Record<string, unknown>) ?? null } as any,
       },
     });
 

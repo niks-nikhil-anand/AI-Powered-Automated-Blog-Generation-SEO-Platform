@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { normalizeSubmission } from "./brief";
 
 /**
  * The manual blog specification - the single entry point of the pipeline.
@@ -145,8 +146,12 @@ export const generationInstructionsSchema = z
   .passthrough();
 
 export const blogInputSchema = z.preprocess((raw: unknown) => {
-  if (raw && typeof raw === "object") {
-    const obj = { ...(raw as Record<string, unknown>) };
+  // A nested authoring brief (schemaVersion "1.0") is mapped onto the flat
+  // shape below before anything else runs; a flat submission passes through
+  // unchanged. See ./brief.ts.
+  const submission = normalizeSubmission(raw);
+  if (submission && typeof submission === "object") {
+    const obj = { ...(submission as Record<string, unknown>) };
     if (!obj.outlineJson && obj.outline && typeof obj.outline === "object") {
       obj.outlineJson = obj.outline;
     }
@@ -176,7 +181,7 @@ export const blogInputSchema = z.preprocess((raw: unknown) => {
     }
     return obj;
   }
-  return raw;
+  return submission;
 }, z.object({
   title: z.string().min(10).max(200),
   slug: z.string().min(3).max(100).optional(),
@@ -189,7 +194,7 @@ export const blogInputSchema = z.preprocess((raw: unknown) => {
   competitorKeywords: z.array(z.string()).optional(),
   longTailKeywords: z.array(z.string()).optional(),
   semanticKeywords: z.array(z.string()).optional(),
-  metaTitle: z.string().max(60).optional(),
+  metaTitle: z.string().max(100).optional(),
   metaDescription: z.string().max(160).optional(),
 
   // Content specs
@@ -202,6 +207,42 @@ export const blogInputSchema = z.preprocess((raw: unknown) => {
   uniqueValueProposition: z.string().optional(),
   specs: z.record(z.string(), z.unknown()).optional(),
   internalLinks: z.array(z.string()).optional(),
+  /**
+   * Opt-ins to behaviour the global content rules switch off by default: a
+   * table of contents, anchor navigation and links the editor has approved.
+   * See workers/shared/editorial-policy.ts.
+   */
+  editorialPolicy: z
+    .object({
+      tableOfContents: z.boolean().optional(),
+      anchorLinks: z.boolean().optional(),
+      internalLinks: z.array(z.string()).optional(),
+      /** URLs the brief vouched for: linkable without being research evidence. */
+      approvedLinks: z.array(z.string()).optional(),
+      externalLinks: z.enum(["evidence-only", "allowed"]).optional(),
+      placeholderDomains: z.array(z.string()).optional(),
+      strictLength: z.boolean().optional(),
+    })
+    .optional(),
+  /** Brief context with no column of its own - rendered as its own prompt block. */
+  briefDirectives: z.array(z.string()).optional(),
+  /** Explicit word bounds from the brief; they override the derived range. */
+  contentBounds: z
+    .object({
+      min: z.number().optional(),
+      max: z.number().optional(),
+      countFaqInTotal: z.boolean().optional(),
+      avoidPadding: z.boolean().optional(),
+    })
+    .optional(),
+  /** outlineJson.h1 - the article's H1 must match it verbatim. */
+  briefedH1: z.string().optional(),
+  /** What the brief -> submission mapping implies; informational only. */
+  briefNotes: z.array(z.string()).optional(),
+  /** generationConfig.generationMode - overrides the sectioned-writing default. */
+  generationMode: z.string().optional(),
+  /** generationConfig.maxSectionRetries - per-section retry budget. */
+  maxSectionRetries: z.number().optional(),
   writingInstructions: z.array(z.string()).optional(),
   generationInstructions: generationInstructionsSchema.optional(),
   seoRequirements: z.record(z.string(), z.unknown()).optional(),
