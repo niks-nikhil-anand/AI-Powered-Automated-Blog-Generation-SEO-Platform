@@ -6,6 +6,9 @@ import { canonicalEvidenceSources } from "../shared/evidence";
 import { runFactCheck, runFullFactCheck, type FactCheckResult, type FullFactCheckDetail, type FullFactCheckResult } from "./factcheck";
 import { judgeBlog, type JudgeResult } from "./judge";
 import { validateArticleContract } from "../shared/article-contract";
+import { reviewArticle, formatViolation, type EditorialReviewResult } from "../shared/editorial-rules";
+import { resolveEditorialPolicy } from "../shared/editorial-policy";
+import { readBriefSpecs } from "../shared/brief";
 
 const log = logger.child({ worker: "quality-worker" });
 
@@ -30,7 +33,7 @@ type BlogForQuality = {
   } | null;
   /** ContentPlan fields the LLM judge scores usefulness against (Task 4). */
   plan?: { searchIntent: string; audience: string; angle: string } | null;
-  outline?: { sections: unknown } | null;
+  outline?: { sections: unknown; faqs?: unknown } | null;
   featuredImage?: { width: number | null; height: number | null; size: number; publicUrl: string } | null;
   seo?: {
     metaTitle: string;
@@ -54,21 +57,6 @@ export type QualityFailure = {
   reason: string;
   suggestedAction: "rewrite" | "remove" | "research_more";
 };
-
-const requiredSections = [
-  "What is",
-  "Why it matters",
-  "Key Features",
-  "Benefits",
-  "How it Works",
-  "Real World Use Cases",
-  "Pros and Cons",
-  "Best Practices",
-  "Common Mistakes",
-  "FAQs",
-  "Conclusion",
-  "Call To Action",
-];
 
 function clamp(score: number) {
   return Math.max(0, Math.min(10, Math.round(score)));
@@ -233,10 +221,28 @@ export async function scoreBlogQuality(blog: BlogForQuality) {
     });
   }
 
-  const expectedSections = outlineSections.length > 0 ? outlineSections : requiredSections;
+  // The outline is the only section authority: articles are no longer
+  // expected to carry a fixed 12-heading skeleton (R3/R4/R16), so an article
+  // without an outline is judged structurally instead.
+  const expectedSections = outlineSections;
+  const editorialReview: EditorialReviewResult = reviewArticle({
+    content,
+    focusKeyword: blog.blogInput?.focusKeyword,
+    metaTitle: blog.seo?.metaTitle,
+    metaDescription: blog.seo?.metaDescription,
+    targetWords: blog.blogInput?.contentLength,
+    policy: resolveEditorialPolicy(blog.blogInput?.specs as Record<string, unknown> | null),
+    approvedUrls: canonicalEvidenceSources(blog.blogInput?.evidenceArticles).map((source) => source.url),
+  });
+  // The same brief-supplied bounds the writing gate applied, so QA and the
+  // writer agree about what the submission asked for.
+  const brief = readBriefSpecs(blog.blogInput?.specs as Record<string, unknown> | null);
   const articleContract = validateArticleContract({
     content,
     targetWords: blog.blogInput?.contentLength,
+    wordBounds: brief.wordBounds,
+    requiredH1: brief.briefedH1,
+    faqQuestions: blog.outline?.faqs ?? (blog.blogInput?.outline as { faqs?: unknown } | null | undefined)?.faqs,
     outlineSections: rawSections,
     focusKeyword: blog.blogInput?.focusKeyword,
     primaryKeywords: blog.blogInput?.keywords,
@@ -319,10 +325,17 @@ export async function scoreBlogQuality(blog: BlogForQuality) {
       score: clamp(
         outlineSections.length > 0
           ? 10 - (missingSections.length / Math.max(1, outlineSections.length)) * 10
-          : 10 - missingSections.length * 0.8
+          : (h2.length >= 4 ? 5 : h2.length) +
+            (/^##\s+(conclusion|final thoughts|summary|wrapping up)/im.test(content) ? 3 : 0) +
+            (editorialReview.violations.some((violation) => violation.rule === "R17.empty-section") ? 0 : 2)
       ),
       maxScore: 10,
-      notes: missingSections.length ? [`Missing: ${missingSections.join(", ")}`] : ["All required sections covered"],
+      notes:
+        outlineSections.length > 0
+          ? missingSections.length
+            ? [`Missing: ${missingSections.join(", ")}`]
+            : ["All outline sections covered"]
+          : [`No outline to check against; judged structurally (${h2.length} H2 sections)`],
     },
     {
       label: "Readability",
@@ -334,30 +347,53 @@ export async function scoreBlogQuality(blog: BlogForQuality) {
       label: "Content Quality",
       score: clamp(
         (wordCount >= 1200 ? 3 : 0) +
-          (wordCount >= 1800 ? 2 : 0) +
-          (h2.length >= (outlineSections.length > 0 ? Math.min(outlineSections.length, 6) : 10) ? 2 : 0) +
-          (!hasDuplicateParagraphs(content) ? 3 : 0)
+          (h2.length >= (outlineSections.length > 0 ? Math.min(outlineSections.length, 6) : 4) ? 2 : 0) +
+          (!hasDuplicateParagraphs(content) ? 3 : 0) +
+          (editorialReview.violations.some((violation) => violation.rule.startsWith("R16.")) ? 0 : 2)
       ),
       maxScore: 10,
-      notes: [`Word count: ${wordCount}`, hasDuplicateParagraphs(content) ? "Duplicate paragraph risk found" : "No duplicate paragraphs found"],
+      notes: [
+        `Word count: ${wordCount}`,
+        hasDuplicateParagraphs(content) ? "Duplicate paragraph risk found" : "No duplicate paragraphs found",
+      ],
     },
     {
+      // Coverage is worth 6, restraint the other 4: an article that repeats
+      // the focus keyword into every paragraph is worse SEO, not better.
       label: "Keyword Optimization",
-      score: clamp(keywords.reduce((sum, keyword) => sum + (lowerContent.includes(keyword.toLowerCase()) ? 1.5 : 0), 0)),
+      score: clamp(
+        Math.min(6, keywords.reduce((sum, keyword) => sum + (lowerContent.includes(keyword.toLowerCase()) ? 1.5 : 0), 0)) +
+          (editorialReview.violations.some((violation) => violation.rule.startsWith("R2.")) ? 0 : 4)
+      ),
       maxScore: 10,
-      notes: [`Keywords checked: ${keywords.length}`],
+      notes: [
+        `Keywords checked: ${keywords.length}`,
+        ...editorialReview.violations.filter((violation) => violation.rule.startsWith("R2.")).map(formatViolation),
+      ],
     },
     {
       label: "Technical SEO",
-      score: clamp((blog.seo?.schema ? 2 : 0) + (blog.featuredImage ? 2 : 0) + (/\]\(https?:\/\//.test(content) ? 2 : 0) + (blog.seo?.metaTitle ? 2 : 0) + (blog.seo?.metaDescription ? 2 : 0)),
+      score: clamp(
+        (blog.seo?.schema ? 2 : 0) +
+          (blog.featuredImage ? 2 : 0) +
+          (blog.slug ? 2 : 0) +
+          (blog.seo?.metaTitle ? 2 : 0) +
+          (blog.seo?.metaDescription ? 2 : 0)
+      ),
       maxScore: 10,
-      notes: [blog.featuredImage ? "Featured image ready" : "Missing featured image", /\]\(https?:\/\//.test(content) ? "External links found" : "No external links found"],
+      notes: [blog.featuredImage ? "Featured image ready" : "Missing featured image", `Slug: ${blog.slug || "missing"}`],
     },
     {
       label: "Formatting & UX",
-      score: clamp((/\|.+\|/.test(content) ? 2 : 0) + (/^- /m.test(content) ? 2 : 0) + (/^\d+\. /m.test(content) ? 2 : 0) + (/```/.test(content) ? 2 : 0) + (/table of contents/i.test(content) ? 2 : 0)),
+      score: clamp(
+        (/\|.+\|/.test(content) ? 2 : 0) +
+          (/^- /m.test(content) ? 2 : 0) +
+          (/^\d+\. /m.test(content) ? 2 : 0) +
+          (/```/.test(content) ? 2 : 0) +
+          (h3.length >= 3 ? 2 : 0)
+      ),
       maxScore: 10,
-      notes: ["Checked table, lists, code blocks, and table of contents"],
+      notes: ["Checked tables, lists, code blocks, and subheading depth"],
     },
     {
       label: "Media Quality",
@@ -420,6 +456,16 @@ export async function scoreBlogQuality(blog: BlogForQuality) {
   ];
 
   checks.push({
+    label: "Editorial Rules",
+    score: clamp(10 - editorialReview.blockers.length * 4 - editorialReview.warnings.length),
+    maxScore: 10,
+    notes:
+      editorialReview.violations.length > 0
+        ? editorialReview.violations.slice(0, 12).map(formatViolation)
+        : ["No global content-rule violations found"],
+  });
+
+  checks.push({
     label: "Article Contract",
     score: articleContract.passed ? 10 : 0,
     maxScore: 10,
@@ -439,6 +485,7 @@ export async function scoreBlogQuality(blog: BlogForQuality) {
       notes: [
         `${judge.critique}${env.JUDGE_SHADOW_MODE ? " (shadow mode - not gated)" : ""}`,
         `depth ${judge.scores.depth}/10 · tone ${judge.scores.accuracyOfTone}/10 · originality ${judge.scores.originality}/10 · usefulness ${judge.scores.usefulness}/10`,
+        `intent fit ${judge.scores.searchIntentFit}/10 · keyword naturalness ${judge.scores.keywordNaturalness}/10 · technical accuracy ${judge.scores.technicalAccuracy}/10`,
       ],
     });
   }
