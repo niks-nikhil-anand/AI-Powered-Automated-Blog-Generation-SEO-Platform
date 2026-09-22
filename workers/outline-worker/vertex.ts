@@ -58,7 +58,7 @@ Return ONLY a JSON object with these keys:
 {
   "title": "polished SEO article title under 70 characters",
   "slug": "url-safe slug",
-  "metaTitle": "under 60 characters",
+  "metaTitle": "under 100 characters",
   "metaDescription": "under 160 characters",
   "sections": [
     { "heading": "H2 heading", "intent": "what this section achieves", "bullets": ["3-5 evidence-bounded bullet points"]${claimsKey} }
