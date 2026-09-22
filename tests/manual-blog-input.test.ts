@@ -276,7 +276,10 @@ const postgresMongoSectionPlan = buildSectionPlan({
 });
 assert.equal(postgresMongoSectionPlan[0].kind, "intro");
 assert.equal(postgresMongoSectionPlan[0].wordTarget, 150);
-assert.equal(postgresMongoSectionPlan[2].heading, "PostgreSQL vs MongoDB: Core Differences");
+// No table of contents unless the submission asks for one, so the first
+// outline section follows the intro directly.
+assert.ok(postgresMongoSectionPlan.every((section) => section.kind !== "toc"));
+assert.equal(postgresMongoSectionPlan[1].heading, "PostgreSQL vs MongoDB: Core Differences");
 
 /* ---------------------------------------------------------------- */
 /* Full custom user specification with subsections & comparisonTable*/
@@ -460,22 +463,36 @@ const sectionPlan = buildSectionPlan({
 
 // The plan MUST follow the user's custom outline, not the generic 14-section skeleton!
 assert.equal(sectionPlan[0].kind, "intro");
-assert.equal(sectionPlan[1].kind, "toc"); // Table of contents inserted after intro
-assert.equal(sectionPlan[2].heading, "The Modern Full-Stack JavaScript Landscape in 2026");
-assert.equal(sectionPlan[2].kind, "subsections");
-assert.equal(sectionPlan[2].subsections?.length, 2);
+// A table of contents is opt-in now (global content rules R9), so the body
+// sections follow the introduction directly.
+assert.ok(sectionPlan.every((section) => section.kind !== "toc"));
+assert.equal(sectionPlan[1].heading, "The Modern Full-Stack JavaScript Landscape in 2026");
+assert.equal(sectionPlan[1].kind, "subsections");
+assert.equal(sectionPlan[1].subsections?.length, 2);
 
-assert.equal(sectionPlan[3].heading, "Next.js vs Nuxt vs SvelteKit: Quick Comparison");
-assert.equal(sectionPlan[3].kind, "table");
-assert.ok(sectionPlan[3].comparisonTable !== undefined);
+assert.equal(sectionPlan[2].heading, "Next.js vs Nuxt vs SvelteKit: Quick Comparison");
+assert.equal(sectionPlan[2].kind, "table");
+assert.ok(sectionPlan[2].comparisonTable !== undefined);
 
-assert.equal(sectionPlan[4].heading, "Deep Dive: Architectural Differences");
-assert.equal(sectionPlan[4].subsections?.length, 3);
+assert.equal(sectionPlan[3].heading, "Deep Dive: Architectural Differences");
+assert.equal(sectionPlan[3].subsections?.length, 3);
 
-assert.equal(sectionPlan[5].heading, "Frequently Asked Questions");
-assert.equal(sectionPlan[5].kind, "faq");
+assert.equal(sectionPlan[4].heading, "Frequently Asked Questions");
+assert.equal(sectionPlan[4].kind, "faq");
 
-assert.equal(sectionPlan[6].heading, "Final Verdict: Making the Right Choice in 2026");
+assert.equal(sectionPlan[5].heading, "Final Verdict: Making the Right Choice in 2026");
+
+// Opting in restores the table of contents, right after the introduction.
+const tocPlan = buildSectionPlan({
+  title: userFullInput.title,
+  topic: userFullInput.title,
+  description: "Framework comparison",
+  outline: { sections: generatedOutline.sections, faqs: generatedOutline.faqs },
+  keywords: userFullInput.primaryKeywords,
+  targetWords: userFullInput.contentLength,
+  specs: { ...userFullInput, editorialPolicy: { tableOfContents: true } } as Record<string, unknown>,
+});
+assert.equal(tocPlan[1].kind, "toc");
 
 // Total word targets must sum to approximately 2500 words
 const totalBudgetedWords = sectionPlan.reduce((sum, s) => sum + s.wordTarget, 0);

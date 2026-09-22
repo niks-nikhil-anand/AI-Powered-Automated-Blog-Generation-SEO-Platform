@@ -6,6 +6,7 @@ import { withVertexTelemetryContext } from "../shared/vertex-telemetry-context";
 import { JOB_IDS, QUEUE_NAMES, type OutlineJobPayload, writingQueue } from "../shared/queues";
 import { generateContentOutline } from "./vertex";
 import { outlineFromUserInput, parseUserOutline } from "./user-outline";
+import { containsKeyword } from "../shared/seo-keyword";
 import { workerOptions } from "../shared/worker-options";
 import { recordAIUsage } from "../shared/pricing";
 import {
@@ -66,6 +67,7 @@ async function outlineTopic(payload: OutlineJobPayload) {
       ? {
           outline: outlineFromUserInput(userOutline, {
             title: blogInput.title,
+            focusKeyword: blogInput.focusKeyword,
             metaTitle: blogInput.metaTitle,
             metaDescription: blogInput.metaDescription,
             angle: plan.angle,
@@ -75,6 +77,7 @@ async function outlineTopic(payload: OutlineJobPayload) {
           model: "user-supplied",
         }
       : await generateContentOutline(blogInput.title, blogInput.category ?? "General", plan, {
+          focusKeyword: blogInput.focusKeyword,
           metaTitle: blogInput.metaTitle,
           metaDescription: blogInput.metaDescription,
           contentLength: blogInput.contentLength,
@@ -82,6 +85,19 @@ async function outlineTopic(payload: OutlineJobPayload) {
         });
     const { outline, usage, model } = generated;
     const latencyMs = Date.now() - startedAt;
+
+    // The article contract requires the focus keyword in at least one H2, and
+    // H2s come from these headings. Generated outlines are repaired in
+    // enforceFocusKeyword; an editor-supplied outline is authoritative, so the
+    // mismatch is reported instead of rewritten.
+    const focusKeyword = blogInput.focusKeyword?.trim();
+    if (focusKeyword && !outline.sections.some((section) => containsKeyword(String(section.heading ?? ""), focusKeyword))) {
+      log.warn("No outline section heading contains the focus keyword - the article contract requires it in an H2", {
+        blogInputId: blogInput.id,
+        focusKeyword,
+        userSupplied: Boolean(userOutline),
+      });
+    }
     let sections = Array.isArray(outline.sections) ? outline.sections : [];
     const faqs = Array.isArray(outline.faqs) ? outline.faqs : [];
     const plannedClaims = normalizePlannedClaims((plan as { plannedClaims?: unknown }).plannedClaims, evidenceSources);

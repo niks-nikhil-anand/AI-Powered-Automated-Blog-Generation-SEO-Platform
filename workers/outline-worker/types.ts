@@ -36,6 +36,14 @@ export const OutlineSectionSchema = z.object({
    */
   wordTarget: z.number().optional(),
   sourceMarkers: z.array(z.string().regex(/^S\d+$/)).optional(),
+  /** Brief-supplied per-section directives; see outline-worker/user-outline.ts. */
+  readerQuestion: z.string().optional(),
+  avoid: z.array(z.string()).optional(),
+  requirements: z.array(z.string()).optional(),
+  evidenceRequirements: z.array(z.string()).optional(),
+  practicalExample: z.string().optional(),
+  format: z.string().optional(),
+  requiredInternalLink: z.object({ url: z.string(), anchor: z.string().optional() }).passthrough().optional(),
   /**
    * Required only for SOURCED submissions (the ones carrying reference
    * articles): outline-worker's evidence gate then insists every section

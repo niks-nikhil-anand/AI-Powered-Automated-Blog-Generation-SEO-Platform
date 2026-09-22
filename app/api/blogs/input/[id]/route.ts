@@ -156,7 +156,9 @@ export async function PATCH(request: Request, context: RouteContext) {
           failureReason: null,
           processedAt: null,
           dispatchedAt: null,
-          specs: (body as any) ?? validated,
+          // Workers read the normalized submission; the original payload is kept
+          // under `brief` (same contract as POST /api/blogs/input).
+          specs: { ...(validated as Record<string, unknown>), brief: (body as Record<string, unknown>) ?? null } as any,
         },
       });
     });

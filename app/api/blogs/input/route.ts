@@ -106,7 +106,9 @@ export async function POST(req: NextRequest) {
         evidenceSummary,
         priority: validated.priority,
         status: "PENDING",
-        specs: (body as any) ?? validated,
+        // The normalized submission is what every worker reads; the original
+        // payload rides along under `brief` so nothing the editor wrote is lost.
+        specs: { ...(validated as Record<string, unknown>), brief: (body as Record<string, unknown>) ?? null } as any,
       },
     });
 

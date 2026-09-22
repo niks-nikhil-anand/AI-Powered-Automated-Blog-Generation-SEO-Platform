@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { normalizeOutlineClaims } from "../shared/evidence-claims";
 import type { OutlineResult } from "./types";
+import { ensureKeywordInTitle } from "../shared/seo-keyword";
 
 /** Same rule as workers/shared/vertex.ts's slugify, inlined so this module stays free of the Vertex/Redis stack. */
 function slugify(input: string): string {
@@ -32,6 +33,22 @@ export const UserOutlineSchema = z.object({
         bullets: z.array(z.string()).optional(),
         wordTarget: z.number().optional(),
         targetWords: z.number().optional(),
+        /**
+         * Brief-supplied section directives (app/dashboard/blogs/new/brief.ts
+         * maps keyPoints -> bullets and avoidContent -> avoid). They travel
+         * with the section so the writer receives them per section rather
+         * than as one undifferentiated wall of instructions.
+         */
+        readerQuestion: z.string().optional(),
+        avoid: z.array(z.string()).optional(),
+        requirements: z.array(z.string()).optional(),
+        evidenceRequirements: z.array(z.string()).optional(),
+        practicalExample: z.string().optional(),
+        format: z.string().optional(),
+        requiredInternalLink: z
+          .object({ url: z.string(), anchor: z.string().optional() })
+          .passthrough()
+          .optional(),
         claims: z.array(z.unknown()).optional(),
         paragraphs: z
           .array(
@@ -102,7 +119,15 @@ export function parseUserOutline(value: unknown): UserOutline | null {
  */
 export function outlineFromUserInput(
   userOutline: UserOutline,
-  meta: { title: string; metaTitle?: string | null; metaDescription?: string | null; angle: string; slug: string }
+  meta: {
+    title: string;
+    metaTitle?: string | null;
+    metaDescription?: string | null;
+    angle: string;
+    slug: string;
+    /** BlogInput.focusKeyword - required verbatim in the article H1, which this title becomes. */
+    focusKeyword?: string | null;
+  }
 ): OutlineResult {
   const sections = userOutline.sections.map((section) => {
     const rawSubsections = section.paragraphs ?? section.subsections ?? [];
@@ -126,6 +151,17 @@ export function outlineFromUserInput(
       heading: section.heading,
       intent: section.intent || section.description || `Cover "${section.heading}" for the reader.`,
       bullets,
+      // Carried through verbatim - the writing worker renders each of these
+      // into the section prompt.
+      ...(section.readerQuestion ? { readerQuestion: section.readerQuestion } : {}),
+      ...(section.avoid && section.avoid.length > 0 ? { avoid: section.avoid } : {}),
+      ...(section.requirements && section.requirements.length > 0 ? { requirements: section.requirements } : {}),
+      ...(section.evidenceRequirements && section.evidenceRequirements.length > 0
+        ? { evidenceRequirements: section.evidenceRequirements }
+        : {}),
+      ...(section.practicalExample ? { practicalExample: section.practicalExample } : {}),
+      ...(section.format ? { format: section.format } : {}),
+      ...(section.requiredInternalLink ? { requiredInternalLink: section.requiredInternalLink } : {}),
       ...(section.wordTarget !== undefined || section.targetWords !== undefined
         ? { wordTarget: section.wordTarget ?? section.targetWords }
         : {}),
@@ -159,10 +195,16 @@ export function outlineFromUserInput(
     }
   }
 
+  // The editor's section headings are theirs and are never rewritten here;
+  // the outline worker logs when none of them carries the focus keyword, so
+  // the H2 rule in the article contract is a visible editorial choice rather
+  // than a silent structural edit.
+  const title = ensureKeywordInTitle(meta.title, meta.focusKeyword);
+
   return {
-    title: meta.title,
-    slug: meta.slug || slugify(meta.title),
-    metaTitle: (meta.metaTitle || meta.title).slice(0, 60),
+    title,
+    slug: meta.slug || slugify(title),
+    metaTitle: ensureKeywordInTitle(meta.metaTitle || title, meta.focusKeyword, { maxLength: 60 }),
     metaDescription: (meta.metaDescription || meta.angle || meta.title).slice(0, 160),
     sections,
     faqs,
