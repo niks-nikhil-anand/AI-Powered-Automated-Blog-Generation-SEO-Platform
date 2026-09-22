@@ -31,6 +31,12 @@ export type JudgeScores = {
   accuracyOfTone: number;
   originality: number;
   usefulness: number;
+  /** R3: does every section serve the search intent, or is some of it filler? */
+  searchIntentFit: number;
+  /** R2/R19: does it read like a person wrote it, or like keyword insurance? */
+  keywordNaturalness: number;
+  /** R5/R6/R12: current terminology, calibrated claims, no invented numbers. */
+  technicalAccuracy: number;
 };
 
 export type JudgeResult = {
@@ -56,6 +62,12 @@ const JudgeResponseSchema = z.object({
     accuracyOfTone: z.number(),
     originality: z.number(),
     usefulness: z.number(),
+    // Defaulted so a model that answers with the older four-dimension shape
+    // still validates - a missing dimension scores neutral rather than
+    // dropping the whole judge result.
+    searchIntentFit: z.number().optional().default(5),
+    keywordNaturalness: z.number().optional().default(5),
+    technicalAccuracy: z.number().optional().default(5),
   }),
   critique: z.string().min(1),
   fixes: z.array(JudgeFixSchema),
@@ -85,11 +97,16 @@ ARTICLE TITLE: ${blog.title}
 CONTENT PLAN THE ARTICLE WAS WRITTEN AGAINST:
 ${planBlock}
 
-Score four dimensions, 0-10 each:
+Score seven dimensions, 0-10 each:
 1. depth - does the article teach something a competent developer couldn't skim from a changelog? Specifics, mechanisms, tradeoffs.
 2. accuracyOfTone - are claims calibrated (confident where sourced, hedged where not)? Any overconfident or marketing-flavored passages?
 3. originality - does it add an angle beyond generic coverage of this news, or is it a rewritten press release?
 4. usefulness - judged against the search intent and audience above: will the target reader leave able to DO something?
+5. searchIntentFit - does EVERY section move the reader towards that search intent? Score down filler sections, sections that exist to hold a keyword, and explanations repeated from an earlier section.
+6. keywordNaturalness - would this read the same way if nobody had given the writer a keyword? Score down forced phrasing, keyword-shaped headings, and the keyword appearing where a pronoun or synonym would read better. An article that simply uses its subject often is fine; one that bends sentences around a phrase is not.
+7. technicalAccuracy - current terminology and APIs, claims that distinguish what the technology does from what a search engine then does with it, dependencies acknowledged, and no invented statistics, benchmarks or company names.
+
+The article must be worth reading with every keyword removed; if it is not, say so in the critique and score usefulness and keywordNaturalness accordingly.
 
 Then list concrete fixes. Every fix MUST name the exact H2 heading it applies to (copy the heading text verbatim from the article), the issue, and what to change. Order by priority. If the article is excellent, return an empty fixes list - do not invent nits.
 
@@ -98,7 +115,7 @@ ${blog.content}
 
 Return ONLY JSON in this exact shape:
 {
-  "scores": { "depth": 0-10, "accuracyOfTone": 0-10, "originality": 0-10, "usefulness": 0-10 },
+  "scores": { "depth": 0-10, "accuracyOfTone": 0-10, "originality": 0-10, "usefulness": 0-10, "searchIntentFit": 0-10, "keywordNaturalness": 0-10, "technicalAccuracy": 0-10 },
   "critique": "2-3 sentences summarizing the editorial assessment",
   "fixes": [{ "section": "exact H2 heading", "issue": "what is wrong", "fix": "what to change", "priority": "high"|"medium"|"low" }]
 }`;
@@ -122,8 +139,12 @@ export async function judgeBlog(blog: JudgeableBlog): Promise<JudgeResult | null
       accuracyOfTone: clamp10(parsed.data.scores.accuracyOfTone),
       originality: clamp10(parsed.data.scores.originality),
       usefulness: clamp10(parsed.data.scores.usefulness),
+      searchIntentFit: clamp10(parsed.data.scores.searchIntentFit),
+      keywordNaturalness: clamp10(parsed.data.scores.keywordNaturalness),
+      technicalAccuracy: clamp10(parsed.data.scores.technicalAccuracy),
     };
-    const overall = Math.round(((scores.depth + scores.accuracyOfTone + scores.originality + scores.usefulness) / 40) * 100);
+    const dimensions = Object.values(scores);
+    const overall = Math.round((dimensions.reduce((sum, value) => sum + value, 0) / (dimensions.length * 10)) * 100);
 
     return {
       scores,
