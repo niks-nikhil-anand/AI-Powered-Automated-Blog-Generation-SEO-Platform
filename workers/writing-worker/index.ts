@@ -49,6 +49,9 @@ import { logVertexRuntimeConfig } from "../shared/vertex";
 import { extractClaimsDeterministic } from "../shared/claims";
 import { failBlogInput } from "../shared/blog-input";
 import { validateArticleContract, type ArticleContractResult } from "../shared/article-contract";
+import { reviewArticle, formatViolation, type EditorialReviewResult } from "../shared/editorial-rules";
+import { resolveEditorialPolicy } from "../shared/editorial-policy";
+import { readBriefSpecs } from "../shared/brief";
 
 const log = logger.child({ worker: "writing-worker" });
 
@@ -144,7 +147,8 @@ function writingGate(
   evidenceSummary?: string | null,
   grounded?: { citedMarkers: string[]; sources: GroundedSource[] },
   factSafety?: { selfCheck: SelfCheckResult | null; unmarkedClaims: string[] },
-  contract?: ArticleContractResult
+  contract?: ArticleContractResult,
+  editorial?: EditorialReviewResult | null
 ): QualityGateReport {
   const score = heuristicScore(markdown);
   const reasons: string[] = [];
@@ -152,6 +156,14 @@ function writingGate(
 
   if (contract && !contract.passed) {
     reasons.push(...contract.reasons);
+  }
+
+  // Global content rules. Blockers are objective (broken code fence, invented
+  // URL, guaranteed-rankings claim) and fail the draft; warnings never do -
+  // they ride along only when the draft is failing anyway, so the retry's
+  // prompt gets the full picture instead of just the blocking reason.
+  if (editorial && !env.EDITORIAL_RULES_SHADOW_MODE) {
+    reasons.push(...editorial.blockers.map(formatViolation));
   }
 
   if (grounded) {
@@ -186,12 +198,34 @@ function writingGate(
     reasons.push(`${factSafety.unmarkedClaims.length} specific claim(s) lack an evidence marker`);
   }
 
+  const advisory =
+    editorial && reasons.length > 0
+      ? editorial.warnings.slice(0, 5).map((violation) => `advisory ${formatViolation(violation)}`)
+      : [];
+
   return {
     stage: "writing-worker",
     score: reasons.length === 0 ? 100 : score,
     passed: reasons.length === 0,
-    reasons: reasons.length > 0 ? reasons : ["Writing format and quality passed"],
+    reasons: reasons.length > 0 ? [...reasons, ...advisory] : ["Writing format and quality passed"],
   };
+}
+
+/**
+ * A writing-gate failure retries the SAME BullMQ payload, so without this the
+ * rewrite prompt would be byte-identical to the one that just failed. The
+ * previous attempt's gate reasons are persisted on WorkerAttempt.qualityReport
+ * (shared/recovery.ts), which makes them the natural feedback channel.
+ */
+async function previousGateReasons(workflowRunId: string, attemptId: string): Promise<string[]> {
+  const previous = await prisma.workerAttempt.findFirst({
+    where: { workflowRunId, worker: "writing-worker", status: "FAILED", id: { not: attemptId } },
+    orderBy: { startedAt: "desc" },
+    select: { qualityReport: true },
+  });
+  const report = previous?.qualityReport as { reasons?: unknown } | null;
+  if (!report || !Array.isArray(report.reasons)) return [];
+  return report.reasons.filter((reason): reason is string => typeof reason === "string");
 }
 
 /**
@@ -204,7 +238,7 @@ function writingGate(
  * normal full-draft path.
  */
 async function attemptTargetedRepair(args: {
-  blogInput: { id: string; evidenceSummary: string | null };
+  blogInput: { id: string; evidenceSummary: string | null; focusKeyword?: string | null; specs?: unknown };
   topic: string;
   description: string;
   outline: { title: string; plan?: SectionArticleContext["plan"] } | null;
@@ -247,6 +281,10 @@ async function attemptTargetedRepair(args: {
     sources: groundedSources,
     evidenceSummary: blogInput.evidenceSummary ?? undefined,
     keywords: [],
+    focusKeyword: blogInput.focusKeyword ?? undefined,
+    // Carries the editorial policy: a repaired section must obey the same
+    // no-ToC/no-invented-links rules as the original draft.
+    specs: (blogInput.specs as Record<string, unknown> | null) ?? undefined,
   };
 
   for (const { fix, sectionIndex } of matched) {
@@ -436,7 +474,7 @@ async function repairSectionsWithClaims(args: {
  * applicable - no blog row, too many issues, or an unmappable claim.
  */
 async function attemptClaimRepair(args: {
-  blogInput: { id: string; evidenceSummary: string | null };
+  blogInput: { id: string; evidenceSummary: string | null; focusKeyword?: string | null; specs?: unknown };
   topic: string;
   description: string;
   outline: { title: string; plan?: SectionArticleContext["plan"] } | null;
@@ -482,6 +520,10 @@ async function attemptClaimRepair(args: {
     sources: groundedSources,
     evidenceSummary: blogInput.evidenceSummary ?? undefined,
     keywords: [],
+    focusKeyword: blogInput.focusKeyword ?? undefined,
+    // Carries the editorial policy: a repaired section must obey the same
+    // no-ToC/no-invented-links rules as the original draft.
+    specs: (blogInput.specs as Record<string, unknown> | null) ?? undefined,
   };
   const repair = await repairSectionsWithClaims({ markdown: blog.content, issues, unmarkedClaims: [], context });
   if (!repair) return null;
@@ -624,7 +666,7 @@ export async function generateBlogForInput(
   // prompt's priorAttempt reasons, so even a FULL rewrite knows exactly
   // which claims to drop or qualify instead of hallucinating fresh ones.
   const priorFactCheckIssues = recoveryContext?.factCheckIssues ?? [];
-  const priorAttempt =
+  let priorAttempt =
     priorReport || priorFactCheckIssues.length > 0
       ? {
           score: priorReport?.score ?? 0,
@@ -637,10 +679,28 @@ export async function generateBlogForInput(
         }
       : undefined;
 
+  // No QA context means this may still be a BullMQ retry of a draft the
+  // writing gate itself rejected - carry those reasons forward so the rewrite
+  // is actually a rewrite.
+  if (!priorAttempt) {
+    const gateReasons = await previousGateReasons(attempt.workflow.id, attempt.attempt.id);
+    if (gateReasons.length > 0) {
+      log.info("Retrying after a writing-gate failure - prior reasons carried into the prompt", {
+        blogInputId,
+        reasons: gateReasons.length,
+      });
+      priorAttempt = { score: 0, reasons: gateReasons.slice(0, 12) };
+    }
+  }
+
   // Task 2: when the submission carries reference articles and the flag is
   // on, the draft grounds on [S1]-marked sources and citations are
   // materialized by code below. Unsourced submissions keep the legacy
   // evidenceSummary path untouched (and cite nothing when that is empty too).
+  const editorialPolicy = resolveEditorialPolicy(blogInput.specs as Record<string, unknown> | null);
+  // Brief-supplied requirements: prompt directives, explicit word bounds and
+  // the briefed H1 the finished article has to carry.
+  const brief = readBriefSpecs(blogInput.specs as Record<string, unknown> | null);
   const evidenceArticles = canonicalEvidenceSources(blogInput.evidenceArticles);
   const groundedSources: GroundedSource[] =
     env.GROUNDED_WRITING_ENABLED && evidenceArticles.length > 0 ? toGroundedSources(evidenceArticles) : [];
@@ -716,6 +776,9 @@ export async function generateBlogForInput(
       blogInputId,
       tone: blogInput.tone ?? undefined,
       targetWords: blogInput.contentLength ?? undefined,
+      focusKeyword: blogInput.focusKeyword ?? undefined,
+      policy: editorialPolicy,
+      briefDirectives: brief.directives,
       specs: (blogInput.specs as Record<string, unknown> | null) ?? undefined,
       internalLinks,
       writingInstructions,
@@ -748,6 +811,9 @@ export async function generateBlogForInput(
         sources: groundedSources,
         evidenceSummary: blogInput.evidenceSummary ?? undefined,
         keywords: draft.keywords,
+        focusKeyword: blogInput.focusKeyword ?? undefined,
+        policy: editorialPolicy,
+        briefDirectives: brief.directives,
         tone: blogInput.tone ?? undefined,
         targetWords: blogInput.contentLength ?? undefined,
         specs: (blogInput.specs as Record<string, unknown> | null) ?? undefined,
@@ -802,6 +868,9 @@ export async function generateBlogForInput(
           blogInputId,
           tone: blogInput.tone ?? undefined,
           targetWords: blogInput.contentLength ?? undefined,
+          focusKeyword: blogInput.focusKeyword ?? undefined,
+          policy: editorialPolicy,
+          briefDirectives: brief.directives,
           specs: (blogInput.specs as Record<string, unknown> | null) ?? undefined,
           internalLinks,
           writingInstructions,
@@ -862,7 +931,36 @@ export async function generateBlogForInput(
       metaTitle: draft.metaTitle,
       metaDescription: draft.metaDescription,
       internalLinks,
+      wordBounds: brief.wordBounds,
+      requiredH1: brief.briefedH1,
+      faqQuestions: outline?.faqs,
     });
+
+    // Global content rules (R1-R20). Approved link targets are the
+    // submission's own reference sources - anything else in the article is an
+    // invented URL as far as the rules are concerned.
+    const editorial = env.EDITORIAL_RULES_ENABLED
+      ? reviewArticle({
+          content: draft.markdown,
+          focusKeyword: blogInput.focusKeyword,
+          metaTitle: draft.metaTitle,
+          metaDescription: draft.metaDescription,
+          targetWords: blogInput.contentLength,
+          policy: editorialPolicy,
+          approvedUrls: [
+            ...evidenceArticles.map((source) => source.url),
+            ...extractEvidenceUrls(blogInput.evidenceSummary),
+          ],
+        })
+      : null;
+    if (editorial && editorial.violations.length > 0) {
+      log.warn("Editorial rule violations", {
+        blogInputId,
+        shadowMode: env.EDITORIAL_RULES_SHADOW_MODE,
+        blockers: editorial.blockers.map(formatViolation),
+        warnings: editorial.warnings.map(formatViolation),
+      });
+    }
 
     // Record spend before the gate: a rejected draft still burned tokens.
     // Task 5: sectioned drafts carry per-call usage rows - record each so
@@ -900,7 +998,8 @@ export async function generateBlogForInput(
         ? { citedMarkers: citationMeta.citedMarkers, sources: groundedSources }
         : undefined,
       env.WRITING_SELFCHECK_ENABLED ? { selfCheck, unmarkedClaims } : undefined,
-      articleContract
+      articleContract,
+      editorial
     );
     log.info("Evidence-constrained writing audit", {
       jobId: attempt.attempt.id,

@@ -215,6 +215,16 @@ export const env = {
    * DIMENSION_FLOOR: minimum per-check score (of 10) - one collapsed
    *   dimension can no longer be averaged into a pass.
    */
+  /**
+   * Global editorial rules (workers/shared/editorial-rules.ts).
+   * EDITORIAL_RULES_ENABLED: run the checks at all. Warnings are always
+   *   advisory - they are logged and fed into the rewrite/repair prompt.
+   * EDITORIAL_RULES_SHADOW_MODE: demote blockers to warnings too, so a noisy
+   *   check can be observed on real articles without stalling the pipeline.
+   */
+  EDITORIAL_RULES_ENABLED: optional("EDITORIAL_RULES_ENABLED", "true") !== "false",
+  EDITORIAL_RULES_SHADOW_MODE: optional("EDITORIAL_RULES_SHADOW_MODE", "false") !== "false",
+
   FULL_FACTCHECK_ENABLED: optional("FULL_FACTCHECK_ENABLED", "true") !== "false",
   JUDGE_ENABLED: optional("JUDGE_ENABLED", "false") !== "false",
   JUDGE_SHADOW_MODE: optional("JUDGE_SHADOW_MODE", "true") !== "false",
