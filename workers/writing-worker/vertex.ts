@@ -4,6 +4,10 @@ import { generateVertexText, slugify, VertexQuotaError, type VertexTextResult } 
 import { getSetting, MODEL_SETTING_KEYS } from "../shared/settings";
 import { buildSectionPlan, generateAllSections, type SectionArticleContext, DEFAULT_MUST_FOLLOW_RULES } from "./sections";
 import type { GroundedSource } from "./citations";
+import { ensureKeywordInTitle, ensureKeywordInH1, extractH1 } from "../shared/seo-keyword";
+import { buildGlobalRulesBlock } from "../shared/editorial-rules";
+import { resolveEditorialPolicy, type EditorialPolicy } from "../shared/editorial-policy";
+import { buildBriefDirectivesBlock, readBriefSpecs } from "../shared/brief";
 
 const log = logger.child({ worker: "writing-worker" });
 
@@ -97,6 +101,23 @@ export type WritingContext = {
   tone?: string;
   /** BlogInput.contentLength - the editor's target word count for the article. */
   targetWords?: number;
+  /**
+   * BlogInput.focusKeyword - the phrase this article must rank for. The
+   * article contract (workers/shared/article-contract.ts) requires it
+   * verbatim in the H1, the introduction, and at least one H2, so the prompt
+   * asks for that placement and enforceSingleH1 guarantees the H1.
+   */
+  focusKeyword?: string;
+  /**
+   * Resolved editorial policy (table of contents, anchor links, approved
+   * links). Defaults are the house rules - see shared/editorial-policy.ts.
+   */
+  policy?: EditorialPolicy;
+  /**
+   * Brief requirements with no column of their own (audience pain points,
+   * scenarios to work in, evidence rules) - see shared/brief.ts.
+   */
+  briefDirectives?: string[];
   /** Full submission specs (writingInstructions, internalLinks, etc.) */
   specs?: Record<string, unknown>;
   internalLinks?: string[];
@@ -121,6 +142,8 @@ const TONE_GUIDANCE: Record<string, string> = {
 };
 
 function buildPrompt(topic: string, description: string, context: WritingContext = {}): string {
+  const focusKeyword = context.focusKeyword?.trim();
+  const policy = context.policy ?? resolveEditorialPolicy(context.specs);
   const primaryKeyword = context.plan?.primaryKeyword?.trim();
   const secondaryKeywords = Array.isArray(context.plan?.secondaryKeywords)
     ? context.plan.secondaryKeywords.map(String).filter(Boolean)
@@ -196,69 +219,62 @@ Mandatory Generation Instructions (Must Follow):
 ${mustFollowRules.map((rule, idx) => `${idx + 1}. ${rule}`).join("\n")}
 `;
 
+  // The article contract rejects a draft that places the focus keyword
+  // loosely, so the placement is spelled out rather than left to the model's
+  // SEO instincts. enforceSingleH1 is the safety net for the H1; the
+  // introduction and H2 placements can only come from the model.
+  const focusKeywordBlock = focusKeyword
+    ? `
+Focus keyword placement (mandatory - the draft is rejected automatically when any of these is missing):
+- Focus keyword: "${focusKeyword}"
+- The H1 (first line) MUST contain "${focusKeyword}" verbatim, e.g. "# ${focusKeyword}: [rest of the title]".
+- The FIRST paragraph of the introduction MUST contain "${focusKeyword}" verbatim.
+- At least one "## " heading MUST contain "${focusKeyword}" verbatim.
+- Use the exact phrase; a reworded variant does not count. Everywhere else use it only where it reads naturally - no keyword stuffing.
+`
+    : "";
+
+  const globalRulesBlock = buildGlobalRulesBlock(policy, focusKeyword);
+  const briefBlock = buildBriefDirectivesBlock(context.briefDirectives ?? readBriefSpecs(context.specs).directives);
+
   const outlineSections = Array.isArray(context.outline?.sections)
     ? (context.outline.sections as Array<Record<string, unknown>>)
     : [];
+
+  const tocInstruction = !policy.tableOfContents
+    ? "- Do not include a Table of Contents section."
+    : policy.anchorLinks
+      ? "- Include a Table of Contents (## Table of Contents) with anchor links to every H2 section, right after the introduction."
+      : "- Include a Table of Contents (## Table of Contents) listing every H2 section as plain text - no links - right after the introduction.";
 
   const structureSection =
     outlineSections.length > 0
       ? `Article Structure Instructions:
 - Follow the approved outline sections and subsections exactly as given in the Approved outline above.
-- Always include a Table of Contents (## Table of Contents) with anchor links to every H2 section right after the introduction.
+${tocInstruction}
 - If an outline section specifies a comparisonTable, render the full Markdown comparison table with the specified columns and rows.
 - If an outline section has subsections or paragraphs, emit each as an "### [Heading]" subsection with detailed technical prose addressing the discussion points.
-- Ensure the complete article is thorough, detailed, and reaches the target length of ${minWords}-${maxWords} words.`
-      : `Mandatory Markdown structure:
-# [SEO-friendly title]
+- Aim for ${minWords}-${maxWords} words, but do not pad: cover the outline properly and stop. A shorter article beats a padded one.`
+      : `Article structure - choose the sections this topic actually needs:
+# [Article title]
 
-[Introduction: 2-4 paragraphs that explain the topic, reader problem, and practical value.]
-
+[Introduction: 2-4 paragraphs establishing the topic, the reader's problem, and what they will be able to do by the end.]
+${policy.tableOfContents ? `
 ## Table of Contents
-[Always include this section. List every H2 below as an anchor-style Markdown link.]
-
-## What is [topic]?
-[Clear definition and context.]
-
-## Why it matters
-[Explain developer/business/security/ecosystem impact.]
-
-## Key Features
-### [Feature 1]
-### [Feature 2]
-### [Feature 3]
-
-## Benefits
-### [Benefit 1]
-### [Benefit 2]
-
-## How it Works
-### Step 1: [Name]
-### Step 2: [Name]
-### Step 3: [Name]
-### Step 4: [Name]
-
-## Real World Use Cases
-### [Use Case 1]
-### [Use Case 2]
-### [Use Case 3]
-
-## Pros and Cons
-[Use a Markdown table.]
-
-## Best Practices
-[Practical checklist or guidance.]
-
-## Common Mistakes
-[Mistakes and how to avoid them.]
-
-## FAQs
-[4-6 H3 questions with concise answers.]
+[${policy.anchorLinks ? "List every H2 below as an anchor-style Markdown link." : "List every H2 below as plain text - no links."}]
+` : ""}
+Then 4-7 "## " sections, named after what they actually cover and ordered the way a reader needs them. Shapes that tend to work - pick only the ones this topic needs, and never all of them:
+- what the thing is, and when it applies
+- how it works, broken into named "### " steps
+- implementation guidance with short, complete code examples
+- trade-offs, or a comparison table when there is a real comparison to make
+- pitfalls and how to avoid them
+- a short FAQ of questions readers actually ask
 
 ## Conclusion
-[Summarize the practical takeaway.]
+[The practical takeaways and one concrete next step.]
 
-## Call To Action
-[One short CTA paragraph.]`;
+Do not add a section that repeats another section's ground, and do not add a section merely because it is a common blog heading.`;
 
   return `You are a Staff Technical Writer for DevKit Market, a developer-focused tech blog.
 
@@ -271,7 +287,7 @@ ${context.plan ? JSON.stringify(context.plan, null, 2) : "No separate content pl
 
 Target keywords (each must appear verbatim, case-insensitive, at least once somewhere in the article body):
 ${targetKeywords.length ? targetKeywords.map((keyword) => `- ${keyword}`).join("\n") : "- No target keywords provided."}
-
+${focusKeywordBlock}
 Approved outline:
 ${context.outline ? JSON.stringify(context.outline, null, 2) : "No separate outline provided."}
 
@@ -285,16 +301,16 @@ Fix the weak areas listed above. Preserve anything that was already working - th
 `
     : ""
 }
-${writingInstructionsBlock}${internalLinksBlock}${mustFollowBlock}
+${writingInstructionsBlock}${internalLinksBlock}${briefBlock}${mustFollowBlock}${globalRulesBlock}
 Guidelines:
 1. ${TONE_GUIDANCE[context.tone ?? "professional"] ?? TONE_GUIDANCE.professional}
 2. Use the approved outline as the authoritative article structure.
-3. Always include the Table of Contents section, linking every H2 as a Markdown anchor.
+3. ${policy.tableOfContents ? (policy.anchorLinks ? "Include the Table of Contents section, linking every H2 as a Markdown anchor." : "Include the Table of Contents section as a plain list of H2 names, with no links.") : "Do not include a Table of Contents section."}
 4. Use proper GitHub Flavored Markdown.
 5. Do not invent unsupported facts. Use cautious wording when evidence is incomplete.
-6. The Call To Action should be short, practical, and related to DevKit Market.
+6. If the article ends with a call to action, keep it to one short, practical paragraph related to DevKit Market.
 ${rule8}
-9. Weave target keywords naturally into headings and sentences.
+9. Use the target keywords only where they read naturally - the global content rules above take precedence over keyword coverage.
 ${rule10}
 11. Keep paragraphs under 100 words each. Sentences should average 15-20 words.
 12. Include comparison tables, lists, and short code snippets where appropriate.
@@ -309,7 +325,16 @@ Heading rules:
 Respond with ONLY the article body as Markdown. Do not return JSON. Do not wrap the whole article in a code fence.`;
 }
 
-function enforceSingleH1(markdown: string, title: string): string {
+/**
+ * Exactly one H1 - and, when the submission has a focus keyword, an H1 that
+ * actually contains it. The prompt asks for that placement, but "asked for"
+ * is not "guaranteed": an H1 that drops the keyword fails the article
+ * contract and burns a full retry, so the title is repaired here instead.
+ * The repair only fires when the model didn't place the keyword itself, and
+ * logs when it does - a prompt that drifts stays visible rather than being
+ * silently patched on every article.
+ */
+export function enforceSingleH1(markdown: string, title: string, focusKeyword?: string): string {
   const lines = markdown.trim().split("\n");
   let seenH1 = false;
   const normalized = lines.map((line, index) => {
@@ -325,11 +350,19 @@ function enforceSingleH1(markdown: string, title: string): string {
     return `## ${line.slice(2).trim()}`;
   });
 
-  if (!seenH1) {
-    return `# ${title}\n\n${normalized.join("\n").trim()}`;
-  }
+  const body = seenH1
+    ? normalized.join("\n").trim()
+    : `# ${ensureKeywordInTitle(title, focusKeyword)}\n\n${normalized.join("\n").trim()}`;
 
-  return normalized.join("\n").trim();
+  const repaired = ensureKeywordInH1(body, focusKeyword);
+  if (repaired.repairedH1) {
+    log.warn("Draft H1 was missing the focus keyword - title repaired", {
+      focusKeyword,
+      h1: repaired.previousH1,
+      repairedH1: repaired.repairedH1,
+    });
+  }
+  return repaired.markdown;
 }
 
 function seoMetaDescription(candidate: string | undefined, title: string, keywords: string[]): string {
@@ -379,20 +412,27 @@ async function generateWithVertex(topic: string, description: string, context: W
     temperature: 0.35,
   });
 
-  const title = context.outline?.title ?? topic;
+  const focusKeyword = context.focusKeyword?.trim();
+  const title = ensureKeywordInTitle(context.outline?.title ?? topic, focusKeyword);
   const keywords = [
     context.plan?.primaryKeyword,
     ...(Array.isArray(context.plan?.secondaryKeywords) ? context.plan.secondaryKeywords.map(String) : []),
   ].filter(Boolean) as string[];
 
+  const markdown = enforceSingleH1(result.text, title, focusKeyword);
+  // The stored title and slug must match the article a reader sees, so they
+  // follow the final H1 rather than the outline's working title - the two
+  // can differ, and the H1 is the one that was keyword-enforced.
+  const articleTitle = extractH1(markdown) ?? title;
+
   return {
-    title,
-    slug: slugify(title),
+    title: articleTitle,
+    slug: slugify(articleTitle),
     excerpt: (context.outline?.metaDescription || `Technical guide to ${topic}`).slice(0, 200),
-    metaTitle: (context.outline?.metaTitle || title).slice(0, 60),
-    metaDescription: seoMetaDescription(context.outline?.metaDescription, title, keywords),
+    metaTitle: ensureKeywordInTitle(context.outline?.metaTitle || articleTitle, focusKeyword, { maxLength: 60 }),
+    metaDescription: seoMetaDescription(context.outline?.metaDescription, articleTitle, keywords),
     keywords: keywords.length > 0 ? keywords.slice(0, 8) : [topic.toLowerCase()],
-    markdown: enforceSingleH1(result.text, title),
+    markdown,
     usage: result.usage,
     model,
   };
@@ -407,7 +447,9 @@ async function generateWithVertex(topic: string, description: string, context: W
  * index.ts is unchanged apart from per-section cost recording.
  */
 async function generateSectionedDraft(topic: string, description: string, context: WritingContext): Promise<BlogDraft> {
-  const title = context.outline?.title ?? topic;
+  const focusKeyword = context.focusKeyword?.trim();
+  const policy = context.policy ?? resolveEditorialPolicy(context.specs);
+  const title = ensureKeywordInTitle(context.outline?.title ?? topic, focusKeyword);
   const keywords = [
     context.plan?.primaryKeyword,
     ...(Array.isArray(context.plan?.secondaryKeywords) ? context.plan.secondaryKeywords.map(String) : []),
@@ -447,6 +489,9 @@ async function generateSectionedDraft(topic: string, description: string, contex
     sources: context.evidenceSources,
     evidenceSummary: context.evidenceSummary,
     keywords,
+    focusKeyword,
+    policy,
+    briefDirectives: context.briefDirectives ?? readBriefSpecs(context.specs).directives,
     tone: context.tone,
     targetWords: context.targetWords,
     specs: context.specs,
@@ -462,7 +507,7 @@ async function generateSectionedDraft(topic: string, description: string, contex
     .filter((draft) => !draft.fromCache)
     .map((draft) => ({ model: draft.model, usage: draft.usage }));
 
-  let markdown = enforceSingleH1(drafts.map((draft) => draft.markdown).join("\n\n"), title);
+  let markdown = enforceSingleH1(drafts.map((draft) => draft.markdown).join("\n\n"), title, focusKeyword);
 
   // Optional Pro-class cohesion pass over the assembled article. Off by
   // default - enable only after measuring its value against its cost.
@@ -478,7 +523,7 @@ async function generateSectionedDraft(topic: string, description: string, contex
         `You are the editor of a developer blog. Polish this assembled article for voice cohesion and transitions between sections; remove any sentence duplicated across sections. Do not add, remove, or alter any specific claim (numbers, dates, versions, capabilities) - polish transitions and voice only. Preserve every "## " heading, every [S1]-style citation marker, every table, and every code block exactly as-is. Return ONLY the full article Markdown.\n\n${markdown}`,
         { maxOutputTokens: 8192, temperature: 0.2, timeoutMs: env.WRITING_TIMEOUT_MS, priority: "deferrable" }
       );
-      markdown = enforceSingleH1(edited.text, title);
+      markdown = enforceSingleH1(edited.text, title, focusKeyword);
       usage.promptTokens += edited.usage.promptTokens;
       usage.completionTokens += edited.usage.completionTokens;
       usageRecords.push({ model: editorModel, usage: edited.usage });
@@ -499,12 +544,14 @@ async function generateSectionedDraft(topic: string, description: string, contex
     editorPass: env.EDITOR_PASS_ENABLED,
   });
 
+  const articleTitle = extractH1(markdown) ?? title;
+
   return {
-    title,
-    slug: slugify(title),
+    title: articleTitle,
+    slug: slugify(articleTitle),
     excerpt: (context.outline?.metaDescription || `Technical guide to ${topic}`).slice(0, 200),
-    metaTitle: (context.outline?.metaTitle || title).slice(0, 60),
-    metaDescription: seoMetaDescription(context.outline?.metaDescription, title, keywords),
+    metaTitle: ensureKeywordInTitle(context.outline?.metaTitle || articleTitle, focusKeyword, { maxLength: 60 }),
+    metaDescription: seoMetaDescription(context.outline?.metaDescription, articleTitle, keywords),
     keywords: keywords.length > 0 ? keywords.slice(0, 8) : [topic.toLowerCase()],
     markdown,
     usage,
@@ -520,7 +567,11 @@ export async function generateBlogDraft(
 ): Promise<BlogDraft> {
   if (!isVertexConfigured) return generateMock(topic, description, context);
   // Task 5 flag: sectioned writing replaces the monolithic draft. Off =
-  // the exact pre-Task-5 single-call behavior.
+  // the exact pre-Task-5 single-call behavior. A brief's
+  // generationConfig.generationMode overrides the flag for that submission.
+  const mode = readBriefSpecs(context.specs).generationMode;
+  if (mode === "section_by_section") return generateSectionedDraft(topic, description, context);
+  if (mode === "single_pass" || mode === "monolithic") return generateWithVertex(topic, description, context);
   if (env.SECTIONED_WRITING_ENABLED) return generateSectionedDraft(topic, description, context);
   return generateWithVertex(topic, description, context);
 }
