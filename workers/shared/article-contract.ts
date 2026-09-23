@@ -213,9 +213,7 @@ export function validateArticleContract(input: ArticleContractInput): ArticleCon
   );
   if (faqQuestions.length > 0) {
     const entries = faqEntries(content);
-    const missingFaqs = faqQuestions.filter(
-      (question) => !candidates.some((heading) => hasMatchingHeading([heading], question)) && !includesText(content, question)
-    );
+    const missingFaqs = faqQuestions.filter((question) => !entries.some((entry) => hasMatchingHeading([entry.question], question)));
     if (missingFaqs.length > 0) reasons.push(`Missing briefed FAQ question(s): ${missingFaqs.join(" | ")}`);
   }
 
