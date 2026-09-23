@@ -497,6 +497,7 @@ const mentionedFaqOnly = validateArticleContract({
 });
 assert.ok(mentionedFaqOnly.reasons.some((reason) => reason.startsWith("Missing briefed FAQ question(s)")));
 
+const unansweredFaq = validateArticleContract({
 // An explicit ceiling is enforced; without one the derived maximum stays advisory.
 const tooLong = validateArticleContract({
   ...contractBase,
@@ -508,6 +509,7 @@ assert.ok(tooLong.reasons.some((reason) => reason.includes("exceeds the briefed 
 // article that omitted every briefed FAQ. Both failures must remain visible
 // to the final, single-source-of-truth contract.
 const originalFailureShape = validateArticleContract({
+  ...contractBase,
 const noCeiling = validateArticleContract({
   ...contractBase,
   wordBounds: { min: 2000 },
