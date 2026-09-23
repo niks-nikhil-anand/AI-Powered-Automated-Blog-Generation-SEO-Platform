@@ -115,6 +115,10 @@ function faqEntries(content: string): FaqEntry[] {
   return entries;
 }
 
+function hasSubstantiveFaqAnswer(answer: string): boolean {
+  return answer.trim().length > 0;
+}
+
 function hasMatchingHeading(actual: string[], expected: string): boolean {
   const normalizedExpected = normalizeHeading(expected);
   return actual.some((heading) => {
