@@ -242,6 +242,8 @@ function budgetSectionPlan(plan: SectionSpec[], context: SectionArticleContext):
     ? Math.min(context.targetWords ?? Math.round(ceiling * 0.93), Math.floor(ceiling * 0.93))
     // Models commonly land below a per-section target. For briefs without a
     // ceiling, generate against a 40% larger internal budget so the assembled
+    // draft reliably clears its required minimum.
+    : context.targetWords ? Math.round(context.targetWords * 1.4) : undefined;
 /**
  * Build the section plan. When the editor supplies an outline, use its
  * sections as the canonical article structure. When no outline exists,
@@ -682,6 +684,7 @@ function inputsHash(plan: SectionSpec[], context: SectionArticleContext): string
         min: env.BLOG_MIN_WORDS,
         max: env.BLOG_MAX_WORDS,
         wordBounds: context.wordBounds,
+        targetWords: context.targetWords,
       })
     )
     .digest("hex")
