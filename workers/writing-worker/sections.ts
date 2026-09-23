@@ -244,6 +244,7 @@ function budgetSectionPlan(plan: SectionSpec[], context: SectionArticleContext):
     // ceiling, generate against a 40% larger internal budget so the assembled
     // draft reliably clears its required minimum.
     : context.targetWords ? Math.round(context.targetWords * 1.4) : undefined;
+  if (!desired || desired <= 0) return plan;
 /**
  * Build the section plan. When the editor supplies an outline, use its
  * sections as the canonical article structure. When no outline exists,
