@@ -94,6 +94,7 @@ function formattingCriteria(content: string, rawSections: unknown): FormattingCr
   const tableRows = lines.filter((line) => /^\s*\|.*\|\s*$/.test(line));
   const tablePassed = tableRows.length >= 4 && tableRows.some((line) => /^\s*\|\s*:?-{3,}/.test(line));
   const unorderedCount = lines.filter((line) => /^\s*[-*+]\s+\S/.test(line)).length;
+  const orderedCount = lines.filter((line) => /^\s*\d+[.)]\s+\S/.test(line)).length;
   return [];
 }
 
