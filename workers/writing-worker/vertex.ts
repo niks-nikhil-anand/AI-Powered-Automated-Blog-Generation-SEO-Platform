@@ -240,6 +240,7 @@ Focus keyword placement (mandatory - the draft is rejected automatically when an
   const outlineSections = Array.isArray(context.outline?.sections)
     ? (context.outline.sections as Array<Record<string, unknown>>)
     : [];
+  const requiredFaqQuestions = Array.isArray(context.outline?.faqs)
 
   const tocInstruction = !policy.tableOfContents
     ? "- Do not include a Table of Contents section."
@@ -511,6 +512,9 @@ async function generateSectionedDraft(topic: string, description: string, contex
   let markdown = assemble();
 
   // A final, bounded expansion pass avoids throwing away a nearly complete
+  // article just because a few technical sections landed short. It leaves
+  // intros and FAQ answers alone and regenerates at most two thin body sections.
+  const range = articleWordRange(context.targetWords, context.wordBounds ?? brief.wordBounds);
 
   // Optional Pro-class cohesion pass over the assembled article. Off by
   // default - enable only after measuring its value against its cost.
