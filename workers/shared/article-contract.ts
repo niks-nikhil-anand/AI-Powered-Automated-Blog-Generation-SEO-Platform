@@ -215,6 +215,10 @@ export function validateArticleContract(input: ArticleContractInput): ArticleCon
     const entries = faqEntries(content);
     const missingFaqs = faqQuestions.filter((question) => !entries.some((entry) => hasMatchingHeading([entry.question], question)));
     if (missingFaqs.length > 0) reasons.push(`Missing briefed FAQ question(s): ${missingFaqs.join(" | ")}`);
+    const unansweredFaqs = faqQuestions.filter((question) => {
+      const entry = entries.find((candidate) => hasMatchingHeading([candidate.question], question));
+      return entry && !hasSubstantiveFaqAnswer(entry.answer);
+    });
   }
 
   const focusKeyword = input.focusKeyword?.trim();
