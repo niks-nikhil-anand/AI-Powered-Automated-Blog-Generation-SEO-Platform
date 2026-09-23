@@ -453,6 +453,7 @@ async function generateSectionedDraft(topic: string, description: string, contex
   const focusKeyword = context.focusKeyword?.trim();
   const policy = context.policy ?? resolveEditorialPolicy(context.specs);
   const brief = readBriefSpecs(context.specs);
+  const mandatoryTitle = context.requiredH1?.trim();
   const keywords = [
     context.plan?.primaryKeyword,
     ...(Array.isArray(context.plan?.secondaryKeywords) ? context.plan.secondaryKeywords.map(String) : []),
@@ -526,6 +527,9 @@ async function generateSectionedDraft(topic: string, description: string, contex
     const missing = range.min - countWords(markdown);
     const expanded = await generateSection(target.spec, sectionContext, {
       repairNote: `The assembled article is ${missing} words below its binding minimum of ${range.min}. Expand this technical section by about ${Math.ceil(missing / (2 - pass))} useful words using implementation detail, trade-offs, or an example. Do not repeat the focus keyword or template phrases. End with a complete sentence.`,
+    });
+    drafts[target.index] = expanded;
+    usage.promptTokens += expanded.usage.promptTokens;
 
   // Optional Pro-class cohesion pass over the assembled article. Off by
   // default - enable only after measuring its value against its cost.
