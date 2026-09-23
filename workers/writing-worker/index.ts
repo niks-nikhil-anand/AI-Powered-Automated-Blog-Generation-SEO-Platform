@@ -778,6 +778,7 @@ export async function generateBlogForInput(
       targetWords: blogInput.contentLength ?? undefined,
       wordBounds: brief.wordBounds,
       primaryKeywords: blogInput.keywords,
+      requiredH1: brief.briefedH1,
       focusKeyword: blogInput.focusKeyword ?? undefined,
       policy: editorialPolicy,
       briefDirectives: brief.directives,
