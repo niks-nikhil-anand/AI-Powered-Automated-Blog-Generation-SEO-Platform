@@ -85,6 +85,13 @@ type FaqEntry = { question: string; answer: string };
 function faqEntries(content: string): FaqEntry[] {
   const lines = content.split("\n");
   const entries: FaqEntry[] = [];
+  let inFaqSection = false;
+  for (const line of lines) {
+    if (line.startsWith("## ")) {
+      inFaqSection = /\bfaqs?\b|frequently asked questions/i.test(line.slice(3));
+      continue;
+    }
+  }
   return entries;
 }
 
