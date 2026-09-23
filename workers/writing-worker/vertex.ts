@@ -524,6 +524,8 @@ async function generateSectionedDraft(topic: string, description: string, contex
   for (let pass = 0; pass < Math.min(2, repairable.length) && countWords(markdown) < range.min; pass += 1) {
     const target = repairable[pass];
     const missing = range.min - countWords(markdown);
+    const expanded = await generateSection(target.spec, sectionContext, {
+      repairNote: `The assembled article is ${missing} words below its binding minimum of ${range.min}. Expand this technical section by about ${Math.ceil(missing / (2 - pass))} useful words using implementation detail, trade-offs, or an example. Do not repeat the focus keyword or template phrases. End with a complete sentence.`,
 
   // Optional Pro-class cohesion pass over the assembled article. Off by
   // default - enable only after measuring its value against its cost.
