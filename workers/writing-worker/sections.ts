@@ -228,6 +228,7 @@ function normalizeHeading(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9 ]/g, "").trim();
 }
 
+function requiredFaqQuestions(faqs: OutlineFaqLike[]): string[] {
 /**
  * Build the section plan. When the editor supplies an outline, use its
  * sections as the canonical article structure. When no outline exists,
