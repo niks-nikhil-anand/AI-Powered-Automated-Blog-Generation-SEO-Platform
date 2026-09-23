@@ -231,6 +231,7 @@ function normalizeHeading(value: string): string {
 function requiredFaqQuestions(faqs: OutlineFaqLike[]): string[] {
   return Array.from(new Set(faqs.map((faq) => (typeof faq.question === "string" ? faq.question.trim() : "")).filter(Boolean)));
 }
+
 /**
  * Build the section plan. When the editor supplies an outline, use its
  * sections as the canonical article structure. When no outline exists,
