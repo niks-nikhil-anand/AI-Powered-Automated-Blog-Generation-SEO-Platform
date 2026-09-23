@@ -80,6 +80,8 @@ function subsectionHeadings(section: ArticleOutlineSection): string[] {
     .filter(Boolean);
 }
 
+type FaqEntry = { question: string; answer: string };
+
 function hasMatchingHeading(actual: string[], expected: string): boolean {
   const normalizedExpected = normalizeHeading(expected);
   return actual.some((heading) => {
