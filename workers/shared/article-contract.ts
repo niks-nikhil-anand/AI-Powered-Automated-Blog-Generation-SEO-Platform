@@ -212,7 +212,7 @@ export function validateArticleContract(input: ArticleContractInput): ArticleCon
       : []
   );
   if (faqQuestions.length > 0) {
-    const candidates = [...h2, ...h3];
+    const entries = faqEntries(content);
     const missingFaqs = faqQuestions.filter(
       (question) => !candidates.some((heading) => hasMatchingHeading([heading], question)) && !includesText(content, question)
     );
