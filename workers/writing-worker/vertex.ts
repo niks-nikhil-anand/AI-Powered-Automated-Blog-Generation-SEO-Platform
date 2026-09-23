@@ -570,6 +570,8 @@ async function generateSectionedDraft(topic: string, description: string, contex
     });
     drafts[targetIndex] = repaired;
     usage.promptTokens += repaired.usage.promptTokens;
+    usage.completionTokens += repaired.usage.completionTokens;
+    usageRecords.push({ model: repaired.model, usage: repaired.usage });
 
   // Optional Pro-class cohesion pass over the assembled article. Off by
   // default - enable only after measuring its value against its cost.
