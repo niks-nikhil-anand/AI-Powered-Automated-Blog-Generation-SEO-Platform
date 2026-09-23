@@ -507,10 +507,12 @@ npm install
 # Start local PostgreSQL and Redis
 docker compose up -d --wait postgres redis
 
+
 # Start Next.js dev server (dashboard UI)
 npm run dev
 
 # Start all Docker workers (after migrations)
+docker compose up -d --build
 npm run worker:dev
 
 # Or individually:
@@ -522,6 +524,7 @@ npm run worker:planning
 The local `.env` uses `postgresql://postgres:postgres@localhost:5432/blog_agent`.
 Docker Compose overrides the workers' database hostname to `postgres`. PostgreSQL
 credentials, database name, and host port are configured with `POSTGRES_USER`,
+`POSTGRES_PASSWORD`, `POSTGRES_DB`, and `POSTGRES_PORT`; keep the local
 Then submit your first blog at http://localhost:3000/dashboard/blogs/new
 
 **Dashboard**: http://localhost:3000/dashboard
