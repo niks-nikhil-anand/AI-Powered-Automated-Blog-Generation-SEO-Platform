@@ -254,6 +254,7 @@ function budgetSectionPlan(plan: SectionSpec[], context: SectionArticleContext):
   return plan.map((section) => ({ ...section, wordTarget: Math.max(minimum, Math.floor((section.wordTarget / total) * desired)) }));
 }
 
+function assignPrimaryKeywords(plan: SectionSpec[], context: SectionArticleContext): SectionSpec[] {
 /**
  * Build the section plan. When the editor supplies an outline, use its
  * sections as the canonical article structure. When no outline exists,
@@ -334,6 +335,7 @@ export function buildSectionPlan(context: SectionArticleContext): SectionSpec[] 
       } else if (/numbered|step.by.step|procedure/.test(format)) {
         kind = "numbered";
       } else if (/checklist|bullet/.test(format)) {
+        kind = "bullets";
       } else if (rawSub && rawSub.length > 0) {
         kind = "subsections";
       } else if (isConclusion) {
@@ -442,6 +444,7 @@ Citation rules: when this section makes a factual claim about the topic, attach 
       ? `\nWeave in these keywords naturally into headings and sentences where relevant: ${context.keywords.join(", ")}.`
       : "";
   const requiredPrimaryBlock = spec.requiredPrimaryKeywords?.length
+    ? `\nRequired primary keyword coverage: use each phrase below exactly once in natural body prose in this section. Do not force it into a heading, title, or repeated sentence.\n${spec.requiredPrimaryKeywords.map((keyword) => `- ${keyword}`).join("\n")}`
 
   // Only the intro section can satisfy the contract's "focus keyword in the
   // introduction" rule - every other section just uses the phrase where it
@@ -510,6 +513,7 @@ ${spec.comparisonTable.instructions ? `Table instructions: ${spec.comparisonTabl
 
   const bulletsBlock = spec.bullets.length > 0 ? `\nKey points to cover:\n${spec.bullets.map((bullet) => `- ${bullet}`).join("\n")}` : "";
   const requiredFaqBlock = spec.requiredFaqQuestions?.length
+    ? `\nRequired FAQ entries (binding): under this FAQ H2, emit EVERY question below as its own \`### Question\` heading followed by a direct, substantive answer of at least 12 words. Do not paraphrase, omit, or merely mention a question.\n${spec.requiredFaqQuestions.map((question) => `- ${question}`).join("\n")}`
 
   // The brief's per-section directives. Each is stated separately so the model
   // can act on them individually rather than parsing one long note.
