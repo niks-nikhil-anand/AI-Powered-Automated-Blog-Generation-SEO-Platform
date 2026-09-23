@@ -82,21 +82,36 @@ function subsectionHeadings(section: ArticleOutlineSection): string[] {
 
 type FaqEntry = { question: string; answer: string };
 
+/**
+ * A required FAQ is a reader-facing entry, not merely a sentence that happens
+ * to repeat the question. Only H3 entries inside an FAQ H2 qualify.
+ */
 function faqEntries(content: string): FaqEntry[] {
   const lines = content.split("\n");
   const entries: FaqEntry[] = [];
   let inFaqSection = false;
+  let question: string | null = null;
+  let answer: string[] = [];
+  const finish = () => {
+    if (question) entries.push({ question, answer: answer.join("\n").trim() });
+    question = null;
+    answer = [];
+  };
+
   for (const line of lines) {
     if (line.startsWith("## ")) {
+      finish();
       inFaqSection = /\bfaqs?\b|frequently asked questions/i.test(line.slice(3));
       continue;
     }
     if (inFaqSection && line.startsWith("### ")) {
-      const q = line.slice(4).trim();
-      entries.push({ question: q, answer: "" });
+      finish();
+      question = line.slice(4).trim();
       continue;
     }
+    if (question) answer.push(line);
   }
+  finish();
   return entries;
 }
 
