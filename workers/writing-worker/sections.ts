@@ -251,6 +251,8 @@ function budgetSectionPlan(plan: SectionSpec[], context: SectionArticleContext):
   const total = plan.reduce((sum, section) => sum + section.wordTarget, 0);
   if (total === desired) return plan;
   const minimum = 60;
+  return plan.map((section) => ({ ...section, wordTarget: Math.max(minimum, Math.floor((section.wordTarget / total) * desired)) }));
+}
 /**
  * Build the section plan. When the editor supplies an outline, use its
  * sections as the canonical article structure. When no outline exists,
@@ -689,6 +691,7 @@ function inputsHash(plan: SectionSpec[], context: SectionArticleContext): string
         max: env.BLOG_MAX_WORDS,
         wordBounds: context.wordBounds,
         targetWords: context.targetWords,
+        faqQuestions: Array.isArray(context.outline?.faqs) ? context.outline.faqs : [],
       })
     )
     .digest("hex")
