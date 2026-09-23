@@ -73,6 +73,7 @@ export type SectionSpec = {
   format?: string;
   requiredInternalLink?: { url: string; anchor?: string };
   /** FAQ questions that must be emitted as H3 entries with answers. */
+  requiredFaqQuestions?: string[];
 };
 
 export type SectionArticleContext = {
@@ -94,6 +95,7 @@ export type SectionArticleContext = {
   /** Rotated per section so legacy articles cite more than one source. */
   preferredEvidenceUrl?: string;
   keywords: string[];
+  /** Exact primary phrases required by the brief. */
   /**
    * BlogInput.focusKeyword. The article contract requires it verbatim in the
    * introduction, and the intro is written as its own section here, so the
@@ -111,6 +113,7 @@ export type SectionArticleContext = {
   /** BlogInput.contentLength - the editor's target word count for the article. */
   targetWords?: number;
   /** Binding article-wide range from the brief. */
+  wordBounds?: { min?: number; max?: number } | null;
   /** Full submission specs (writingInstructions, internalLinks, etc.) */
   specs?: Record<string, unknown>;
   internalLinks?: string[];
@@ -245,6 +248,7 @@ function budgetSectionPlan(plan: SectionSpec[], context: SectionArticleContext):
     // draft reliably clears its required minimum.
     : context.targetWords ? Math.round(context.targetWords * 1.4) : undefined;
   if (!desired || desired <= 0) return plan;
+  const total = plan.reduce((sum, section) => sum + section.wordTarget, 0);
 /**
  * Build the section plan. When the editor supplies an outline, use its
  * sections as the canonical article structure. When no outline exists,
@@ -324,6 +328,7 @@ export function buildSectionPlan(context: SectionArticleContext): SectionSpec[] 
         kind = "faq";
       } else if (/numbered|step.by.step|procedure/.test(format)) {
         kind = "numbered";
+      } else if (/checklist|bullet/.test(format)) {
       } else if (rawSub && rawSub.length > 0) {
         kind = "subsections";
       } else if (isConclusion) {
@@ -331,8 +336,7 @@ export function buildSectionPlan(context: SectionArticleContext): SectionSpec[] 
       }
 
       let bullets = Array.isArray(sec.bullets) ? sec.bullets.map(String).filter(Boolean) : [];
-      if (isFaq && outlineFaqs.length > 0 && bullets.length === 0) {
-        bullets = outlineFaqs
+      if (isFaq && faqQuestions.length > 0) {
           .map((faq) =>
             typeof faq.question === "string"
               ? `${faq.question}${typeof faq.answerIntent === "string" ? ` - ${faq.answerIntent}` : ""}`
@@ -356,6 +360,7 @@ export function buildSectionPlan(context: SectionArticleContext): SectionSpec[] 
       });
     }
     if (faqQuestions.length > 0 && !plan.some((section) => section.kind === "faq")) {
+      plan.push({ heading: "FAQs", kind: "faq", intent: DEFAULT_INTENTS.faq, bullets: faqQuestions, wordTarget: Math.max(160, Math.round(targetTotal * 0.14)), requiredFaqQuestions: faqQuestions });
   }
 
   // Fallback: the short spine when no outline is present
@@ -442,6 +447,7 @@ Citation rules: when this section makes a factual claim about the topic, attach 
     ? ""
     : spec.kind === "intro"
       ? `\nFocus keyword (mandatory): the FIRST paragraph of this introduction MUST contain the exact phrase "${focusKeyword}" exactly once. Use natural variations after that.`
+      : spec.heading?.toLowerCase().includes(focusKeyword.toLowerCase())
 
   let subsectionsBlock = "";
   if (spec.subsections && spec.subsections.length > 0) {
@@ -545,8 +551,7 @@ ${context.plan ? `Audience: ${context.plan.audience}\nAngle: ${context.plan.angl
 
 Section to write: ${spec.heading ? `"## ${spec.heading}"` : "the introduction"}
 Section intent: ${spec.intent}
-Target length: at least ${spec.wordTarget} words. Write in depth with rich technical substance. Paragraphs under 100 words each; sentences average 15-20 words.
-${kindInstruction(spec.kind, spec.heading)}${subsectionsBlock}${tableBlock}${bulletsBlock}${sectionDirectivesBlock}${keywordsBlock}${focusKeywordBlock}${internalLinksBlock}${writingInstructionsBlock}${briefBlock}${sourcesBlock}${legacyEvidenceBlock}${repairBlock}
+Target length: about ${spec.wordTarget} words. Do not exceed this budget by more than 10%; concise, complete coverage is better than filler. Paragraphs under 100 words each; sentences average 15-20 words.
 ${mustFollowBlock}${globalRulesBlock}
 Rules:
 - GitHub Flavored Markdown. Technical, practical, zero fluff.
@@ -579,14 +584,11 @@ export async function generateSection(
     timeoutMs: env.WRITING_TIMEOUT_MS,
   });
 
-  // Length check: if generated text is less than 80% of target words
-  // (and target >= 100 words), retry once asking for depth. Anything still
-  // short is caught by the final article contract before persistence.
+  // Keep a short or truncated section local: otherwise several weak sections
   const generatedWords = result.text.trim().split(/\s+/).filter(Boolean).length;
-  if (spec.wordTarget >= 100 && generatedWords < Math.round(spec.wordTarget * 0.8)) {
+  const endsComplete = /[.!?:)"'\]]\s*$/.test(result.text);
     log.warn(
-      `Section "${spec.heading ?? "intro"}" under word target (${generatedWords}/${spec.wordTarget} words) - retrying with expansion`,
-      { heading: spec.heading, generatedWords, wordTarget: spec.wordTarget }
+      `Section "${spec.heading ?? "intro"}" needs local repair (${generatedWords}/${spec.wordTarget} words, complete=${endsComplete})`,
     );
     try {
       const expandedResult = await generateVertexText(
@@ -661,8 +663,7 @@ async function mapWithConcurrency<T, R>(items: T[], concurrency: number, fn: (it
 }
 
 function cacheKey(blogInputId: string): string {
-  // Versioned after custom outline support and rich section prompts.
-  return `sections:v3:${blogInputId}`;
+  // Versioned when binding word and FAQ requirements were added.
 }
 
 export async function clearSectionCache(blogInputId: string): Promise<void> {
