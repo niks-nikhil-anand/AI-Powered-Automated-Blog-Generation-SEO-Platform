@@ -7,6 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "db:push": "node scripts/check-db-and-run-prisma.js db push",
+    "db:migrate": "node scripts/check-db-and-run-prisma.js migrate deploy",
     "worker:scheduler": "tsx workers/scheduler-worker/index.ts",
     "worker:planning": "tsx workers/planning-worker/index.ts",
     "worker:outline": "tsx workers/outline-worker/index.ts",
