@@ -655,6 +655,7 @@ async function runAsyncTests() {
     },
   });
   assert.ok(qualityReport.checks.some((check) => check.label === "Article Contract"));
+  const formattingReport = qualityReport.checks.find((check) => check.label === "Formatting & UX");
 
   assert.equal(DEFAULT_MUST_FOLLOW_RULES.length, 12);
   assert.ok(
