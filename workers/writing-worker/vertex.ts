@@ -243,6 +243,7 @@ Focus keyword placement (mandatory - the draft is rejected automatically when an
     : [];
   const requiredFaqQuestions = Array.isArray(context.outline?.faqs)
     ? context.outline.faqs
+        .map((faq) => (faq && typeof faq === "object" && "question" in faq ? String((faq as { question: unknown }).question).trim() : ""))
 
   const tocInstruction = !policy.tableOfContents
     ? "- Do not include a Table of Contents section."
@@ -530,6 +531,8 @@ async function generateSectionedDraft(topic: string, description: string, contex
     });
     drafts[target.index] = expanded;
     usage.promptTokens += expanded.usage.promptTokens;
+    usage.completionTokens += expanded.usage.completionTokens;
+    usageRecords.push({ model: expanded.model, usage: expanded.usage });
 
   // Optional Pro-class cohesion pass over the assembled article. Off by
   // default - enable only after measuring its value against its cost.
