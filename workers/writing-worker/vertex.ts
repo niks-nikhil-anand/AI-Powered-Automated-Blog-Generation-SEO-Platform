@@ -554,6 +554,8 @@ async function generateSectionedDraft(topic: string, description: string, contex
     wordBounds: context.wordBounds ?? brief.wordBounds,
     requiredH1: mandatoryTitle,
     faqQuestions,
+  });
+  const structuralReasons = structuralCheck.reasons.filter(
 
   // Optional Pro-class cohesion pass over the assembled article. Off by
   // default - enable only after measuring its value against its cost.
