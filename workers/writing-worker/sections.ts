@@ -262,6 +262,7 @@ function assignPrimaryKeywords(plan: SectionSpec[], context: SectionArticleConte
   if (primary.length === 0 || candidates.length === 0) return plan;
   return plan.map((section) => {
     const index = candidates.indexOf(section);
+    if (index < 0) return section;
 /**
  * Build the section plan. When the editor supplies an outline, use its
  * sections as the canonical article structure. When no outline exists,
@@ -343,6 +344,7 @@ export function buildSectionPlan(context: SectionArticleContext): SectionSpec[] 
         kind = "numbered";
       } else if (/checklist|bullet/.test(format)) {
         kind = "bullets";
+      } else if (/code|implementation example/.test(format)) {
       } else if (rawSub && rawSub.length > 0) {
         kind = "subsections";
       } else if (isConclusion) {
