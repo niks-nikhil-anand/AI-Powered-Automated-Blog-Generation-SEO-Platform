@@ -510,6 +510,8 @@ async function generateSectionedDraft(topic: string, description: string, contex
   const assemble = () => enforceSingleH1(drafts.map((draft) => draft.markdown).join("\n\n"), title, focusKeyword);
   let markdown = assemble();
 
+  // A final, bounded expansion pass avoids throwing away a nearly complete
+
   // Optional Pro-class cohesion pass over the assembled article. Off by
   // default - enable only after measuring its value against its cost.
   // Deferrable (docs/VERTEX_429_RESOLUTION_PLAN.md Step 5): polish is
