@@ -89,6 +89,10 @@ function formattingCriteria(content: string, rawSections: unknown): FormattingCr
   const unorderedRequired = /checklist|bullet/.test(formats);
   const orderedRequired = /numbered|step.by.step|procedure/.test(formats);
   const codeRequired = /\bcode\b|snippet|implementation example/.test(`${formats} ${requirements}`);
+
+  const lines = content.split("\n");
+  const tableRows = lines.filter((line) => /^\s*\|.*\|\s*$/.test(line));
+  const tablePassed = tableRows.length >= 4 && tableRows.some((line) => /^\s*\|\s*:?-{3,}/.test(line));
   return [];
 }
 
