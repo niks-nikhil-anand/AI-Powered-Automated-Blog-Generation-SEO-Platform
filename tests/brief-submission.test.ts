@@ -430,6 +430,7 @@ assert.equal(plan.length, 12);
 const generatedFaqSection = plan.find((section) => section.kind === "faq");
 assert.deepEqual(generatedFaqSection?.requiredFaqQuestions, outline.faqs.map((faq) => faq.question));
 assert.deepEqual(
+  Array.from(new Set(plan.flatMap((section) => section.requiredPrimaryKeywords ?? []))).sort(),
 
 const planChecklist = plan.find((section) => section.heading?.startsWith("A Practical Checklist"));
 assert.equal(planChecklist?.format, "Actionable checklist");
@@ -498,6 +499,8 @@ const mentionedFaqOnly = validateArticleContract({
 assert.ok(mentionedFaqOnly.reasons.some((reason) => reason.startsWith("Missing briefed FAQ question(s)")));
 
 const unansweredFaq = validateArticleContract({
+  ...contractBase,
+  faqQuestions: [{ question: "Does Next.js have built-in authentication?" }],
 // An explicit ceiling is enforced; without one the derived maximum stays advisory.
 const tooLong = validateArticleContract({
   ...contractBase,
@@ -510,6 +513,7 @@ assert.ok(tooLong.reasons.some((reason) => reason.includes("exceeds the briefed 
 // to the final, single-source-of-truth contract.
 const originalFailureShape = validateArticleContract({
   ...contractBase,
+  content: `# ${brief.briefedH1}\n\n${"word ".repeat(3920)}.\n`,
 const noCeiling = validateArticleContract({
   ...contractBase,
   wordBounds: { min: 2000 },
