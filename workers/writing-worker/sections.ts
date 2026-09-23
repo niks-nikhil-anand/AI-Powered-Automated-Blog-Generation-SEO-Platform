@@ -260,6 +260,8 @@ function assignPrimaryKeywords(plan: SectionSpec[], context: SectionArticleConte
   const primary = Array.from(new Set((context.primaryKeywords ?? []).map((keyword) => keyword.trim()).filter(Boolean)));
   const candidates = plan.filter((section) => section.kind !== "toc" && section.kind !== "faq");
   if (primary.length === 0 || candidates.length === 0) return plan;
+  return plan.map((section) => {
+    const index = candidates.indexOf(section);
 /**
  * Build the section plan. When the editor supplies an outline, use its
  * sections as the canonical article structure. When no outline exists,
@@ -704,6 +706,7 @@ function inputsHash(plan: SectionSpec[], context: SectionArticleContext): string
         wordBounds: context.wordBounds,
         targetWords: context.targetWords,
         faqQuestions: Array.isArray(context.outline?.faqs) ? context.outline.faqs : [],
+        primaryKeywords: context.primaryKeywords,
       })
     )
     .digest("hex")
