@@ -275,7 +275,7 @@ const postgresMongoSectionPlan = buildSectionPlan({
   specs: postgresMongoInput as Record<string, unknown>,
 });
 assert.equal(postgresMongoSectionPlan[0].kind, "intro");
-assert.equal(postgresMongoSectionPlan[0].wordTarget, 150);
+assert.equal(postgresMongoSectionPlan[0].wordTarget, 210);
 // No table of contents unless the submission asks for one, so the first
 // outline section follows the intro directly.
 assert.ok(postgresMongoSectionPlan.every((section) => section.kind !== "toc"));
@@ -494,10 +494,11 @@ const tocPlan = buildSectionPlan({
 });
 assert.equal(tocPlan[1].kind, "toc");
 
-// Total word targets must sum to approximately 2500 words
+// The internal writing budget is 40% above an unbounded 2500-word target.
 const totalBudgetedWords = sectionPlan.reduce((sum, s) => sum + s.wordTarget, 0);
 assert.ok(
   totalBudgetedWords >= 3400 && totalBudgetedWords <= 3600,
+  `Budgeted words ${totalBudgetedWords} should be around 3500`
 );
 
 const shortContract = validateArticleContract({
@@ -611,6 +612,7 @@ DX and user performance must be balanced.
 | Feature | Next.js | Nuxt | SvelteKit |
 | :--- | :--- | :--- | :--- |
 | Ecosystem | Massive | Large | Growing |
+| Rendering | Hybrid | Hybrid | Hybrid |
 
 ## Deep Dive: Architectural Differences
 Let us examine the compilation paradigms.
@@ -657,6 +659,7 @@ async function runAsyncTests() {
   const formattingReport = qualityReport.checks.find((check) => check.label === "Formatting & UX");
   assert.equal(formattingReport?.score, 10, `Expected outline-required formatting to pass: ${formattingReport?.notes.join(", ")}`);
   assert.ok(formattingReport?.notes.some((note) => note.startsWith("Comparison table: passed")));
+  assert.ok(formattingReport?.notes.some((note) => note.startsWith("Required subheadings: passed")));
 
   assert.equal(DEFAULT_MUST_FOLLOW_RULES.length, 12);
   assert.ok(
