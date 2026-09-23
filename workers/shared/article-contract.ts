@@ -116,7 +116,8 @@ function faqEntries(content: string): FaqEntry[] {
 }
 
 function hasSubstantiveFaqAnswer(answer: string): boolean {
-  return answer.trim().length > 0;
+  const normalized = answer.trim();
+  return countWords(normalized) >= 12;
 }
 
 function hasMatchingHeading(actual: string[], expected: string): boolean {
