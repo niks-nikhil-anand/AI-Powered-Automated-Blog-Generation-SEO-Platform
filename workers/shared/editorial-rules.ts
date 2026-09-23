@@ -131,6 +131,65 @@ function wordCount(text: string): number {
   return text.split(/\s+/).filter(Boolean).length;
 }
 
+function stripMarkdownNoise(text: string): string {
+  return splitCode(text).prose
+    .replace(/^#+\s+.*$/gm, " ")
+    .replace(/^\s*\|.*\|\s*$/gm, " ")
+    .replace(/\[[^\]]*]\([^)]*\)/g, " ")
+    .replace(/[*_>#`]/g, " ")
+    .trim();
+}
+
+function finalMeaningfulLine(text: string): string {
+  return text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.startsWith("#") && !/^\s*\|.*\|\s*$/.test(line))
+    .at(-1) ?? "";
+}
+
+function hasBalancedClosers(text: string): boolean {
+  const pairs: [RegExp, RegExp][] = [
+    [/\(/g, /\)/g],
+    [/\[/g, /]/g],
+    [/{/g, /}/g],
+  ];
+  return pairs.every(([open, close]) => (text.match(open)?.length ?? 0) <= (text.match(close)?.length ?? 0));
+}
+
+function incompleteEndingReason(text: string): string | null {
+  const line = finalMeaningfulLine(text);
+  if (!line) return null;
+
+  const cleaned = stripMarkdownNoise(line).replace(/\s+/g, " ").trim();
+  if (!cleaned) return null;
+
+  if (!hasBalancedClosers(cleaned)) return "ends with an unclosed parenthesis or bracket";
+  if (/[,:;([]\s*$/.test(cleaned)) return "ends with dangling punctuation";
+  if (/(\.\.\.|…)\s*$/.test(cleaned)) return "ends with an ellipsis";
+  if (!/[.!?")\]]\s*$/.test(cleaned)) return "ends without terminal sentence punctuation";
+
+  const lower = cleaned.toLowerCase();
+  const danglingPhrase =
+    /\b(and|or|but|with|without|for|from|to|of|in|on|at|by|as|when|while|where|because|although|unless|including|especially when|such as|e\.g\.|i\.e\.)[.!?")\]]?\s*$/.test(lower) ||
+    /\b(e\.g\.|such as|including)\s+[^.!?]{0,80}[.!?")\]]?\s*$/.test(lower);
+  if (danglingPhrase) return "ends with an unfinished transition or example phrase";
+
+  return null;
+}
+
+function danglingLeadInReason(text: string): string | null {
+  const line = finalMeaningfulLine(text);
+  if (!line) return null;
+  const cleaned = stripMarkdownNoise(line).replace(/\s+/g, " ").trim();
+  if (
+    /\b(for example|consider this example|the following code demonstrates|this can be implemented as follows|here is a practical pattern|for instance|example)\s*:\s*$/i.test(cleaned)
+  ) {
+    return "ends with a lead-in that promises an example but does not include it";
+  }
+  return null;
+}
+
 function countOccurrences(text: string, phrase: string): number {
   const needle = normalizeForKeywordMatch(phrase);
   if (!needle) return 0;
@@ -494,6 +553,26 @@ function checkCompleteness(markdown: string, out: EditorialViolation[]): void {
     } else if (wordCount(body) < 25 && !/\|/.test(body) && !/```/.test(body)) {
       out.push({ rule: "R17.thin-section", severity: "warning", message: `Section "${section.heading}" is only ${wordCount(body)} words` });
     }
+
+    const incompleteReason = incompleteEndingReason(section.body);
+    if (incompleteReason) {
+      out.push({
+        rule: "R17.truncated-section",
+        severity: "blocker",
+        message: `Section "${section.heading}" appears incomplete: ${incompleteReason}`,
+        evidence: excerpt(finalMeaningfulLine(section.body)),
+      });
+    }
+
+    const leadInReason = danglingLeadInReason(section.body);
+    if (leadInReason) {
+      out.push({
+        rule: "R17.dangling-lead-in",
+        severity: "blocker",
+        message: `Section "${section.heading}" appears incomplete: ${leadInReason}`,
+        evidence: excerpt(finalMeaningfulLine(section.body)),
+      });
+    }
   }
 
   if (/\b(TBD|TODO|FIXME|lorem ipsum|\[insert\b|\[your\s+\w+\s+here\])/i.test(markdown)) {
@@ -503,8 +582,9 @@ function checkCompleteness(markdown: string, out: EditorialViolation[]): void {
   // R17: a paragraph that just stops mid-thought.
   const { prose } = splitCode(markdown);
   for (const paragraph of paragraphsOf(prose)) {
-    if (!/[.!?:)"'\]]$/.test(paragraph)) {
-      out.push({ rule: "R17.incomplete-paragraph", severity: "warning", message: "A paragraph ends without terminal punctuation", evidence: excerpt(paragraph) });
+    const incompleteReason = incompleteEndingReason(paragraph);
+    if (incompleteReason) {
+      out.push({ rule: "R17.incomplete-paragraph", severity: "warning", message: `A paragraph appears incomplete: ${incompleteReason}`, evidence: excerpt(paragraph) });
       break;
     }
   }
