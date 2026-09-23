@@ -102,6 +102,7 @@ export type WritingContext = {
   /** BlogInput.contentLength - the editor's target word count for the article. */
   targetWords?: number;
   wordBounds?: { min?: number; max?: number } | null;
+  primaryKeywords?: string[];
   /**
    * BlogInput.focusKeyword - the phrase this article must rank for. The
    * article contract (workers/shared/article-contract.ts) requires it
@@ -180,7 +181,7 @@ Citation protocol (mandatory):
     ? `10. Only state a specific number, percentage, date, version, or named benchmark result if it explicitly appears in the SOURCES above (with its marker attached per the protocol). For anything the SOURCES don't cover, describe it qualitatively instead of inventing a figure. Explain architectural concepts, official framework features, and standard developer paradigms thoroughly with technical depth. Avoid unsupported benchmark speed rankings or declaring an unqualified "best" framework without evidence.`
     : `10. Only state a specific number, percentage, date, version, or named benchmark result if it is explicitly present in the Evidence above. For anything the Evidence doesn't cover, describe it qualitatively instead of inventing a figure. Explain architectural concepts, official framework features, and standard developer paradigms thoroughly with technical depth. Avoid unsupported benchmark speed rankings or declaring an unqualified "best" framework without evidence.`;
 
-  const { min: minWords, max: maxWords } = wordRange(context.targetWords);
+  const brief = readBriefSpecs(context.specs);
 
   const rawSpecs = (context.specs ?? {}) as Record<string, unknown>;
   const nestedSpecs = (rawSpecs.specs ?? {}) as Record<string, unknown>;
@@ -244,6 +245,7 @@ Focus keyword placement (mandatory - the draft is rejected automatically when an
   const requiredFaqQuestions = Array.isArray(context.outline?.faqs)
     ? context.outline.faqs
         .map((faq) => (faq && typeof faq === "object" && "question" in faq ? String((faq as { question: unknown }).question).trim() : ""))
+        .filter(Boolean)
 
   const tocInstruction = !policy.tableOfContents
     ? "- Do not include a Table of Contents section."
@@ -455,6 +457,7 @@ async function generateSectionedDraft(topic: string, description: string, contex
   const policy = context.policy ?? resolveEditorialPolicy(context.specs);
   const brief = readBriefSpecs(context.specs);
   const mandatoryTitle = context.requiredH1?.trim();
+  const sourceTitle = mandatoryTitle ?? context.outline?.title ?? topic;
   const keywords = [
     context.plan?.primaryKeyword,
     ...(Array.isArray(context.plan?.secondaryKeywords) ? context.plan.secondaryKeywords.map(String) : []),
@@ -499,6 +502,7 @@ async function generateSectionedDraft(topic: string, description: string, contex
     briefDirectives: context.briefDirectives ?? readBriefSpecs(context.specs).directives,
     tone: context.tone,
     targetWords: context.targetWords,
+    wordBounds: context.wordBounds ?? brief.wordBounds,
     specs: context.specs,
     internalLinks,
     writingInstructions,
@@ -536,6 +540,8 @@ async function generateSectionedDraft(topic: string, description: string, contex
     models.push(expanded.model);
     markdown = assemble();
   }
+  if (countWords(markdown) < range.min) await clearSectionCache(context.blogInputId ?? "unknown");
+
 
   // Optional Pro-class cohesion pass over the assembled article. Off by
   // default - enable only after measuring its value against its cost.
