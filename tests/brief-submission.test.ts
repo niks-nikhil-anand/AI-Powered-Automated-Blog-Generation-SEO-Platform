@@ -488,12 +488,14 @@ const missingFaqs = validateArticleContract({
 });
 assert.ok(missingFaqs.reasons.some((reason) => reason.startsWith("Missing briefed FAQ question(s)")));
 
+const mentionedFaqOnly = validateArticleContract({
 // An explicit ceiling is enforced; without one the derived maximum stays advisory.
 const tooLong = validateArticleContract({
   ...contractBase,
   content: `# ${brief.briefedH1}\n\n${"word ".repeat(3000)}.\n`,
 });
 assert.ok(tooLong.reasons.some((reason) => reason.includes("exceeds the briefed maximum of 2800")));
+
 const noCeiling = validateArticleContract({
   ...contractBase,
   wordBounds: { min: 2000 },
