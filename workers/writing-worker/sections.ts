@@ -75,6 +75,7 @@ export type SectionSpec = {
   /** FAQ questions that must be emitted as H3 entries with answers. */
   requiredFaqQuestions?: string[];
   /** Primary phrases assigned to this section for natural, verifiable coverage. */
+  requiredPrimaryKeywords?: string[];
 };
 
 export type SectionArticleContext = {
@@ -97,6 +98,7 @@ export type SectionArticleContext = {
   preferredEvidenceUrl?: string;
   keywords: string[];
   /** Exact primary phrases required by the brief. */
+  primaryKeywords?: string[];
   /**
    * BlogInput.focusKeyword. The article contract requires it verbatim in the
    * introduction, and the intro is written as its own section here, so the
@@ -116,6 +118,7 @@ export type SectionArticleContext = {
   /** Binding article-wide range from the brief. */
   wordBounds?: { min?: number; max?: number } | null;
   /** Concrete gate failures from a prior attempt; changes cache eligibility. */
+  repairReasons?: string[];
   /** Full submission specs (writingInstructions, internalLinks, etc.) */
   specs?: Record<string, unknown>;
   internalLinks?: string[];
@@ -266,6 +269,8 @@ function assignPrimaryKeywords(plan: SectionSpec[], context: SectionArticleConte
     const assigned = primary.filter((_, keywordIndex) => keywordIndex % candidates.length === index);
     return assigned.length > 0 ? { ...section, requiredPrimaryKeywords: assigned } : section;
   });
+}
+
 /**
  * Build the section plan. When the editor supplies an outline, use its
  * sections as the canonical article structure. When no outline exists,
@@ -285,6 +290,7 @@ export function buildSectionPlan(context: SectionArticleContext): SectionSpec[] 
     ? (context.outline.faqs as OutlineFaqLike[])
     : [];
 
+  const faqQuestions = requiredFaqQuestions(outlineFaqs);
   if (outlineSections.length > 0) {
     const firstIsIntro = /intro/i.test(String(outlineSections[0]?.heading ?? ""));
     const plan: SectionSpec[] = [];
@@ -337,6 +343,7 @@ export function buildSectionPlan(context: SectionArticleContext): SectionSpec[] 
       const comparisonTable = sec.comparisonTable as ComparisonTableSpec | undefined;
       const isFaq = /faq|frequently asked/i.test(heading);
       const isConclusion = /conclusion|summary/i.test(heading);
+      const format = typeof sec.format === "string" ? sec.format.toLowerCase() : "";
 
       let kind: SectionKind = "generic";
       if (comparisonTable) {
@@ -348,6 +355,7 @@ export function buildSectionPlan(context: SectionArticleContext): SectionSpec[] 
       } else if (/checklist|bullet/.test(format)) {
         kind = "bullets";
       } else if (/code|implementation example/.test(format)) {
+        kind = "steps";
       } else if (rawSub && rawSub.length > 0) {
         kind = "subsections";
       } else if (isConclusion) {
@@ -356,12 +364,14 @@ export function buildSectionPlan(context: SectionArticleContext): SectionSpec[] 
 
       let bullets = Array.isArray(sec.bullets) ? sec.bullets.map(String).filter(Boolean) : [];
       if (isFaq && faqQuestions.length > 0) {
+        const required = outlineFaqs
           .map((faq) =>
             typeof faq.question === "string"
               ? `${faq.question}${typeof faq.answerIntent === "string" ? ` - ${faq.answerIntent}` : ""}`
               : null
           )
           .filter((b): b is string => Boolean(b));
+        bullets = Array.from(new Set([...required, ...bullets]));
       }
 
       plan.push({
@@ -375,26 +385,29 @@ export function buildSectionPlan(context: SectionArticleContext): SectionSpec[] 
         subsections: rawSub,
         comparisonTable,
         wordTarget: typeof sec.wordTarget === "number" ? (sec.wordTarget as number) : bodyBudgetPerSection,
+        requiredFaqQuestions: isFaq ? faqQuestions : undefined,
         ...sectionDirectives(sec),
       });
     }
     if (faqQuestions.length > 0 && !plan.some((section) => section.kind === "faq")) {
       plan.push({ heading: "FAQs", kind: "faq", intent: DEFAULT_INTENTS.faq, bullets: faqQuestions, wordTarget: Math.max(160, Math.round(targetTotal * 0.14)), requiredFaqQuestions: faqQuestions });
     }
+    return assignPrimaryKeywords(budgetSectionPlan(plan, context), context);
   }
 
   // Fallback: the short spine when no outline is present
   const skeleton = skeletonWords(targetTotal, policy);
-  return skeleton.map(({ heading, kind, wordTarget }) => {
+  return assignPrimaryKeywords(budgetSectionPlan(skeleton.map(({ heading, kind, wordTarget }) => {
     const resolvedHeading = heading?.replace("{topic}", context.topic) ?? null;
     return {
       heading: resolvedHeading,
       kind,
       intent: DEFAULT_INTENTS[kind],
-      bullets: [],
+      bullets: kind === "faq" ? faqQuestions : [],
       wordTarget,
+      requiredFaqQuestions: kind === "faq" ? faqQuestions : undefined,
     };
-  });
+  }), context), context);
 }
 
 /* ------------------------------------------------------------------ */
@@ -458,6 +471,7 @@ Citation rules: when this section makes a factual claim about the topic, attach 
       : "";
   const requiredPrimaryBlock = spec.requiredPrimaryKeywords?.length
     ? `\nRequired primary keyword coverage: use each phrase below exactly once in natural body prose in this section. Do not force it into a heading, title, or repeated sentence.\n${spec.requiredPrimaryKeywords.map((keyword) => `- ${keyword}`).join("\n")}`
+    : "";
 
   // Only the intro section can satisfy the contract's "focus keyword in the
   // introduction" rule - every other section just uses the phrase where it
@@ -470,6 +484,7 @@ Citation rules: when this section makes a factual claim about the topic, attach 
       ? `\nFocus keyword (mandatory): the FIRST paragraph of this introduction MUST contain the exact phrase "${focusKeyword}" exactly once. Use natural variations after that.`
       : spec.heading?.toLowerCase().includes(focusKeyword.toLowerCase())
         ? `\nFocus keyword: this section heading already contains "${focusKeyword}". Do not repeat the exact phrase in the body; use natural variations instead.`
+        : `\nFocus keyword: do not use the exact phrase "${focusKeyword}" in this section. Use a natural variation if needed.`;
 
   let subsectionsBlock = "";
   if (spec.subsections && spec.subsections.length > 0) {
@@ -528,6 +543,7 @@ ${spec.comparisonTable.instructions ? `Table instructions: ${spec.comparisonTabl
   const bulletsBlock = spec.bullets.length > 0 ? `\nKey points to cover:\n${spec.bullets.map((bullet) => `- ${bullet}`).join("\n")}` : "";
   const requiredFaqBlock = spec.requiredFaqQuestions?.length
     ? `\nRequired FAQ entries (binding): under this FAQ H2, emit EVERY question below as its own \`### Question\` heading followed by a direct, substantive answer of at least 12 words. Do not paraphrase, omit, or merely mention a question.\n${spec.requiredFaqQuestions.map((question) => `- ${question}`).join("\n")}`
+    : "";
 
   // The brief's per-section directives. Each is stated separately so the model
   // can act on them individually rather than parsing one long note.
@@ -575,6 +591,7 @@ ${context.plan ? `Audience: ${context.plan.audience}\nAngle: ${context.plan.angl
 Section to write: ${spec.heading ? `"## ${spec.heading}"` : "the introduction"}
 Section intent: ${spec.intent}
 Target length: about ${spec.wordTarget} words. Do not exceed this budget by more than 10%; concise, complete coverage is better than filler. Paragraphs under 100 words each; sentences average 15-20 words.
+${kindInstruction(spec.kind, spec.heading)}${subsectionsBlock}${tableBlock}${bulletsBlock}${requiredFaqBlock}${requiredPrimaryBlock}${sectionDirectivesBlock}${keywordsBlock}${focusKeywordBlock}${internalLinksBlock}${writingInstructionsBlock}${briefBlock}${sourcesBlock}${legacyEvidenceBlock}${repairBlock}${context.repairReasons?.length ? `\nPrior gate failures to correct in this rewrite:\n${context.repairReasons.map((reason) => `- ${reason}`).join("\n")}\n` : ""}
 ${mustFollowBlock}${globalRulesBlock}
 Rules:
 - GitHub Flavored Markdown. Technical, practical, zero fluff.
@@ -598,7 +615,7 @@ export async function generateSection(
 ): Promise<SectionDraft> {
   if (!isVertexConfigured) throw new Error("Vertex AI is not configured");
   const model = options.modelOverride ?? (await getSetting(MODEL_SETTING_KEYS.writingSections, env.VERTEX_FLASH));
-  const maxTokens = Math.max(2048, Math.ceil(spec.wordTarget * 4));
+  const maxTokens = Math.max(2048, Math.ceil(spec.wordTarget * 6));
   const prompt = buildSectionPrompt(spec, context, options.repairNote);
 
   let result = await generateVertexText(model, prompt, {
@@ -608,15 +625,18 @@ export async function generateSection(
   });
 
   // Keep a short or truncated section local: otherwise several weak sections
+  // combine into an article that misses the brief's minimum.
   const generatedWords = result.text.trim().split(/\s+/).filter(Boolean).length;
   const endsComplete = /[.!?:)"'\]]\s*$/.test(result.text);
+  if (spec.wordTarget >= 100 && (generatedWords < Math.round(spec.wordTarget * 0.9) || !endsComplete)) {
     log.warn(
       `Section "${spec.heading ?? "intro"}" needs local repair (${generatedWords}/${spec.wordTarget} words, complete=${endsComplete})`,
+      { heading: spec.heading, generatedWords, wordTarget: spec.wordTarget, endsComplete }
     );
     try {
       const expandedResult = await generateVertexText(
         model,
-        `${prompt}\n\nIMPORTANT: The previous attempt was too brief (${generatedWords} words). Expand this section with thorough technical analysis, architectural details, and code or comparison points to reach at least ${spec.wordTarget} words.`,
+        `${prompt}\n\nIMPORTANT: The previous attempt was ${generatedWords} words and ${endsComplete ? "too brief" : "ended mid-thought"}. Return a complete replacement section with thorough technical analysis, architectural details, and code or comparison points. Reach at least ${spec.wordTarget} words and end with a full sentence.`,
         {
           maxOutputTokens: maxTokens,
           temperature: sectionTemperature(spec.kind),
@@ -687,6 +707,7 @@ async function mapWithConcurrency<T, R>(items: T[], concurrency: number, fn: (it
 
 function cacheKey(blogInputId: string): string {
   // Versioned when binding word and FAQ requirements were added.
+  return `sections:v4:${blogInputId}`;
 }
 
 export async function clearSectionCache(blogInputId: string): Promise<void> {
@@ -712,6 +733,7 @@ function inputsHash(plan: SectionSpec[], context: SectionArticleContext): string
         targetWords: context.targetWords,
         faqQuestions: Array.isArray(context.outline?.faqs) ? context.outline.faqs : [],
         primaryKeywords: context.primaryKeywords,
+        repairReasons: context.repairReasons,
       })
     )
     .digest("hex")
