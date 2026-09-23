@@ -462,6 +462,7 @@ async function generateSectionedDraft(topic: string, description: string, contex
   const mandatoryTitle = context.requiredH1?.trim();
   const sourceTitle = mandatoryTitle ?? context.outline?.title ?? topic;
   // Never alter a binding title, including to add a focus keyword. The final
+  // contract compares this value exactly against the editor's brief.
   const keywords = [
     context.plan?.primaryKeyword,
     ...(Array.isArray(context.plan?.secondaryKeywords) ? context.plan.secondaryKeywords.map(String) : []),
@@ -563,6 +564,8 @@ async function generateSectionedDraft(topic: string, description: string, contex
   if (structuralReasons.length > 0) {
     const repairIndex = plan.findIndex((spec) => spec.kind === "faq");
     const targetIndex = repairIndex >= 0 ? repairIndex : plan.length - 1;
+    const repaired = await generateSection(plan[targetIndex], sectionContext, {
+      repairNote: `The assembled article failed these binding checks:\n${structuralReasons.map((reason) => `- ${reason}`).join("\n")}\nReturn the complete replacement section. Include every required FAQ as its own H3 entry with a substantive answer, and ensure the final prose ends with a complete sentence.`,
 
   // Optional Pro-class cohesion pass over the assembled article. Off by
   // default - enable only after measuring its value against its cost.
