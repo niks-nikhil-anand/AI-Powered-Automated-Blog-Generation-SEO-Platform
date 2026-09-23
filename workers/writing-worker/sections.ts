@@ -253,6 +253,7 @@ function budgetSectionPlan(plan: SectionSpec[], context: SectionArticleContext):
   const minimum = 60;
   return plan.map((section) => ({ ...section, wordTarget: Math.max(minimum, Math.floor((section.wordTarget / total) * desired)) }));
 }
+
 /**
  * Build the section plan. When the editor supplies an outline, use its
  * sections as the canonical article structure. When no outline exists,
