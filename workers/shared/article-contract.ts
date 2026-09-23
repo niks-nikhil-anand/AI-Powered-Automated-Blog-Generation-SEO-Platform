@@ -219,6 +219,7 @@ export function validateArticleContract(input: ArticleContractInput): ArticleCon
       const entry = entries.find((candidate) => hasMatchingHeading([candidate.question], question));
       return entry && !hasSubstantiveFaqAnswer(entry.answer);
     });
+    if (unansweredFaqs.length > 0) reasons.push(`Briefed FAQ question(s) need substantive answers: ${unansweredFaqs.join(" | ")}`);
   }
 
   const focusKeyword = input.focusKeyword?.trim();
