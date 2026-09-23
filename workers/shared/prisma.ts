@@ -12,7 +12,7 @@ import { env } from "./env";
  * NOTE: as of writing, this repo's .env DATABASE_URL is a
  * `prisma+postgres://...` URL from a local `prisma dev` session, not the
  * `postgresql://postgres:postgres@postgres:5432/blog_agent` URL that
- * docker-compose.yml's `postgres` service expects. Those are two
+ * docker-compose.yml's postgres service expects. Those are two
  * different databases - point DATABASE_URL at whichever Postgres you
  * actually want the workers writing blogs into before running them.
  */
