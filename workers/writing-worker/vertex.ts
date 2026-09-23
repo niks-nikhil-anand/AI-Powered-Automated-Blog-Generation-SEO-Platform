@@ -542,6 +542,8 @@ async function generateSectionedDraft(topic: string, description: string, contex
   }
   if (countWords(markdown) < range.min) await clearSectionCache(context.blogInputId ?? "unknown");
 
+  // FAQ omissions and a truncated final paragraph are also section-local.
+  // Repair the FAQ section (or final body section if no FAQ exists) once
 
   // Optional Pro-class cohesion pass over the assembled article. Off by
   // default - enable only after measuring its value against its cost.
