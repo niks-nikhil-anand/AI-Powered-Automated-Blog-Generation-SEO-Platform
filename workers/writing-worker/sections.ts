@@ -263,6 +263,7 @@ function assignPrimaryKeywords(plan: SectionSpec[], context: SectionArticleConte
   return plan.map((section) => {
     const index = candidates.indexOf(section);
     if (index < 0) return section;
+    const assigned = primary.filter((_, keywordIndex) => keywordIndex % candidates.length === index);
 /**
  * Build the section plan. When the editor supplies an outline, use its
  * sections as the canonical article structure. When no outline exists,
