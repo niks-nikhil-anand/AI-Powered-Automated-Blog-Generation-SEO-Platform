@@ -72,6 +72,7 @@ export type SectionSpec = {
   practicalExample?: string;
   format?: string;
   requiredInternalLink?: { url: string; anchor?: string };
+  /** FAQ questions that must be emitted as H3 entries with answers. */
 };
 
 export type SectionArticleContext = {
@@ -109,6 +110,7 @@ export type SectionArticleContext = {
   tone?: string;
   /** BlogInput.contentLength - the editor's target word count for the article. */
   targetWords?: number;
+  /** Binding article-wide range from the brief. */
   /** Full submission specs (writingInstructions, internalLinks, etc.) */
   specs?: Record<string, unknown>;
   internalLinks?: string[];
@@ -235,6 +237,7 @@ function requiredFaqQuestions(faqs: OutlineFaqLike[]): string[] {
 function budgetSectionPlan(plan: SectionSpec[], context: SectionArticleContext): SectionSpec[] {
   const ceiling = (context.wordBounds ?? readBriefSpecs(context.specs).wordBounds)?.max;
   // Stay below a binding ceiling so assembly, FAQ answers, and light editing
+  // have room. The brief's maximum remains the final validator's authority.
 /**
  * Build the section plan. When the editor supplies an outline, use its
  * sections as the canonical article structure. When no outline exists,
@@ -344,8 +347,7 @@ export function buildSectionPlan(context: SectionArticleContext): SectionSpec[] 
         ...sectionDirectives(sec),
       });
     }
-
-    return plan;
+    if (faqQuestions.length > 0 && !plan.some((section) => section.kind === "faq")) {
   }
 
   // Fallback: the short spine when no outline is present
@@ -430,8 +432,7 @@ Citation rules: when this section makes a factual claim about the topic, attach 
   const focusKeywordBlock = !focusKeyword
     ? ""
     : spec.kind === "intro"
-      ? `\nFocus keyword (mandatory): the FIRST paragraph of this introduction MUST contain the exact phrase "${focusKeyword}", verbatim. A reworded variant does not count.`
-      : `\nFocus keyword: "${focusKeyword}" - use the exact phrase where it reads naturally, without keyword stuffing.`;
+      ? `\nFocus keyword (mandatory): the FIRST paragraph of this introduction MUST contain the exact phrase "${focusKeyword}" exactly once. Use natural variations after that.`
 
   let subsectionsBlock = "";
   if (spec.subsections && spec.subsections.length > 0) {
