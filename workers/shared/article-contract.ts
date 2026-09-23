@@ -82,6 +82,12 @@ function subsectionHeadings(section: ArticleOutlineSection): string[] {
 
 type FaqEntry = { question: string; answer: string };
 
+function faqEntries(content: string): FaqEntry[] {
+  const lines = content.split("\n");
+  const entries: FaqEntry[] = [];
+  return entries;
+}
+
 function hasMatchingHeading(actual: string[], expected: string): boolean {
   const normalizedExpected = normalizeHeading(expected);
   return actual.some((heading) => {
