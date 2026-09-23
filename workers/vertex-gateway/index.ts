@@ -157,7 +157,7 @@ export function startVertexGateway() {
   const worker = new Worker<VertexRequest, VertexResponse>(
     QUEUE_NAMES.vertex,
     processGatewayJob,
-    { ...workerOptions(1), concurrency: 1 }
+    { ...workerOptions(1), concurrency }
   );
   worker.on("completed", (job) => log.info("Vertex request completed", { requestId: job.id, operation: job.data.operation, model: job.data.model }));
   worker.on("failed", (job, error) => log.error("Vertex request failed", { requestId: job?.id, operation: job?.data.operation, model: job?.data.model, error: error.message, ...errorInfo(error) }));
