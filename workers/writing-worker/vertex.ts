@@ -560,6 +560,9 @@ async function generateSectionedDraft(topic: string, description: string, contex
   const structuralReasons = structuralCheck.reasons.filter(
     (reason) => reason.startsWith("Missing briefed FAQ question(s)") || reason.startsWith("Briefed FAQ question(s) need substantive answers") || reason === "Article does not end with a complete sentence"
   );
+  if (structuralReasons.length > 0) {
+    const repairIndex = plan.findIndex((spec) => spec.kind === "faq");
+    const targetIndex = repairIndex >= 0 ? repairIndex : plan.length - 1;
 
   // Optional Pro-class cohesion pass over the assembled article. Off by
   // default - enable only after measuring its value against its cost.
