@@ -11,7 +11,6 @@ import { env } from "./env";
  *
  * Local processes use localhost from .env; Docker Compose overrides
  * DATABASE_URL to connect through the postgres service hostname.
- * Point DATABASE_URL at whichever Postgres instance you want workers writing into.
  */
 declare global {
   var __workerPgPool: pg.Pool | undefined;
