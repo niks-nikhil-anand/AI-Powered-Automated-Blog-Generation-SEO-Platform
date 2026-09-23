@@ -23,7 +23,7 @@
     "test:editorial-rules": "node --import tsx tests/editorial-rules.test.ts",
     "test:brief": "node --import tsx tests/brief-submission.test.ts",
     "migrate:manual-input": "tsx scripts/migrate-to-manual-input.ts",
-    "worker:dev": "tsx workers/start.ts",
+    "worker:all": "tsx workers/start.ts",
     "worker:drill:rate-limit": "tsx workers/shared/rate-limit.drill.ts"
   },
   "dependencies": {
