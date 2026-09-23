@@ -257,6 +257,9 @@ export async function scoreBlogQuality(blog: BlogForQuality) {
   // expected to carry a fixed 12-heading skeleton (R3/R4/R16), so an article
   // without an outline is judged structurally instead.
   const expectedSections = outlineSections;
+  const formatting = formattingCriteria(content, rawSections);
+  const requiredFormatting = formatting.filter((criterion) => criterion.required);
+  const passedFormatting = requiredFormatting.filter((criterion) => criterion.passed);
   const editorialReview: EditorialReviewResult = reviewArticle({
     content,
     focusKeyword: blog.blogInput?.focusKeyword,
