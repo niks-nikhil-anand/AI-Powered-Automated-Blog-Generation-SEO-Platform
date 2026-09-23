@@ -232,6 +232,7 @@ function requiredFaqQuestions(faqs: OutlineFaqLike[]): string[] {
   return Array.from(new Set(faqs.map((faq) => (typeof faq.question === "string" ? faq.question.trim() : "")).filter(Boolean)));
 }
 
+function budgetSectionPlan(plan: SectionSpec[], context: SectionArticleContext): SectionSpec[] {
 /**
  * Build the section plan. When the editor supplies an outline, use its
  * sections as the canonical article structure. When no outline exists,
@@ -309,6 +310,7 @@ export function buildSectionPlan(context: SectionArticleContext): SectionSpec[] 
         kind = "table";
       } else if (isFaq) {
         kind = "faq";
+      } else if (/numbered|step.by.step|procedure/.test(format)) {
       } else if (rawSub && rawSub.length > 0) {
         kind = "subsections";
       } else if (isConclusion) {
