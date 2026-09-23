@@ -80,6 +80,14 @@ function subsectionHeadings(section: ArticleOutlineSection): string[] {
     .filter(Boolean);
 }
 
+function hasMatchingHeading(actual: string[], expected: string): boolean {
+  const normalizedExpected = normalizeHeading(expected);
+  return actual.some((heading) => {
+    const normalizedActual = normalizeHeading(heading);
+    return normalizedActual === normalizedExpected || normalizedActual.includes(normalizedExpected) || normalizedExpected.includes(normalizedActual);
+  });
+}
+
 type FaqEntry = { question: string; answer: string };
 
 /**
@@ -118,14 +126,6 @@ function faqEntries(content: string): FaqEntry[] {
 function hasSubstantiveFaqAnswer(answer: string): boolean {
   const normalized = answer.trim();
   return countWords(normalized) >= 12 && !/\b(todo|tbd|placeholder|lorem ipsum)\b/i.test(normalized);
-}
-
-function hasMatchingHeading(actual: string[], expected: string): boolean {
-  const normalizedExpected = normalizeHeading(expected);
-  return actual.some((heading) => {
-    const normalizedActual = normalizeHeading(heading);
-    return normalizedActual === normalizedExpected || normalizedActual.includes(normalizedExpected) || normalizedExpected.includes(normalizedActual);
-  });
 }
 
 function headingIndex(actual: string[], expected: string): number {
