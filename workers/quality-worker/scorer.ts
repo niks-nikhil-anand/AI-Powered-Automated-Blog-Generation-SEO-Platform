@@ -420,13 +420,7 @@ export async function scoreBlogQuality(blog: BlogForQuality) {
     },
     {
       label: "Formatting & UX",
-      score: clamp(
-        (/\|.+\|/.test(content) ? 2 : 0) +
-          (/^- /m.test(content) ? 2 : 0) +
-          (/^\d+\. /m.test(content) ? 2 : 0) +
-          (/```/.test(content) ? 2 : 0) +
-          (h3.length >= 3 ? 2 : 0)
-      ),
+      score: requiredFormatting.length === 0 ? 10 : clamp((passedFormatting.length / requiredFormatting.length) * 10),
       maxScore: 10,
       notes: ["Checked tables, lists, code blocks, and subheading depth"],
     },
