@@ -109,6 +109,11 @@ export const env = {
   VERTEX_RETRY_BUDGET_MS: Number(optional("VERTEX_RETRY_BUDGET_MS", "600000")),
   VERTEX_BREAKER_COOLDOWN_MS: Number(optional("VERTEX_BREAKER_COOLDOWN_MS", "120000")),
   VERTEX_BREAKER_MAX_COOLDOWN_MS: Number(optional("VERTEX_BREAKER_MAX_COOLDOWN_MS", "900000")),
+  /**
+   * The gateway can overlap slow network/model responses. Per-model RPM
+   * pacing still happens in Redis before every call, so this improves
+   * throughput without raising the configured Vertex quota demand.
+   */
 
   /**
    * Kill switch for real AI hero-image generation in image-worker (see
