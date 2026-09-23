@@ -95,6 +95,8 @@ function formattingCriteria(content: string, rawSections: unknown): FormattingCr
   const tablePassed = tableRows.length >= 4 && tableRows.some((line) => /^\s*\|\s*:?-{3,}/.test(line));
   const unorderedCount = lines.filter((line) => /^\s*[-*+]\s+\S/.test(line)).length;
   const orderedCount = lines.filter((line) => /^\s*\d+[.)]\s+\S/.test(line)).length;
+  const codePassed = /```[a-zA-Z][^\n]*\n[\s\S]*?\n```/.test(content);
+  const h3Count = lines.filter((line) => /^###\s+\S/.test(line)).length;
   return [];
 }
 
