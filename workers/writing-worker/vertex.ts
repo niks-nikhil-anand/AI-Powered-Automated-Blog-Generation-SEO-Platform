@@ -246,6 +246,7 @@ Focus keyword placement (mandatory - the draft is rejected automatically when an
     ? context.outline.faqs
         .map((faq) => (faq && typeof faq === "object" && "question" in faq ? String((faq as { question: unknown }).question).trim() : ""))
         .filter(Boolean)
+    : [];
 
   const tocInstruction = !policy.tableOfContents
     ? "- Do not include a Table of Contents section."
@@ -547,6 +548,8 @@ async function generateSectionedDraft(topic: string, description: string, contex
   // before the final article contract gets a chance to reject the draft.
   const faqQuestions = Array.isArray(context.outline?.faqs) ? context.outline.faqs : [];
   const structuralCheck = validateArticleContract({
+    content: markdown,
+    targetWords: context.targetWords,
 
   // Optional Pro-class cohesion pass over the assembled article. Off by
   // default - enable only after measuring its value against its cost.
