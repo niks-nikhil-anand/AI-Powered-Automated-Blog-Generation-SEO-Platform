@@ -240,6 +240,7 @@ function budgetSectionPlan(plan: SectionSpec[], context: SectionArticleContext):
   // have room. The brief's maximum remains the final validator's authority.
   const desired = ceiling && ceiling > 0
     ? Math.min(context.targetWords ?? Math.round(ceiling * 0.93), Math.floor(ceiling * 0.93))
+    // Models commonly land below a per-section target. For briefs without a
 /**
  * Build the section plan. When the editor supplies an outline, use its
  * sections as the canonical article structure. When no outline exists,
@@ -318,6 +319,7 @@ export function buildSectionPlan(context: SectionArticleContext): SectionSpec[] 
       } else if (isFaq) {
         kind = "faq";
       } else if (/numbered|step.by.step|procedure/.test(format)) {
+        kind = "numbered";
       } else if (rawSub && rawSub.length > 0) {
         kind = "subsections";
       } else if (isConclusion) {
@@ -425,6 +427,7 @@ Citation rules: when this section makes a factual claim about the topic, attach 
     context.keywords.length > 0
       ? `\nWeave in these keywords naturally into headings and sentences where relevant: ${context.keywords.join(", ")}.`
       : "";
+  const requiredPrimaryBlock = spec.requiredPrimaryKeywords?.length
 
   // Only the intro section can satisfy the contract's "focus keyword in the
   // introduction" rule - every other section just uses the phrase where it
@@ -491,6 +494,7 @@ ${spec.comparisonTable.instructions ? `Table instructions: ${spec.comparisonTabl
       : "";
 
   const bulletsBlock = spec.bullets.length > 0 ? `\nKey points to cover:\n${spec.bullets.map((bullet) => `- ${bullet}`).join("\n")}` : "";
+  const requiredFaqBlock = spec.requiredFaqQuestions?.length
 
   // The brief's per-section directives. Each is stated separately so the model
   // can act on them individually rather than parsing one long note.
