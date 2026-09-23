@@ -450,7 +450,7 @@ async function generateWithVertex(topic: string, description: string, context: W
 async function generateSectionedDraft(topic: string, description: string, context: WritingContext): Promise<BlogDraft> {
   const focusKeyword = context.focusKeyword?.trim();
   const policy = context.policy ?? resolveEditorialPolicy(context.specs);
-  const title = ensureKeywordInTitle(context.outline?.title ?? topic, focusKeyword);
+  const brief = readBriefSpecs(context.specs);
   const keywords = [
     context.plan?.primaryKeyword,
     ...(Array.isArray(context.plan?.secondaryKeywords) ? context.plan.secondaryKeywords.map(String) : []),
@@ -515,6 +515,8 @@ async function generateSectionedDraft(topic: string, description: string, contex
   // article just because a few technical sections landed short. It leaves
   // intros and FAQ answers alone and regenerates at most two thin body sections.
   const range = articleWordRange(context.targetWords, context.wordBounds ?? brief.wordBounds);
+  const repairable = plan
+    .map((spec, index) => ({ spec, index, words: countWords(drafts[index]?.markdown ?? "") }))
 
   // Optional Pro-class cohesion pass over the assembled article. Off by
   // default - enable only after measuring its value against its cost.
