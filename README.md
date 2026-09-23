@@ -504,8 +504,7 @@ Blog.status = PUBLISHED, BlogInput.status = COMPLETED
 # Install dependencies
 npm install
 
-# Run migrations (if updating schema)
-npx prisma migrate dev
+# Start local PostgreSQL and Redis
 
 # Start Next.js dev server (dashboard UI)
 npm run dev
@@ -519,6 +518,7 @@ npm run worker:planning
 # ... etc
 ```
 
+The local `.env` uses `postgresql://postgres:postgres@localhost:5432/blog_agent`.
 Then submit your first blog at http://localhost:3000/dashboard/blogs/new
 
 **Dashboard**: http://localhost:3000/dashboard
