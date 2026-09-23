@@ -233,6 +233,8 @@ function requiredFaqQuestions(faqs: OutlineFaqLike[]): string[] {
 }
 
 function budgetSectionPlan(plan: SectionSpec[], context: SectionArticleContext): SectionSpec[] {
+  const ceiling = (context.wordBounds ?? readBriefSpecs(context.specs).wordBounds)?.max;
+  // Stay below a binding ceiling so assembly, FAQ answers, and light editing
 /**
  * Build the section plan. When the editor supplies an outline, use its
  * sections as the canonical article structure. When no outline exists,
@@ -671,6 +673,7 @@ function inputsHash(plan: SectionSpec[], context: SectionArticleContext): string
         evidenceUrls: Array.from(new Set((context.evidenceSummary?.match(/https?:\/\/[^\s)]+/g) ?? []).map((url) => url.replace(/[.,)]+$/, "")))),
         min: env.BLOG_MIN_WORDS,
         max: env.BLOG_MAX_WORDS,
+        wordBounds: context.wordBounds,
       })
     )
     .digest("hex")
