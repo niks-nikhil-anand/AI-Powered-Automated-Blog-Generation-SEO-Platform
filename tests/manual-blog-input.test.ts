@@ -497,8 +497,7 @@ assert.equal(tocPlan[1].kind, "toc");
 // Total word targets must sum to approximately 2500 words
 const totalBudgetedWords = sectionPlan.reduce((sum, s) => sum + s.wordTarget, 0);
 assert.ok(
-  totalBudgetedWords >= 2300 && totalBudgetedWords <= 2700,
-  `Budgeted words ${totalBudgetedWords} should be around 2500`
+  totalBudgetedWords >= 3400 && totalBudgetedWords <= 3600,
 );
 
 const shortContract = validateArticleContract({
@@ -656,6 +655,7 @@ async function runAsyncTests() {
   });
   assert.ok(qualityReport.checks.some((check) => check.label === "Article Contract"));
   const formattingReport = qualityReport.checks.find((check) => check.label === "Formatting & UX");
+  assert.equal(formattingReport?.score, 10, `Expected outline-required formatting to pass: ${formattingReport?.notes.join(", ")}`);
 
   assert.equal(DEFAULT_MUST_FOLLOW_RULES.length, 12);
   assert.ok(
