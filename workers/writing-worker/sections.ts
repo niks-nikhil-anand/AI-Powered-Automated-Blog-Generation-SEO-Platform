@@ -239,6 +239,7 @@ function budgetSectionPlan(plan: SectionSpec[], context: SectionArticleContext):
   // Stay below a binding ceiling so assembly, FAQ answers, and light editing
   // have room. The brief's maximum remains the final validator's authority.
   const desired = ceiling && ceiling > 0
+    ? Math.min(context.targetWords ?? Math.round(ceiling * 0.93), Math.floor(ceiling * 0.93))
 /**
  * Build the section plan. When the editor supplies an outline, use its
  * sections as the canonical article structure. When no outline exists,
