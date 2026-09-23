@@ -91,6 +91,11 @@ function faqEntries(content: string): FaqEntry[] {
       inFaqSection = /\bfaqs?\b|frequently asked questions/i.test(line.slice(3));
       continue;
     }
+    if (inFaqSection && line.startsWith("### ")) {
+      const q = line.slice(4).trim();
+      entries.push({ question: q, answer: "" });
+      continue;
+    }
   }
   return entries;
 }
