@@ -74,6 +74,8 @@ function keywordList(value: unknown) {
   return Array.isArray(value) ? value.map(String).filter(Boolean) : [];
 }
 
+type FormattingCriterion = { label: string; required: boolean; passed: boolean; evidence: string };
+
 function hasDuplicateParagraphs(content: string) {
   const paragraphs = content
     .split(/\n{2,}/)
