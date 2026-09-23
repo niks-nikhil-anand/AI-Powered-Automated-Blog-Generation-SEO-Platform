@@ -114,11 +114,7 @@ export const env = {
    * pacing still happens in Redis before every call, so this improves
    * throughput without raising the configured Vertex quota demand.
    */
-  VERTEX_GATEWAY_CONCURRENCY: Number(optional("VERTEX_GATEWAY_CONCURRENCY", "1")),
-   * The gateway can overlap slow network/model responses. Per-model RPM
-   * pacing still happens in Redis before every call, so this improves
-   * throughput without raising the configured Vertex quota demand.
-   */
+  VERTEX_GATEWAY_CONCURRENCY: Number(optional("VERTEX_GATEWAY_CONCURRENCY", "2")),
 
   /**
    * Kill switch for real AI hero-image generation in image-worker (see
