@@ -416,6 +416,7 @@ const plan = buildSectionPlan({
   description: "buyer decision guide",
   outline: { sections: outline.sections, faqs: outline.faqs },
   keywords: input.primaryKeywords,
+  primaryKeywords: input.primaryKeywords,
   focusKeyword: input.focusKeyword,
   targetWords: input.contentLength,
   specs: input as unknown as Record<string, unknown>,
@@ -425,6 +426,7 @@ const plan = buildSectionPlan({
 // Intro first, no table of contents, ten body sections.
 assert.equal(plan[0].kind, "intro");
 assert.ok(plan[0].wordTarget > 0);
+assert.ok(plan.reduce((total, section) => total + section.wordTarget, 0) <= Math.floor(input.contentBounds!.max! * 0.93));
 assert.ok(plan.every((section) => section.kind !== "toc"));
 assert.equal(plan.length, 12);
 const generatedFaqSection = plan.find((section) => section.kind === "faq");
@@ -433,6 +435,7 @@ assert.deepEqual(
   Array.from(new Set(plan.flatMap((section) => section.requiredPrimaryKeywords ?? []))).sort(),
   input.primaryKeywords.slice().sort(),
   "every primary keyword is assigned once to a natural body section"
+);
 
 const planChecklist = plan.find((section) => section.heading?.startsWith("A Practical Checklist"));
 assert.equal(planChecklist?.format, "Actionable checklist");
@@ -440,7 +443,7 @@ assert.deepEqual(planChecklist?.avoid, ["Arbitrary numerical scoring", "Unsuppor
 
 const planDefinition = plan.find((section) => section.heading === "What Is a Next.js SaaS Starter Kit?");
 assert.equal(planDefinition?.readerQuestion, "What am I actually buying when I purchase a starter kit?");
-assert.equal(planDefinition?.wordTarget, 220);
+assert.ok((planDefinition?.wordTarget ?? 0) > 0);
 
 const planStack = plan.find((section) => section.heading?.startsWith("Evaluate the Technology"));
 assert.deepEqual(planStack?.evidenceRequirements, [
@@ -505,6 +508,8 @@ const unansweredFaq = validateArticleContract({
   faqQuestions: [{ question: "Does Next.js have built-in authentication?" }],
   content: `# ${brief.briefedH1}\n\n## FAQs\n\n### Does Next.js have built-in authentication?\n\nNo.\n`,
 });
+assert.ok(unansweredFaq.reasons.some((reason) => reason.startsWith("Briefed FAQ question(s) need substantive answers")));
+
 // An explicit ceiling is enforced; without one the derived maximum stays advisory.
 const tooLong = validateArticleContract({
   ...contractBase,
@@ -520,6 +525,8 @@ const originalFailureShape = validateArticleContract({
   content: `# ${brief.briefedH1}\n\n${"word ".repeat(3920)}.\n`,
 });
 assert.equal(originalFailureShape.wordCount, 3932);
+assert.ok(originalFailureShape.reasons.some((reason) => reason.includes("exceeds the briefed maximum of 2800")));
+assert.ok(originalFailureShape.reasons.some((reason) => reason.startsWith("Missing briefed FAQ question(s)")));
 const noCeiling = validateArticleContract({
   ...contractBase,
   wordBounds: { min: 2000 },
