@@ -153,6 +153,7 @@ async function processGatewayJob(job: Job<VertexRequest>): Promise<VertexRespons
 }
 
 export function startVertexGateway() {
+  const concurrency = Math.max(1, Math.floor(env.VERTEX_GATEWAY_CONCURRENCY));
   const worker = new Worker<VertexRequest, VertexResponse>(
     QUEUE_NAMES.vertex,
     processGatewayJob,
