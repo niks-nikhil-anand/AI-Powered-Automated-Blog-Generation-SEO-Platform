@@ -6,6 +6,8 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-blog_agent}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
   redis:
     image: redis:7-alpine
     container_name: blog-agent-redis
@@ -32,6 +34,7 @@ services:
       - REDIS_URL=redis://redis:6379
     depends_on:
       redis:
+        condition: service_started
     restart: always
 
   # Vertex credentials are supplied as GCP_* environment variables. The
@@ -51,6 +54,7 @@ services:
       - REDIS_URL=redis://redis:6379
     depends_on:
       redis:
+        condition: service_started
     restart: always
 
   planning-worker:
@@ -64,6 +68,7 @@ services:
       - REDIS_URL=redis://redis:6379
     depends_on:
       redis:
+        condition: service_started
     restart: always
 
   outline-worker:
@@ -77,6 +82,7 @@ services:
       - REDIS_URL=redis://redis:6379
     depends_on:
       redis:
+        condition: service_started
     restart: always
 
   writing-worker:
@@ -90,6 +96,7 @@ services:
       - REDIS_URL=redis://redis:6379
     depends_on:
       redis:
+        condition: service_started
     restart: always
 
   image-worker:
@@ -103,6 +110,7 @@ services:
       - REDIS_URL=redis://redis:6379
     depends_on:
       redis:
+        condition: service_started
     restart: always
 
   # quality-worker calls Vertex (Gemini vision) for the featured-image
@@ -120,6 +128,7 @@ services:
       - REDIS_URL=redis://redis:6379
     depends_on:
       redis:
+        condition: service_started
     restart: always
 
   publish-worker:
@@ -133,6 +142,7 @@ services:
       - REDIS_URL=redis://redis:6379
     depends_on:
       redis:
+        condition: service_started
     restart: always
 
 volumes:
