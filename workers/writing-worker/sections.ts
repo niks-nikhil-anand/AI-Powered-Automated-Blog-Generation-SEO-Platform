@@ -250,6 +250,7 @@ function budgetSectionPlan(plan: SectionSpec[], context: SectionArticleContext):
   if (!desired || desired <= 0) return plan;
   const total = plan.reduce((sum, section) => sum + section.wordTarget, 0);
   if (total === desired) return plan;
+  const minimum = 60;
 /**
  * Build the section plan. When the editor supplies an outline, use its
  * sections as the canonical article structure. When no outline exists,
