@@ -97,6 +97,7 @@ function formattingCriteria(content: string, rawSections: unknown): FormattingCr
   const orderedCount = lines.filter((line) => /^\s*\d+[.)]\s+\S/.test(line)).length;
   const codePassed = /```[a-zA-Z][^\n]*\n[\s\S]*?\n```/.test(content);
   const h3Count = lines.filter((line) => /^###\s+\S/.test(line)).length;
+
   return [
     { label: "Comparison table", required: tableRequired, passed: tablePassed, evidence: tablePassed ? `${tableRows.length} table rows` : "No valid table with header, divider, and two data rows" },
     { label: "Checklist", required: unorderedRequired, passed: unorderedCount >= 3, evidence: `${unorderedCount} unordered list item(s)` },
@@ -422,7 +423,7 @@ export async function scoreBlogQuality(blog: BlogForQuality) {
       label: "Formatting & UX",
       score: requiredFormatting.length === 0 ? 10 : clamp((passedFormatting.length / requiredFormatting.length) * 10),
       maxScore: 10,
-      notes: ["Checked tables, lists, code blocks, and subheading depth"],
+      notes: formatting.map((criterion) => `${criterion.label}: ${criterion.required ? (criterion.passed ? "passed" : "missing") : "not required"} — ${criterion.evidence}`),
     },
     {
       label: "Media Quality",
