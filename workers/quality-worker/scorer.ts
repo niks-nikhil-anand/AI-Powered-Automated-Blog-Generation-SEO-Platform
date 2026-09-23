@@ -77,6 +77,13 @@ function keywordList(value: unknown) {
 type FormattingCriterion = { label: string; required: boolean; passed: boolean; evidence: string };
 
 function formattingCriteria(content: string, rawSections: unknown): FormattingCriterion[] {
+  const sections = Array.isArray(rawSections) ? rawSections.filter((section): section is Record<string, unknown> => Boolean(section && typeof section === "object")) : [];
+  const fieldText = (field: string) => sections.flatMap((section) => {
+    const value = section[field];
+    return Array.isArray(value) ? value.map(String) : typeof value === "string" ? [value] : [];
+  }).join(" ").toLowerCase();
+  const formats = fieldText("format");
+  const requirements = `${fieldText("requirements")} ${fieldText("practicalExample")}`;
   return [];
 }
 
