@@ -508,6 +508,7 @@ npm install
 docker compose up -d --wait postgres redis
 
 # Initialize/update the local database
+npx prisma migrate deploy
 
 # Start Next.js dev server (dashboard UI)
 npm run dev
@@ -515,6 +516,7 @@ npm run dev
 # Start all Docker workers (after migrations)
 docker compose up -d --build
 
+# Or run workers locally in a separate terminal
 npm run worker:dev
 
 # Or individually:
@@ -529,6 +531,8 @@ credentials, database name, and host port are configured with `POSTGRES_USER`,
 `POSTGRES_PASSWORD`, `POSTGRES_DB`, and `POSTGRES_PORT`; keep the local
 `DATABASE_URL` in sync when changing them. Data persists in the `postgres_data`
 volume across container restarts. Credentials initialize a new volume only.
+This local database starts empty; hosted database data is not copied automatically.
+
 Then submit your first blog at http://localhost:3000/dashboard/blogs/new
 
 **Dashboard**: http://localhost:3000/dashboard
