@@ -84,6 +84,11 @@ function formattingCriteria(content: string, rawSections: unknown): FormattingCr
   }).join(" ").toLowerCase();
   const formats = fieldText("format");
   const requirements = `${fieldText("requirements")} ${fieldText("practicalExample")}`;
+  const requiredH3 = sections.reduce((total, section) => total + (Array.isArray(section.subsections) ? section.subsections.length : Array.isArray(section.paragraphs) ? section.paragraphs.length : 0), 0);
+  const tableRequired = sections.some((section) => Boolean(section.comparisonTable));
+  const unorderedRequired = /checklist|bullet/.test(formats);
+  const orderedRequired = /numbered|step.by.step|procedure/.test(formats);
+  const codeRequired = /\bcode\b|snippet|implementation example/.test(`${formats} ${requirements}`);
   return [];
 }
 
