@@ -426,7 +426,7 @@ const plan = buildSectionPlan({
 assert.equal(plan[0].kind, "intro");
 assert.equal(plan[0].wordTarget, 150);
 assert.ok(plan.every((section) => section.kind !== "toc"));
-assert.equal(plan.length, 11);
+assert.equal(plan.length, 12);
 
 const planChecklist = plan.find((section) => section.heading?.startsWith("A Practical Checklist"));
 assert.equal(planChecklist?.format, "Actionable checklist");
@@ -489,6 +489,7 @@ const missingFaqs = validateArticleContract({
 assert.ok(missingFaqs.reasons.some((reason) => reason.startsWith("Missing briefed FAQ question(s)")));
 
 const mentionedFaqOnly = validateArticleContract({
+  ...contractBase,
 // An explicit ceiling is enforced; without one the derived maximum stays advisory.
 const tooLong = validateArticleContract({
   ...contractBase,
@@ -496,6 +497,7 @@ const tooLong = validateArticleContract({
 });
 assert.ok(tooLong.reasons.some((reason) => reason.includes("exceeds the briefed maximum of 2800")));
 
+// Regression: the reported production failure was an assembled 3,932-word
 const noCeiling = validateArticleContract({
   ...contractBase,
   wordBounds: { min: 2000 },
