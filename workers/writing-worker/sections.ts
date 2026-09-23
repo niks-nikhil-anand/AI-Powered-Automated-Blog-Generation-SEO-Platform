@@ -74,6 +74,7 @@ export type SectionSpec = {
   requiredInternalLink?: { url: string; anchor?: string };
   /** FAQ questions that must be emitted as H3 entries with answers. */
   requiredFaqQuestions?: string[];
+  /** Primary phrases assigned to this section for natural, verifiable coverage. */
 };
 
 export type SectionArticleContext = {
@@ -114,6 +115,7 @@ export type SectionArticleContext = {
   targetWords?: number;
   /** Binding article-wide range from the brief. */
   wordBounds?: { min?: number; max?: number } | null;
+  /** Concrete gate failures from a prior attempt; changes cache eligibility. */
   /** Full submission specs (writingInstructions, internalLinks, etc.) */
   specs?: Record<string, unknown>;
   internalLinks?: string[];
@@ -256,6 +258,7 @@ function budgetSectionPlan(plan: SectionSpec[], context: SectionArticleContext):
 
 function assignPrimaryKeywords(plan: SectionSpec[], context: SectionArticleContext): SectionSpec[] {
   const primary = Array.from(new Set((context.primaryKeywords ?? []).map((keyword) => keyword.trim()).filter(Boolean)));
+  const candidates = plan.filter((section) => section.kind !== "toc" && section.kind !== "faq");
 /**
  * Build the section plan. When the editor supplies an outline, use its
  * sections as the canonical article structure. When no outline exists,
@@ -369,6 +372,7 @@ export function buildSectionPlan(context: SectionArticleContext): SectionSpec[] 
     }
     if (faqQuestions.length > 0 && !plan.some((section) => section.kind === "faq")) {
       plan.push({ heading: "FAQs", kind: "faq", intent: DEFAULT_INTENTS.faq, bullets: faqQuestions, wordTarget: Math.max(160, Math.round(targetTotal * 0.14)), requiredFaqQuestions: faqQuestions });
+    }
   }
 
   // Fallback: the short spine when no outline is present
@@ -457,6 +461,7 @@ Citation rules: when this section makes a factual claim about the topic, attach 
     : spec.kind === "intro"
       ? `\nFocus keyword (mandatory): the FIRST paragraph of this introduction MUST contain the exact phrase "${focusKeyword}" exactly once. Use natural variations after that.`
       : spec.heading?.toLowerCase().includes(focusKeyword.toLowerCase())
+        ? `\nFocus keyword: this section heading already contains "${focusKeyword}". Do not repeat the exact phrase in the body; use natural variations instead.`
 
   let subsectionsBlock = "";
   if (spec.subsections && spec.subsections.length > 0) {
