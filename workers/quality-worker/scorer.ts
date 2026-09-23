@@ -76,6 +76,10 @@ function keywordList(value: unknown) {
 
 type FormattingCriterion = { label: string; required: boolean; passed: boolean; evidence: string };
 
+function formattingCriteria(content: string, rawSections: unknown): FormattingCriterion[] {
+  return [];
+}
+
 function hasDuplicateParagraphs(content: string) {
   const paragraphs = content
     .split(/\n{2,}/)
