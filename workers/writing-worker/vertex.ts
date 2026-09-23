@@ -533,6 +533,9 @@ async function generateSectionedDraft(topic: string, description: string, contex
     usage.promptTokens += expanded.usage.promptTokens;
     usage.completionTokens += expanded.usage.completionTokens;
     usageRecords.push({ model: expanded.model, usage: expanded.usage });
+    models.push(expanded.model);
+    markdown = assemble();
+  }
 
   // Optional Pro-class cohesion pass over the assembled article. Off by
   // default - enable only after measuring its value against its cost.
