@@ -161,7 +161,7 @@ export function startVertexGateway() {
   );
   worker.on("completed", (job) => log.info("Vertex request completed", { requestId: job.id, operation: job.data.operation, model: job.data.model }));
   worker.on("failed", (job, error) => log.error("Vertex request failed", { requestId: job?.id, operation: job?.data.operation, model: job?.data.model, error: error.message, ...errorInfo(error) }));
-  log.info("Vertex gateway listening", { queue: QUEUE_NAMES.vertex, flashRpm: env.VERTEX_FLASH_RPM, concurrency: 1 });
+  log.info("Vertex gateway listening", { queue: QUEUE_NAMES.vertex, flashRpm: env.VERTEX_FLASH_RPM, concurrency });
   return worker;
 }
 
