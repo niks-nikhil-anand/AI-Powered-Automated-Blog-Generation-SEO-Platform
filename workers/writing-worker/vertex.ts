@@ -517,6 +517,9 @@ async function generateSectionedDraft(topic: string, description: string, contex
   const range = articleWordRange(context.targetWords, context.wordBounds ?? brief.wordBounds);
   const repairable = plan
     .map((spec, index) => ({ spec, index, words: countWords(drafts[index]?.markdown ?? "") }))
+    .filter(({ spec }) => spec.kind !== "intro" && spec.kind !== "toc" && spec.kind !== "faq")
+    .sort((a, b) => a.words - b.words);
+  for (let pass = 0; pass < Math.min(2, repairable.length) && countWords(markdown) < range.min; pass += 1) {
 
   // Optional Pro-class cohesion pass over the assembled article. Off by
   // default - enable only after measuring its value against its cost.
