@@ -203,9 +203,7 @@ export function validateArticleContract(input: ArticleContractInput): ArticleCon
     }
   }
 
-  // Briefed FAQ questions must actually be answered in the article. Headings
-  // are matched loosely (punctuation/case) because a writer may phrase the
-  // question slightly differently as a heading.
+  // Briefed FAQ questions must be distinct entries with substantive answers.
   const faqQuestions = stringArray(
     Array.isArray(input.faqQuestions)
       ? input.faqQuestions.map((faq) =>
