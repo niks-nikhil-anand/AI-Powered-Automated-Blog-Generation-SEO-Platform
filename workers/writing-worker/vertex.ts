@@ -101,6 +101,7 @@ export type WritingContext = {
   tone?: string;
   /** BlogInput.contentLength - the editor's target word count for the article. */
   targetWords?: number;
+  wordBounds?: { min?: number; max?: number } | null;
   /**
    * BlogInput.focusKeyword - the phrase this article must rank for. The
    * article contract (workers/shared/article-contract.ts) requires it
@@ -241,6 +242,7 @@ Focus keyword placement (mandatory - the draft is rejected automatically when an
     ? (context.outline.sections as Array<Record<string, unknown>>)
     : [];
   const requiredFaqQuestions = Array.isArray(context.outline?.faqs)
+    ? context.outline.faqs
 
   const tocInstruction = !policy.tableOfContents
     ? "- Do not include a Table of Contents section."
@@ -520,6 +522,8 @@ async function generateSectionedDraft(topic: string, description: string, contex
     .filter(({ spec }) => spec.kind !== "intro" && spec.kind !== "toc" && spec.kind !== "faq")
     .sort((a, b) => a.words - b.words);
   for (let pass = 0; pass < Math.min(2, repairable.length) && countWords(markdown) < range.min; pass += 1) {
+    const target = repairable[pass];
+    const missing = range.min - countWords(markdown);
 
   // Optional Pro-class cohesion pass over the assembled article. Off by
   // default - enable only after measuring its value against its cost.
