@@ -1,4 +1,5 @@
 services:
+  postgres:
   redis:
     image: redis:7-alpine
     container_name: blog-agent-redis
