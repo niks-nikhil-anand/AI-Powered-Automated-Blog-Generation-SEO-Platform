@@ -544,6 +544,9 @@ async function generateSectionedDraft(topic: string, description: string, contex
 
   // FAQ omissions and a truncated final paragraph are also section-local.
   // Repair the FAQ section (or final body section if no FAQ exists) once
+  // before the final article contract gets a chance to reject the draft.
+  const faqQuestions = Array.isArray(context.outline?.faqs) ? context.outline.faqs : [];
+  const structuralCheck = validateArticleContract({
 
   // Optional Pro-class cohesion pass over the assembled article. Off by
   // default - enable only after measuring its value against its cost.
