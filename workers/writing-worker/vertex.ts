@@ -249,6 +249,7 @@ Focus keyword placement (mandatory - the draft is rejected automatically when an
         .filter(Boolean)
     : [];
   const requiredFaqBlock = requiredFaqQuestions.length > 0
+    ? `\nRequired FAQ entries (binding): add a \`## FAQs\` section. Emit each question below verbatim as its own \`###\` heading and follow it with a direct, substantive answer of at least 12 words.\n${requiredFaqQuestions.map((question) => `- ${question}`).join("\n")}\n`
 
   const tocInstruction = !policy.tableOfContents
     ? "- Do not include a Table of Contents section."
@@ -566,6 +567,9 @@ async function generateSectionedDraft(topic: string, description: string, contex
     const targetIndex = repairIndex >= 0 ? repairIndex : plan.length - 1;
     const repaired = await generateSection(plan[targetIndex], sectionContext, {
       repairNote: `The assembled article failed these binding checks:\n${structuralReasons.map((reason) => `- ${reason}`).join("\n")}\nReturn the complete replacement section. Include every required FAQ as its own H3 entry with a substantive answer, and ensure the final prose ends with a complete sentence.`,
+    });
+    drafts[targetIndex] = repaired;
+    usage.promptTokens += repaired.usage.promptTokens;
 
   // Optional Pro-class cohesion pass over the assembled article. Off by
   // default - enable only after measuring its value against its cost.
