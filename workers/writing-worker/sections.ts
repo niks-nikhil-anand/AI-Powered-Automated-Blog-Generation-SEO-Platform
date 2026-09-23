@@ -255,6 +255,7 @@ function budgetSectionPlan(plan: SectionSpec[], context: SectionArticleContext):
 }
 
 function assignPrimaryKeywords(plan: SectionSpec[], context: SectionArticleContext): SectionSpec[] {
+  const primary = Array.from(new Set((context.primaryKeywords ?? []).map((keyword) => keyword.trim()).filter(Boolean)));
 /**
  * Build the section plan. When the editor supplies an outline, use its
  * sections as the canonical article structure. When no outline exists,
