@@ -103,6 +103,7 @@ export type WritingContext = {
   targetWords?: number;
   wordBounds?: { min?: number; max?: number } | null;
   primaryKeywords?: string[];
+  /** A binding H1 resolved by the caller from the submission brief. */
   /**
    * BlogInput.focusKeyword - the phrase this article must rank for. The
    * article contract (workers/shared/article-contract.ts) requires it
@@ -247,6 +248,7 @@ Focus keyword placement (mandatory - the draft is rejected automatically when an
         .map((faq) => (faq && typeof faq === "object" && "question" in faq ? String((faq as { question: unknown }).question).trim() : ""))
         .filter(Boolean)
     : [];
+  const requiredFaqBlock = requiredFaqQuestions.length > 0
 
   const tocInstruction = !policy.tableOfContents
     ? "- Do not include a Table of Contents section."
@@ -556,6 +558,8 @@ async function generateSectionedDraft(topic: string, description: string, contex
     faqQuestions,
   });
   const structuralReasons = structuralCheck.reasons.filter(
+    (reason) => reason.startsWith("Missing briefed FAQ question(s)") || reason.startsWith("Briefed FAQ question(s) need substantive answers") || reason === "Article does not end with a complete sentence"
+  );
 
   // Optional Pro-class cohesion pass over the assembled article. Off by
   // default - enable only after measuring its value against its cost.
