@@ -9,12 +9,9 @@ import { env } from "./env";
  * adapter instead of a bare connection string - see
  * .claude/skills/prisma-postgres-setup/references/prisma7-client.md
  *
- * NOTE: as of writing, this repo's .env DATABASE_URL is a
- * `prisma+postgres://...` URL from a local `prisma dev` session, not the
- * `postgresql://postgres:postgres@postgres:5432/blog_agent` URL that
- * docker-compose.yml's postgres service expects. Those are two
- * different databases - point DATABASE_URL at whichever Postgres you
- * actually want the workers writing blogs into before running them.
+ * Local processes use localhost from .env; Docker Compose overrides
+ * DATABASE_URL to connect through the postgres service hostname.
+ * Point DATABASE_URL at whichever Postgres instance you want workers writing into.
  */
 declare global {
   var __workerPgPool: pg.Pool | undefined;
