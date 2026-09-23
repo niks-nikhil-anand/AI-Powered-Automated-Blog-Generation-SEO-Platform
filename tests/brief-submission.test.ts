@@ -428,6 +428,7 @@ assert.equal(plan[0].wordTarget, 150);
 assert.ok(plan.every((section) => section.kind !== "toc"));
 assert.equal(plan.length, 12);
 const generatedFaqSection = plan.find((section) => section.kind === "faq");
+assert.deepEqual(generatedFaqSection?.requiredFaqQuestions, outline.faqs.map((faq) => faq.question));
 
 const planChecklist = plan.find((section) => section.heading?.startsWith("A Practical Checklist"));
 assert.equal(planChecklist?.format, "Actionable checklist");
@@ -492,6 +493,8 @@ assert.ok(missingFaqs.reasons.some((reason) => reason.startsWith("Missing briefe
 const mentionedFaqOnly = validateArticleContract({
   ...contractBase,
   content: `# ${brief.briefedH1}\n\nDoes Next.js have built-in authentication? This mention is not an FAQ entry.\n`,
+});
+assert.ok(mentionedFaqOnly.reasons.some((reason) => reason.startsWith("Missing briefed FAQ question(s)")));
 // An explicit ceiling is enforced; without one the derived maximum stays advisory.
 const tooLong = validateArticleContract({
   ...contractBase,
@@ -501,6 +504,7 @@ assert.ok(tooLong.reasons.some((reason) => reason.includes("exceeds the briefed 
 
 // Regression: the reported production failure was an assembled 3,932-word
 // article that omitted every briefed FAQ. Both failures must remain visible
+// to the final, single-source-of-truth contract.
 const noCeiling = validateArticleContract({
   ...contractBase,
   wordBounds: { min: 2000 },
