@@ -241,6 +241,7 @@ function budgetSectionPlan(plan: SectionSpec[], context: SectionArticleContext):
   const desired = ceiling && ceiling > 0
     ? Math.min(context.targetWords ?? Math.round(ceiling * 0.93), Math.floor(ceiling * 0.93))
     // Models commonly land below a per-section target. For briefs without a
+    // ceiling, generate against a 40% larger internal budget so the assembled
 /**
  * Build the section plan. When the editor supplies an outline, use its
  * sections as the canonical article structure. When no outline exists,
