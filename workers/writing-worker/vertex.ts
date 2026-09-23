@@ -507,7 +507,8 @@ async function generateSectionedDraft(topic: string, description: string, contex
     .filter((draft) => !draft.fromCache)
     .map((draft) => ({ model: draft.model, usage: draft.usage }));
 
-  let markdown = enforceSingleH1(drafts.map((draft) => draft.markdown).join("\n\n"), title, focusKeyword);
+  const assemble = () => enforceSingleH1(drafts.map((draft) => draft.markdown).join("\n\n"), title, focusKeyword);
+  let markdown = assemble();
 
   // Optional Pro-class cohesion pass over the assembled article. Off by
   // default - enable only after measuring its value against its cost.
