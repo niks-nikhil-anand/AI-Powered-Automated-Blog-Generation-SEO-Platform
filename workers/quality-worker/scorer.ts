@@ -97,7 +97,13 @@ function formattingCriteria(content: string, rawSections: unknown): FormattingCr
   const orderedCount = lines.filter((line) => /^\s*\d+[.)]\s+\S/.test(line)).length;
   const codePassed = /```[a-zA-Z][^\n]*\n[\s\S]*?\n```/.test(content);
   const h3Count = lines.filter((line) => /^###\s+\S/.test(line)).length;
-  return [];
+  return [
+    { label: "Comparison table", required: tableRequired, passed: tablePassed, evidence: tablePassed ? `${tableRows.length} table rows` : "No valid table with header, divider, and two data rows" },
+    { label: "Checklist", required: unorderedRequired, passed: unorderedCount >= 3, evidence: `${unorderedCount} unordered list item(s)` },
+    { label: "Numbered procedure", required: orderedRequired, passed: orderedCount >= 3, evidence: `${orderedCount} ordered list item(s)` },
+    { label: "Typed code example", required: codeRequired, passed: codePassed, evidence: codePassed ? "Typed fenced code block present" : "No typed fenced code block" },
+    { label: "Required subheadings", required: requiredH3 > 0, passed: h3Count >= requiredH3, evidence: `${h3Count}/${requiredH3 || 0} H3 subheading(s)` },
+  ];
 }
 
 function hasDuplicateParagraphs(content: string) {
