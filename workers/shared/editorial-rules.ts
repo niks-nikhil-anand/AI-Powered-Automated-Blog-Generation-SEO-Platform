@@ -116,7 +116,7 @@ export function paragraphsOf(text: string): string[] {
     .map((paragraph) => paragraph.trim())
     // Headings, blockquotes, tables, and list blocks are valid Markdown
     // structures, not prose that needs terminal-sentence punctuation.
-    .filter((paragraph) => paragraph.length > 0 && !paragraph.startsWith("#") && !/^[|>-]/.test(paragraph));
+    .filter((paragraph) => paragraph.length > 0 && !paragraph.startsWith("#") && !/^[|>\-+*]/.test(paragraph));
 }
 
 export function sentencesOf(text: string): string[] {
