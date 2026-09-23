@@ -11,6 +11,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
   redis:
     image: redis:7-alpine
     container_name: blog-agent-redis
@@ -38,6 +39,7 @@ services:
     depends_on:
       redis:
         condition: service_started
+      postgres:
     restart: always
 
   # Vertex credentials are supplied as GCP_* environment variables. The
@@ -58,6 +60,7 @@ services:
     depends_on:
       redis:
         condition: service_started
+      postgres:
     restart: always
 
   planning-worker:
@@ -72,6 +75,7 @@ services:
     depends_on:
       redis:
         condition: service_started
+      postgres:
     restart: always
 
   outline-worker:
@@ -86,6 +90,7 @@ services:
     depends_on:
       redis:
         condition: service_started
+      postgres:
     restart: always
 
   writing-worker:
@@ -100,6 +105,7 @@ services:
     depends_on:
       redis:
         condition: service_started
+      postgres:
     restart: always
 
   image-worker:
@@ -114,6 +120,7 @@ services:
     depends_on:
       redis:
         condition: service_started
+      postgres:
     restart: always
 
   # quality-worker calls Vertex (Gemini vision) for the featured-image
@@ -132,6 +139,7 @@ services:
     depends_on:
       redis:
         condition: service_started
+      postgres:
     restart: always
 
   publish-worker:
@@ -146,6 +154,7 @@ services:
     depends_on:
       redis:
         condition: service_started
+      postgres:
     restart: always
 
 volumes:
