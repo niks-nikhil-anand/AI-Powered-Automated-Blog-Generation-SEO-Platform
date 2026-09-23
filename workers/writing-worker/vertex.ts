@@ -2,12 +2,13 @@ import { env, isVertexConfigured } from "../shared/env";
 import { logger } from "../shared/logger";
 import { generateVertexText, slugify, VertexQuotaError, type VertexTextResult } from "../shared/vertex";
 import { getSetting, MODEL_SETTING_KEYS } from "../shared/settings";
-import { buildSectionPlan, generateAllSections, type SectionArticleContext, DEFAULT_MUST_FOLLOW_RULES } from "./sections";
+import { buildSectionPlan, clearSectionCache, generateAllSections, generateSection, type SectionArticleContext, DEFAULT_MUST_FOLLOW_RULES } from "./sections";
 import type { GroundedSource } from "./citations";
 import { ensureKeywordInTitle, ensureKeywordInH1, extractH1 } from "../shared/seo-keyword";
 import { buildGlobalRulesBlock } from "../shared/editorial-rules";
 import { resolveEditorialPolicy, type EditorialPolicy } from "../shared/editorial-policy";
 import { buildBriefDirectivesBlock, readBriefSpecs } from "../shared/brief";
+import { articleWordRange, countWords, validateArticleContract } from "../shared/article-contract";
 
 const log = logger.child({ worker: "writing-worker" });
 
@@ -104,6 +105,7 @@ export type WritingContext = {
   wordBounds?: { min?: number; max?: number } | null;
   primaryKeywords?: string[];
   /** A binding H1 resolved by the caller from the submission brief. */
+  requiredH1?: string | null;
   /**
    * BlogInput.focusKeyword - the phrase this article must rank for. The
    * article contract (workers/shared/article-contract.ts) requires it
@@ -183,6 +185,7 @@ Citation protocol (mandatory):
     : `10. Only state a specific number, percentage, date, version, or named benchmark result if it is explicitly present in the Evidence above. For anything the Evidence doesn't cover, describe it qualitatively instead of inventing a figure. Explain architectural concepts, official framework features, and standard developer paradigms thoroughly with technical depth. Avoid unsupported benchmark speed rankings or declaring an unqualified "best" framework without evidence.`;
 
   const brief = readBriefSpecs(context.specs);
+  const { min: minWords, max: maxWords } = articleWordRange(context.targetWords, context.wordBounds ?? brief.wordBounds);
 
   const rawSpecs = (context.specs ?? {}) as Record<string, unknown>;
   const nestedSpecs = (rawSpecs.specs ?? {}) as Record<string, unknown>;
@@ -250,6 +253,7 @@ Focus keyword placement (mandatory - the draft is rejected automatically when an
     : [];
   const requiredFaqBlock = requiredFaqQuestions.length > 0
     ? `\nRequired FAQ entries (binding): add a \`## FAQs\` section. Emit each question below verbatim as its own \`###\` heading and follow it with a direct, substantive answer of at least 12 words.\n${requiredFaqQuestions.map((question) => `- ${question}`).join("\n")}\n`
+    : "";
 
   const tocInstruction = !policy.tableOfContents
     ? "- Do not include a Table of Contents section."
@@ -264,7 +268,7 @@ Focus keyword placement (mandatory - the draft is rejected automatically when an
 ${tocInstruction}
 - If an outline section specifies a comparisonTable, render the full Markdown comparison table with the specified columns and rows.
 - If an outline section has subsections or paragraphs, emit each as an "### [Heading]" subsection with detailed technical prose addressing the discussion points.
-- Aim for ${minWords}-${maxWords} words, but do not pad: cover the outline properly and stop. A shorter article beats a padded one.`
+- Aim for ${minWords}-${maxWords} words, but do not pad: cover the outline properly and stop. When a maximum is specified, aim roughly 7% below it to leave room for complete FAQ answers.`
       : `Article structure - choose the sections this topic actually needs:
 # [Article title]
 
@@ -298,6 +302,7 @@ ${context.plan ? JSON.stringify(context.plan, null, 2) : "No separate content pl
 Target keywords (each must appear verbatim, case-insensitive, at least once somewhere in the article body):
 ${targetKeywords.length ? targetKeywords.map((keyword) => `- ${keyword}`).join("\n") : "- No target keywords provided."}
 ${focusKeywordBlock}
+${requiredFaqBlock}
 Approved outline:
 ${context.outline ? JSON.stringify(context.outline, null, 2) : "No separate outline provided."}
 
@@ -464,6 +469,7 @@ async function generateSectionedDraft(topic: string, description: string, contex
   const sourceTitle = mandatoryTitle ?? context.outline?.title ?? topic;
   // Never alter a binding title, including to add a focus keyword. The final
   // contract compares this value exactly against the editor's brief.
+  const title = mandatoryTitle || ensureKeywordInTitle(sourceTitle, focusKeyword);
   const keywords = [
     context.plan?.primaryKeyword,
     ...(Array.isArray(context.plan?.secondaryKeywords) ? context.plan.secondaryKeywords.map(String) : []),
@@ -503,12 +509,14 @@ async function generateSectionedDraft(topic: string, description: string, contex
     sources: context.evidenceSources,
     evidenceSummary: context.evidenceSummary,
     keywords,
+    primaryKeywords: context.primaryKeywords ?? keywords,
     focusKeyword,
     policy,
-    briefDirectives: context.briefDirectives ?? readBriefSpecs(context.specs).directives,
+    briefDirectives: context.briefDirectives ?? brief.directives,
     tone: context.tone,
     targetWords: context.targetWords,
     wordBounds: context.wordBounds ?? brief.wordBounds,
+    repairReasons: context.priorAttempt?.reasons,
     specs: context.specs,
     internalLinks,
     writingInstructions,
@@ -572,6 +580,9 @@ async function generateSectionedDraft(topic: string, description: string, contex
     usage.promptTokens += repaired.usage.promptTokens;
     usage.completionTokens += repaired.usage.completionTokens;
     usageRecords.push({ model: repaired.model, usage: repaired.usage });
+    models.push(repaired.model);
+    markdown = assemble();
+  }
 
   // Optional Pro-class cohesion pass over the assembled article. Off by
   // default - enable only after measuring its value against its cost.
