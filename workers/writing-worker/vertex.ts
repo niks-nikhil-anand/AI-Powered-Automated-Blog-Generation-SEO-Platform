@@ -459,6 +459,7 @@ async function generateSectionedDraft(topic: string, description: string, contex
   const brief = readBriefSpecs(context.specs);
   const mandatoryTitle = context.requiredH1?.trim();
   const sourceTitle = mandatoryTitle ?? context.outline?.title ?? topic;
+  // Never alter a binding title, including to add a focus keyword. The final
   const keywords = [
     context.plan?.primaryKeyword,
     ...(Array.isArray(context.plan?.secondaryKeywords) ? context.plan.secondaryKeywords.map(String) : []),
@@ -550,6 +551,9 @@ async function generateSectionedDraft(topic: string, description: string, contex
   const structuralCheck = validateArticleContract({
     content: markdown,
     targetWords: context.targetWords,
+    wordBounds: context.wordBounds ?? brief.wordBounds,
+    requiredH1: mandatoryTitle,
+    faqQuestions,
 
   // Optional Pro-class cohesion pass over the assembled article. Off by
   // default - enable only after measuring its value against its cost.
