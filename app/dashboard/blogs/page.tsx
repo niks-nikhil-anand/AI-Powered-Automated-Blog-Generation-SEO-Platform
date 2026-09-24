@@ -114,7 +114,7 @@ export default function BlogManagementPage() {
   return (
     <div className="flex flex-col gap-[13px]">
       {/* Header */}
-      <div className="flex items-end justify-between gap-[16px] flex-wrap">
+      <div className="flex flex-col gap-[12px] sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="margin-0 text-[19px] font-extrabold tracking-tight text-[var(--fg)]">
             Blog Management & Pipeline
@@ -123,29 +123,31 @@ export default function BlogManagementPage() {
             {blogRows.length} articles · {blogRows.filter((row) => row.status === "Review").length} in pipeline · {blogRows.filter((row) => row.status === "Failed QA").length} failed QA gate
           </p>
         </div>
-        <div className="flex gap-[7px]">
+        {selectedIds.length > 0 && (
+        <div aria-label={`${selectedIds.length} selected articles`} className="flex w-full gap-[7px] sm:w-auto">
           <button
             aria-label="Publish selected"
             onClick={() => alert(`Publishing ${selectedIds.length} selected articles`)}
-            className="h-[30px] px-[12px] rounded-[8px] border border-[var(--bd)] bg-[var(--card)] text-[var(--fg2)] text-[11.5px] font-semibold hover:border-[var(--emerald)] hover:text-[var(--emerald)] transition-colors"
+            className="h-[44px] flex-1 px-[12px] rounded-[8px] border border-[var(--bd)] bg-[var(--card)] text-[11.5px] font-semibold text-[var(--fg2)] transition-colors hover:border-[var(--emerald)] hover:text-[var(--emerald)] sm:h-[34px] sm:flex-none"
           >
             Publish selected
           </button>
           <button
             aria-label="Re-run QA on selected"
             onClick={() => alert(`Re-running QA on ${selectedIds.length} selected articles`)}
-            className="h-[30px] px-[12px] rounded-[8px] border border-[var(--bd)] bg-[var(--card)] text-[var(--fg2)] text-[11.5px] font-semibold hover:border-[var(--bd2)] transition-colors"
+            className="h-[44px] flex-1 px-[12px] rounded-[8px] border border-[var(--bd)] bg-[var(--card)] text-[11.5px] font-semibold text-[var(--fg2)] transition-colors hover:border-[var(--bd2)] sm:h-[34px] sm:flex-none"
           >
             Re-run QA
           </button>
           <button
             aria-label="Delete selected"
             onClick={() => alert(`Deleted ${selectedIds.length} selected articles`)}
-            className="h-[30px] px-[12px] rounded-[8px] border border-[var(--bd)] bg-[var(--card)] text-[var(--rose)] text-[11.5px] font-semibold hover:border-[var(--rose)] transition-colors"
+            className="h-[44px] flex-1 px-[12px] rounded-[8px] border border-[var(--bd)] bg-[var(--card)] text-[11.5px] font-semibold text-[var(--rose)] transition-colors hover:border-[var(--rose)] sm:h-[34px] sm:flex-none"
           >
             Delete
           </button>
         </div>
+        )}
       </div>
 
       {/* Main Container */}
@@ -175,7 +177,7 @@ export default function BlogManagementPage() {
 
         {/* Filter Controls Bar */}
         <div className="flex items-center gap-[8px] p-[10px_12px] border-b border-[var(--bd)] bg-[var(--card2)] flex-wrap">
-          <div className="flex items-center gap-[7px] h-[29px] px-[10px] rounded-[8px] border border-[var(--bd)] bg-[var(--card)] text-[var(--faint)] min-w-[230px]">
+          <div className="flex h-[44px] w-full items-center gap-[7px] rounded-[8px] border border-[var(--bd)] bg-[var(--card)] px-[10px] text-[var(--faint)] sm:h-[34px] sm:min-w-[230px] sm:flex-1">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
               <circle cx="11" cy="11" r="7" />
               <path d="M20 20l-3.5-3.5" />
@@ -195,7 +197,7 @@ export default function BlogManagementPage() {
             aria-label="Filter by category"
             value={categoryFilter}
             onChange={(e) => setCategoryFilter(e.target.value)}
-            className="h-[29px] px-[8px] rounded-[8px] border border-[var(--bd)] bg-[var(--card)] text-[var(--fg2)] text-[11.5px] font-semibold outline-none"
+            className="h-[44px] min-w-0 flex-1 rounded-[8px] border border-[var(--bd)] bg-[var(--card)] px-[8px] text-[11.5px] font-semibold text-[var(--fg2)] outline-none sm:h-[34px] sm:flex-none"
           >
             <option>All categories</option>
             {categories.map((category) => (
@@ -203,14 +205,14 @@ export default function BlogManagementPage() {
             ))}
           </select>
 
-          <span className="ml-auto text-[11px] text-[var(--mut)]">
+          <span className="ml-auto whitespace-nowrap text-[11px] text-[var(--mut)]">
             {selectedIds.length} selected · {filteredRows.length} rows
           </span>
         </div>
 
         {/* Table */}
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-[12px] min-w-[920px]">
+        <div className="hidden overflow-x-auto md:block">
+          <table className="min-w-[680px] w-full border-collapse text-[12px] min-[1200px]:min-w-[920px]">
             <thead>
               <tr className="bg-[var(--card)] text-[var(--mut)]">
                 <th className="w-[34px] p-[8px_0_8px_12px] border-b border-[var(--bd)]">
@@ -227,10 +229,10 @@ export default function BlogManagementPage() {
                 <th className="text-left p-[8px] text-[10px] font-bold tracking-wider uppercase border-b border-[var(--bd)]">
                   Category
                 </th>
-                <th className="text-right p-[8px] text-[10px] font-bold tracking-wider uppercase border-b border-[var(--bd)]">
+                <th className="hidden min-[1200px]:table-cell text-right p-[8px] text-[10px] font-bold tracking-wider uppercase border-b border-[var(--bd)]">
                   Words
                 </th>
-                <th className="text-right p-[8px] text-[10px] font-bold tracking-wider uppercase border-b border-[var(--bd)]">
+                <th className="hidden min-[1200px]:table-cell text-right p-[8px] text-[10px] font-bold tracking-wider uppercase border-b border-[var(--bd)]">
                   Quality
                 </th>
                 <th className="text-right p-[8px] text-[10px] font-bold tracking-wider uppercase border-b border-[var(--bd)]">
@@ -282,7 +284,11 @@ export default function BlogManagementPage() {
               ) : pageRows.length > 0 ? pageRows.map((b) => (
                 <tr
                   key={b.id}
-                  className="border-b border-[var(--bd)] hover:bg-[var(--card2)] transition-colors"
+                  onClick={(event) => {
+                    if ((event.target as HTMLElement).closest("button, input, a, select, textarea, label")) return;
+                    openBlogDetail(b);
+                  }}
+                  className="cursor-pointer border-b border-[var(--bd)] hover:bg-[var(--card2)] focus-within:bg-[var(--card2)] transition-colors"
                 >
                   <td className="p-[9px_0_9px_12px]">
                     <input
@@ -293,9 +299,15 @@ export default function BlogManagementPage() {
                     />
                   </td>
                   <td className="p-[9px_8px] max-w-[330px]">
-                    <div className="font-semibold text-[12px] leading-snug text-[var(--fg)]">
+                    <button
+                      type="button"
+                      aria-label={`View details for ${b.title}`}
+                      aria-haspopup="dialog"
+                      onClick={() => openBlogDetail(b)}
+                      className="cursor-pointer rounded-sm text-left font-semibold text-[12px] leading-snug text-[var(--fg)] hover:text-[var(--indigo)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--indigo)]"
+                    >
                       {b.title}
-                    </div>
+                    </button>
                     <div className="font-mono text-[10px] text-[var(--faint)] mt-[2px] truncate">
                       {b.slug}
                     </div>
@@ -305,7 +317,7 @@ export default function BlogManagementPage() {
                       {b.cat}
                     </span>
                   </td>
-                  <td className="p-[9px_8px] text-right font-mono text-[11.5px] text-[var(--mut)]">
+                  <td className="hidden min-[1200px]:table-cell p-[9px_8px] text-right font-mono text-[11.5px] text-[var(--mut)]">
                     {b.words}
                   </td>
                   <td className="p-[9px_8px] text-right">
@@ -316,7 +328,7 @@ export default function BlogManagementPage() {
                       {b.quality}
                     </span>
                   </td>
-                  <td className="p-[9px_8px] text-right font-mono text-[11.5px] text-[var(--mut)]">
+                  <td className="hidden min-[1200px]:table-cell p-[9px_8px] text-right font-mono text-[11.5px] text-[var(--mut)]">
                     {b.cost}
                   </td>
                   <td className="p-[9px_8px]">
@@ -353,6 +365,36 @@ export default function BlogManagementPage() {
               )}
             </tbody>
           </table>
+        </div>
+
+        <div className="divide-y divide-[var(--bd)] md:hidden">
+          {isLoadingBlogs && blogRows.length === 0 ? (
+            Array.from({ length: 4 }).map((_, index) => <div key={index} className="p-4"><Skeleton className="h-5 w-4/5" /><Skeleton className="mt-3 h-4 w-full" /></div>)
+          ) : pageRows.length > 0 ? pageRows.map((blog) => (
+            <article
+              key={blog.id}
+              onClick={(event) => {
+                if ((event.target as HTMLElement).closest("button, input, a, select, textarea, label")) return;
+                openBlogDetail(blog);
+              }}
+              className="cursor-pointer p-4 transition-colors hover:bg-[var(--card2)]"
+            >
+              <div className="flex items-start gap-3">
+                <input type="checkbox" aria-label={`Select ${blog.title}`} checked={selectedIds.includes(blog.id!)} onChange={() => handleToggleRow(blog.id!)} className="mt-1 size-5" />
+                <div className="min-w-0 flex-1">
+                  <button type="button" aria-haspopup="dialog" onClick={() => openBlogDetail(blog)} className="text-left text-[14px] font-semibold leading-snug text-[var(--fg)]">{blog.title}</button>
+                  <p className="mt-1 truncate font-mono text-[10px] text-[var(--faint)]">{blog.slug}</p>
+                </div>
+                <span className="shrink-0 rounded-full border px-2 py-1 text-[10.5px] font-semibold" style={{ background: blog.sBg, color: blog.sFg, borderColor: blog.sBd }}>{blog.status}</span>
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] text-[var(--mut)]">
+                <span>Category <strong className="ml-1 font-semibold text-[var(--fg2)]">{blog.cat}</strong></span>
+                <span>Updated <strong className="ml-1 font-semibold text-[var(--fg2)]">{blog.updated}</strong></span>
+                <span>Words <strong className="ml-1 font-mono text-[var(--fg2)]">{blog.words}</strong></span>
+                <span>Quality <strong className="ml-1 font-mono text-[var(--fg2)]">{blog.quality}</strong></span>
+              </div>
+            </article>
+          )) : <p className="p-8 text-center text-[12px] text-[var(--mut)]">No articles yet.</p>}
         </div>
 
         {/* Footer Pagination */}
