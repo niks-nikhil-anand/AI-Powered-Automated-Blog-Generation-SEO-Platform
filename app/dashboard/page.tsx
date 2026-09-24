@@ -321,7 +321,7 @@ export default function ExecutiveDashboard({ onOpenBlogModal, onOpenRunPipeline 
   return (
     <div className="flex flex-col gap-[14px]">
       {/* Page Header */}
-      <div className="flex items-end justify-between gap-[16px] flex-wrap">
+      <div className="flex flex-col items-stretch justify-between gap-[12px] sm:flex-row sm:items-end sm:gap-[16px]">
         <div>
           <h1 className="margin-0 text-[19px] font-extrabold tracking-tight text-[var(--fg)]">
             Executive Dashboard
@@ -330,13 +330,13 @@ export default function ExecutiveDashboard({ onOpenBlogModal, onOpenRunPipeline 
             Editor-submitted blog specifications, generated end to end · {today}
           </p>
         </div>
-        <div className="flex gap-[7px]">
+        <div className="grid grid-cols-5 gap-[7px] sm:flex">
           {["24h", "7d", "30d"].map((r) => (
             <button
               key={r}
               aria-label={`Time range ${r}`}
               onClick={() => setRange(r)}
-              className={`h-[29px] px-[11px] rounded-[8px] border text-[11.5px] font-semibold transition-colors ${range === r
+              className={`h-[40px] px-[8px] rounded-[8px] border text-[11.5px] font-semibold transition-colors sm:h-[29px] sm:px-[11px] ${range === r
                   ? "border-[var(--indigo)] bg-[var(--tint)] text-[var(--indigo)]"
                   : "border-[var(--bd)] bg-[var(--card)] text-[var(--fg2)] hover:border-[var(--bd2)]"
                 }`}
@@ -347,14 +347,14 @@ export default function ExecutiveDashboard({ onOpenBlogModal, onOpenRunPipeline 
           <button
             aria-label="Export report"
             onClick={() => alert("Exported executive CSV report.")}
-            className="h-[29px] px-[11px] rounded-[8px] border border-[var(--bd)] bg-[var(--card)] text-[var(--fg2)] text-[11.5px] font-semibold hover:border-[var(--bd2)]"
+            className="h-[40px] px-[8px] rounded-[8px] border border-[var(--bd)] bg-[var(--card)] text-[var(--fg2)] text-[11.5px] font-semibold hover:border-[var(--bd2)] sm:h-[29px] sm:px-[11px]"
           >
             Export
           </button>
           <button
             aria-label="Run pipeline"
             onClick={() => onOpenRunPipeline?.()}
-            className="h-[29px] px-[12px] rounded-[8px] border border-transparent bg-[var(--indigo)] text-white text-[11.5px] font-bold hover:bg-[#4f46e5] transition-colors flex items-center gap-[6px]"
+            className="h-[40px] px-[8px] rounded-[8px] border border-transparent bg-[var(--indigo)] text-white text-[11.5px] font-bold hover:bg-[#4f46e5] transition-colors flex items-center justify-center gap-[6px] sm:h-[29px] sm:px-[12px]"
           >
             <span className="text-[9px] leading-none">▶</span>
             Run
@@ -388,7 +388,7 @@ export default function ExecutiveDashboard({ onOpenBlogModal, onOpenRunPipeline 
       )}
 
       {/* Metrics Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-[12px]">
+      <div className="grid grid-cols-2 gap-[8px] sm:gap-[12px] lg:grid-cols-4">
         {metrics.map((m, idx) => (
           <MetricCard key={idx} {...m} />
         ))}
@@ -503,7 +503,29 @@ export default function ExecutiveDashboard({ onOpenBlogModal, onOpenRunPipeline 
               View all
             </Link>
           </div>
-          <div className="overflow-x-auto">
+          <div className="md:hidden p-[8px]">
+            {recentBlogs.length > 0 ? recentBlogs.map((b, idx) => (
+              <button
+                key={idx}
+                onClick={() => onOpenBlogModal && onOpenBlogModal(b)}
+                className="w-full text-left rounded-[9px] border border-[var(--bd)] bg-[var(--card2)] p-[11px] mb-[8px] last:mb-0 hover:border-[var(--indigo)] transition-colors"
+              >
+                <div className="flex items-start justify-between gap-[8px]">
+                  <div className="min-w-0">
+                    <div className="font-semibold text-[12px] leading-snug text-[var(--fg)] line-clamp-2">{b.title}</div>
+                    <div className="font-mono text-[10px] text-[var(--faint)] mt-[3px] truncate">{b.slug}</div>
+                  </div>
+                  <span className="shrink-0 text-[10px] font-semibold p-[2px_7px] rounded-full border" style={{ background: b.sBg, color: b.sFg, borderColor: b.sBd }}>{b.status}</span>
+                </div>
+                <div className="mt-[9px] flex items-center gap-[8px] text-[10px] text-[var(--mut)]">
+                  <span className="p-[2px_6px] rounded-[5px] bg-[var(--card)] text-[var(--fg2)]">{b.cat}</span>
+                  <span>{b.tokens ?? "-"} tokens</span>
+                  <span className="ml-auto font-mono font-bold" style={{ color: b.qFg }}>{b.quality}</span>
+                </div>
+              </button>
+            )) : <div className="p-[24px_8px] text-center text-[12px] text-[var(--mut)]">No recent generations yet.</div>}
+          </div>
+          <div className="hidden overflow-x-auto md:block">
             <table className="w-full border-collapse text-[12px]">
               <thead>
                 <tr className="bg-[var(--card2)] text-[var(--mut)]">
@@ -720,7 +742,23 @@ export default function ExecutiveDashboard({ onOpenBlogModal, onOpenRunPipeline 
             {analytics.tokens.totalLabel} tokens · {analytics.calls} calls
           </span>
         </div>
-        <div className="overflow-x-auto">
+        <div className="md:hidden p-[8px]">
+          {analytics.models.length > 0 ? analytics.models.map((m) => (
+            <div key={m.model} className="rounded-[9px] border border-[var(--bd)] bg-[var(--card2)] p-[11px] mb-[8px] last:mb-0">
+              <div className="flex items-center gap-[7px]">
+                <span className="w-[8px] h-[8px] rounded-[2px]" style={{ background: m.color }} />
+                <span className="font-mono text-[11.5px] font-semibold text-[var(--fg)]">{m.model}</span>
+                <span className="ml-auto font-mono font-bold text-[11px] text-[var(--fg)]">{m.costLabel}</span>
+              </div>
+              <div className="mt-[8px] grid grid-cols-3 gap-[6px] text-[10px] text-[var(--mut)]">
+                <span>Calls <b className="block text-[var(--fg2)]">{m.calls}</b></span>
+                <span>Tokens <b className="block text-[var(--fg2)]">{(m.promptTokens + m.completionTokens).toLocaleString()}</b></span>
+                <span>Latency <b className="block text-[var(--fg2)]">{m.avgLatencyMs > 0 ? `${(m.avgLatencyMs / 1000).toFixed(1)}s` : "-"}</b></span>
+              </div>
+            </div>
+          )) : <div className="p-[24px_8px] text-center text-[12px] text-[var(--mut)]">No AI calls recorded today.</div>}
+        </div>
+        <div className="hidden overflow-x-auto md:block">
           <table className="w-full border-collapse text-[12px]">
             <thead>
               <tr className="bg-[var(--card2)] text-[var(--mut)]">
