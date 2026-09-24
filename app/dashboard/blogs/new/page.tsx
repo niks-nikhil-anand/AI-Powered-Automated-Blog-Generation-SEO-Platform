@@ -160,6 +160,21 @@ function ContentPlanModal({
   const [category, setCategory] = useState(initialValues?.category ?? "");
   const [json, setJson] = useState(initialValues?.json ?? "");
   const [startNow, setStartNow] = useState(mode === "create");
+  const [categoryOptions, setCategoryOptions] = useState(CATEGORIES);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      fetch("/api/categories?active=true&pageSize=100", { cache: "no-store" })
+        .then((response) => response.json())
+        .then((data) => {
+          if (Array.isArray(data.categories) && data.categories.length > 0) {
+            setCategoryOptions(data.categories.map((item: { name: string }) => ({ value: item.name, label: item.name })));
+          }
+        })
+        .catch(() => {});
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   if (!open) return null;
 
@@ -180,15 +195,15 @@ function ContentPlanModal({
     }
   };
 
-  const knownCategories = CATEGORIES.map((c) => c.value);
+  const knownCategories = categoryOptions.map((c) => c.value);
   const isCustomCategory = category && !knownCategories.includes(category as typeof knownCategories[number]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-[16px]">
-      <div className="w-full max-w-[720px] rounded-[12px] border border-[var(--bd)] bg-[var(--card)] shadow-[0_24px_80px_rgba(15,23,42,0.35)]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/45 p-3 sm:p-6">
+      <div role="dialog" aria-modal="true" aria-labelledby="content-plan-modal-title" className="my-auto flex max-h-[calc(100dvh-24px)] w-full max-w-[720px] flex-col overflow-hidden rounded-[12px] border border-[var(--bd)] bg-[var(--card)] shadow-[0_24px_80px_rgba(15,23,42,0.35)]">
         <div className="flex items-center justify-between gap-[12px] border-b border-[var(--bd)] p-[14px_16px]">
           <div>
-            <h2 className="text-[15px] font-bold text-[var(--fg)]">
+            <h2 id="content-plan-modal-title" className="text-[15px] font-bold text-[var(--fg)]">
               {mode === "edit" ? "Update content plan" : "Create content plan"}
             </h2>
             <p className="mt-[2px] text-[11px] text-[var(--mut)]">Save a plan to the backlog without leaving this page.</p>
@@ -197,7 +212,7 @@ function ContentPlanModal({
             type="button"
             aria-label="Close modal"
             onClick={onClose}
-            className="inline-flex size-[30px] items-center justify-center rounded-[8px] border border-[var(--bd)] bg-[var(--card)] text-[var(--fg2)] hover:border-[var(--bd2)]"
+            className="inline-flex size-11 items-center justify-center rounded-[8px] border border-[var(--bd)] bg-[var(--card)] text-[var(--fg2)] hover:border-[var(--bd2)] sm:size-[34px]"
           >
             <X className="size-[15px]" />
           </button>
@@ -208,7 +223,7 @@ function ContentPlanModal({
             event.preventDefault();
             onSubmit({ title, category, json, startNow });
           }}
-          className="flex flex-col gap-[13px] p-[16px]"
+          className="flex min-h-0 flex-col gap-[13px] overflow-y-auto p-[16px]"
         >
           <div className="grid grid-cols-1 gap-[12px] md:grid-cols-[1fr_190px]">
             <div>
@@ -230,20 +245,29 @@ function ContentPlanModal({
               <label className={labelClass} htmlFor="content-plan-category">
                 Category
               </label>
-              <select
-                id="content-plan-category"
-                value={category}
-                onChange={(event) => setCategory(event.target.value)}
-                className={inputClass}
-              >
-                <option value="">Select category</option>
-                {CATEGORIES.map((item) => (
-                  <option key={item.value} value={item.value}>
-                    {item.label}
-                  </option>
-                ))}
-                {isCustomCategory && <option value={category}>{category}</option>}
-              </select>
+              <div className="flex flex-col gap-[6px]">
+                <select
+                  id="content-plan-category"
+                  value={category}
+                  onChange={(event) => setCategory(event.target.value)}
+                  className={inputClass}
+                >
+                  <option value="">Select category</option>
+                  {categoryOptions.map((item) => (
+                    <option key={item.value} value={item.value}>
+                      {item.label}
+                    </option>
+                  ))}
+                  {isCustomCategory && <option value={category}>{category}</option>}
+                </select>
+                <Link
+                  href="/dashboard/categories"
+                  className="inline-flex min-h-[40px] items-center justify-center rounded-[8px] border border-[var(--bd)] bg-[var(--card2)] px-[10px] text-[11px] font-semibold text-[var(--indigo)] transition-colors hover:border-[var(--indigo)] sm:min-h-[30px]"
+                >
+                  <Plus className="mr-[5px] size-[13px]" />
+                  Add category
+                </Link>
+              </div>
             </div>
           </div>
 
@@ -258,7 +282,7 @@ function ContentPlanModal({
               value={json}
               onChange={(event) => handleJsonChange(event.target.value)}
               placeholder={JSON_PLACEHOLDER}
-              className="w-full resize-y rounded-[8px] border border-[var(--bd)] bg-[var(--card)] p-[10px] font-mono text-[11.5px] leading-[1.55] text-[var(--fg)] outline-none transition-colors focus:border-[var(--indigo)]"
+              className="min-h-[220px] w-full resize-y rounded-[8px] border border-[var(--bd)] bg-[var(--card)] p-[10px] font-mono text-[11.5px] leading-[1.55] text-[var(--fg)] outline-none transition-colors focus:border-[var(--indigo)]"
             />
             <p className="mt-[5px] text-[10.5px] text-[var(--mut)]">
               Optional. Add any valid content-plan fields such as keywords, outlineJson, audience, tone, priority, or sources.
@@ -281,18 +305,18 @@ function ContentPlanModal({
             </div>
           )}
 
-          <div className="flex items-center justify-end gap-[8px] border-t border-[var(--bd)] pt-[13px]">
+          <div className="sticky bottom-0 flex items-center justify-end gap-[8px] border-t border-[var(--bd)] bg-[var(--card)] pt-[13px]">
             <button
               type="button"
               onClick={onClose}
-              className="h-[32px] rounded-[8px] border border-[var(--bd)] bg-[var(--card)] px-[12px] text-[11.5px] font-semibold text-[var(--fg2)] hover:border-[var(--bd2)]"
+              className="h-[44px] rounded-[8px] border border-[var(--bd)] bg-[var(--card)] px-[12px] text-[11.5px] font-semibold text-[var(--fg2)] hover:border-[var(--bd2)] sm:h-[34px]"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={saving}
-              className="inline-flex h-[32px] items-center gap-[6px] rounded-[8px] bg-[var(--indigo)] px-[13px] text-[11.5px] font-semibold text-white disabled:opacity-50"
+              className="inline-flex h-[44px] items-center gap-[6px] rounded-[8px] bg-[var(--indigo)] px-[13px] text-[11.5px] font-semibold text-white disabled:opacity-50 sm:h-[34px]"
             >
               <Check className="size-[13px]" />
               {saving ? (mode === "edit" ? "Updating..." : "Saving...") : mode === "edit" ? "Update plan" : "Save plan"}
@@ -318,11 +342,11 @@ function DeletePlanModal({
   if (!row) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-[16px]">
-      <div className="w-full max-w-[460px] rounded-[12px] border border-[var(--bd)] bg-[var(--card)] shadow-[0_24px_80px_rgba(15,23,42,0.35)]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/45 p-3 sm:p-6">
+      <div role="dialog" aria-modal="true" aria-labelledby="delete-plan-modal-title" className="my-auto w-full max-w-[460px] rounded-[12px] border border-[var(--bd)] bg-[var(--card)] shadow-[0_24px_80px_rgba(15,23,42,0.35)]">
         <div className="flex items-center justify-between gap-[12px] border-b border-[var(--bd)] p-[14px_16px]">
           <div>
-            <h2 className="text-[15px] font-bold text-[var(--fg)]">Delete content plan</h2>
+            <h2 id="delete-plan-modal-title" className="text-[15px] font-bold text-[var(--fg)]">Delete content plan</h2>
             <p className="mt-[2px] text-[11px] text-[var(--mut)]">This removes the saved plan from the backlog.</p>
           </div>
           <button
@@ -330,7 +354,7 @@ function DeletePlanModal({
             aria-label="Close delete confirmation"
             disabled={deleting}
             onClick={onClose}
-            className="inline-flex size-[30px] items-center justify-center rounded-[8px] border border-[var(--bd)] bg-[var(--card)] text-[var(--fg2)] hover:border-[var(--bd2)] disabled:opacity-50"
+            className="inline-flex size-11 items-center justify-center rounded-[8px] border border-[var(--bd)] bg-[var(--card)] text-[var(--fg2)] hover:border-[var(--bd2)] disabled:opacity-50 sm:size-[34px]"
           >
             <X className="size-[15px]" />
           </button>
@@ -352,7 +376,7 @@ function DeletePlanModal({
             type="button"
             disabled={deleting}
             onClick={onClose}
-            className="h-[32px] rounded-[8px] border border-[var(--bd)] bg-[var(--card)] px-[12px] text-[11.5px] font-semibold text-[var(--fg2)] hover:border-[var(--bd2)] disabled:opacity-50"
+            className="h-[44px] rounded-[8px] border border-[var(--bd)] bg-[var(--card)] px-[12px] text-[11.5px] font-semibold text-[var(--fg2)] hover:border-[var(--bd2)] disabled:opacity-50 sm:h-[34px]"
           >
             Keep plan
           </button>
@@ -360,7 +384,7 @@ function DeletePlanModal({
             type="button"
             disabled={deleting}
             onClick={onConfirm}
-            className="inline-flex h-[32px] items-center gap-[6px] rounded-[8px] bg-[var(--rose)] px-[13px] text-[11.5px] font-semibold text-white disabled:opacity-50"
+            className="inline-flex h-[44px] items-center gap-[6px] rounded-[8px] bg-[var(--rose)] px-[13px] text-[11.5px] font-semibold text-white disabled:opacity-50 sm:h-[34px]"
           >
             <Trash2 className="size-[13px]" />
             {deleting ? "Deleting..." : "Delete"}
@@ -585,7 +609,7 @@ export default function NewBlogPage() {
 
   return (
     <div className="flex w-full flex-col gap-[13px]">
-      <div className="flex flex-wrap items-end justify-between gap-[14px]">
+      <div className="flex flex-col gap-[12px] sm:flex-row sm:flex-wrap sm:items-end sm:justify-between">
         <div>
           <h1 className="text-[19px] font-extrabold tracking-tight text-[var(--fg)]">Content Plan</h1>
           <p className="mt-[3px] text-[12px] text-[var(--mut)]">
@@ -600,14 +624,14 @@ export default function NewBlogPage() {
             setModalVersion((version) => version + 1);
             setModalOpen(true);
           }}
-          className="inline-flex h-[34px] items-center gap-[7px] rounded-[8px] bg-[var(--indigo)] px-[13px] text-[12px] font-semibold text-white shadow-sm transition-opacity hover:opacity-90"
+          className="inline-flex h-[44px] w-full items-center justify-center gap-[7px] rounded-[8px] bg-[var(--indigo)] px-[13px] text-[12px] font-semibold text-white shadow-sm transition-opacity hover:opacity-90 sm:h-[34px] sm:w-auto"
         >
           <Plus className="size-[14px]" />
           Add content plan
         </button>
       </div>
 
-      <div className="grid grid-cols-1 gap-[10px] md:grid-cols-4">
+      <div className="grid grid-cols-2 gap-[10px] md:grid-cols-4">
         {[
           { label: "Total plans", value: planStats.total, icon: FolderKanban },
           { label: "Backlog", value: planStats.pending, icon: ListFilter },
@@ -626,7 +650,7 @@ export default function NewBlogPage() {
 
       <section className="overflow-hidden rounded-[12px] border border-[var(--bd)] bg-[var(--card)] shadow-[var(--shadow)]">
         <div className="flex flex-wrap items-center gap-[8px] border-b border-[var(--bd)] bg-[var(--card2)] p-[10px_12px]">
-          <div className="flex h-[30px] min-w-[260px] flex-1 items-center gap-[7px] rounded-[8px] border border-[var(--bd)] bg-[var(--card)] px-[10px] text-[var(--faint)]">
+          <div className="flex h-[44px] w-full min-w-0 items-center gap-[7px] rounded-[8px] border border-[var(--bd)] bg-[var(--card)] px-[10px] text-[var(--faint)] md:h-[34px] md:min-w-[260px] md:flex-1">
             <Search className="size-[13px]" />
             <input
               aria-label="Search content plans"
@@ -637,7 +661,7 @@ export default function NewBlogPage() {
             />
           </div>
 
-          <label className="inline-flex h-[30px] items-center gap-[6px] rounded-[8px] border border-[var(--bd)] bg-[var(--card)] px-[8px] text-[11.5px] font-semibold text-[var(--fg2)]">
+          <label className="inline-flex h-[44px] min-w-0 flex-1 items-center gap-[6px] rounded-[8px] border border-[var(--bd)] bg-[var(--card)] px-[8px] text-[11.5px] font-semibold text-[var(--fg2)] md:h-[34px] md:flex-none">
             <Filter className="size-[13px]" />
             <select
               aria-label="Filter by status"
@@ -654,7 +678,7 @@ export default function NewBlogPage() {
             </select>
           </label>
 
-          <label className="inline-flex h-[30px] items-center gap-[6px] rounded-[8px] border border-[var(--bd)] bg-[var(--card)] px-[8px] text-[11.5px] font-semibold text-[var(--fg2)]">
+          <label className="inline-flex h-[44px] min-w-0 flex-1 items-center gap-[6px] rounded-[8px] border border-[var(--bd)] bg-[var(--card)] px-[8px] text-[11.5px] font-semibold text-[var(--fg2)] md:h-[34px] md:flex-none">
             <ChevronDown className="size-[13px]" />
             <select
               aria-label="Filter by category"
@@ -671,7 +695,7 @@ export default function NewBlogPage() {
             </select>
           </label>
 
-          <label className="inline-flex h-[30px] items-center gap-[6px] rounded-[8px] border border-[var(--bd)] bg-[var(--card)] px-[8px] text-[11.5px] font-semibold text-[var(--fg2)]">
+          <label className="inline-flex h-[44px] w-full items-center gap-[6px] rounded-[8px] border border-[var(--bd)] bg-[var(--card)] px-[8px] text-[11.5px] font-semibold text-[var(--fg2)] md:h-[34px] md:w-auto">
             Group
             <select
               aria-label="Group content plans"
@@ -691,8 +715,8 @@ export default function NewBlogPage() {
           <div className="border-b border-[var(--bd)] px-[12px] py-[9px] text-[11.5px] text-[var(--fg2)]">{notice}</div>
         )}
 
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[980px] border-collapse text-[12px]">
+        <div className="hidden overflow-x-auto md:block">
+          <table className="w-full min-w-[700px] border-collapse text-[12px] min-[1200px]:min-w-[980px]">
             <thead>
               <tr className="border-b border-[var(--bd)] text-[var(--mut)]">
                 <th className="p-[9px_12px] text-left">
@@ -704,13 +728,13 @@ export default function NewBlogPage() {
                 <th className="p-[9px_8px] text-left">
                   <SortButton label="Status" active={sortKey === "status"} direction={sortDirection} onClick={() => setSort("status")} />
                 </th>
-                <th className="p-[9px_8px] text-left">
+                <th className="hidden min-[1200px]:table-cell p-[9px_8px] text-left">
                   <SortButton label="Stage" active={sortKey === "stage"} direction={sortDirection} onClick={() => setSort("stage")} />
                 </th>
-                <th className="p-[9px_8px] text-left">
+                <th className="hidden min-[1200px]:table-cell p-[9px_8px] text-left">
                   <SortButton label="Priority" active={sortKey === "priority"} direction={sortDirection} onClick={() => setSort("priority")} />
                 </th>
-                <th className="p-[9px_8px] text-left">
+                <th className="hidden min-[1200px]:table-cell p-[9px_8px] text-left">
                   <SortButton label="Created" active={sortKey === "createdAt"} direction={sortDirection} onClick={() => setSort("createdAt")} />
                 </th>
                 <th className="p-[9px_12px] text-right text-[10px] font-bold uppercase tracking-wider text-[var(--mut)]">Actions</th>
@@ -786,14 +810,14 @@ export default function NewBlogPage() {
                               {row.status}
                             </span>
                           </td>
-                          <td className="p-[10px_8px] text-[11px] text-[var(--mut)]">
+                          <td className="hidden min-[1200px]:table-cell p-[10px_8px] text-[11px] text-[var(--mut)]">
                             <div>{row.currentStage ?? "-"}</div>
                             <div className="mt-[2px] font-mono text-[9.5px] text-[var(--faint)]">
                               plan:{row.planStatus} · outline:{row.outlineStatus}
                             </div>
                           </td>
-                          <td className="p-[10px_8px] font-mono text-[11px] text-[var(--fg2)]">{row.priority}</td>
-                          <td className="p-[10px_8px] text-[11px] text-[var(--mut)] whitespace-nowrap">{formatDate(row.createdAt)}</td>
+                          <td className="hidden min-[1200px]:table-cell p-[10px_8px] font-mono text-[11px] text-[var(--fg2)]">{row.priority}</td>
+                          <td className="hidden min-[1200px]:table-cell p-[10px_8px] text-[11px] text-[var(--mut)] whitespace-nowrap">{formatDate(row.createdAt)}</td>
                           <td className="p-[10px_12px]">
                             <div className="flex justify-end gap-[6px]">
                               {row.status === "PENDING" && (
@@ -857,6 +881,45 @@ export default function NewBlogPage() {
               )}
             </tbody>
           </table>
+        </div>
+
+        <div className="divide-y divide-[var(--bd)] md:hidden">
+          {rowsLoading && rows.length === 0 ? (
+            Array.from({ length: 4 }).map((_, index) => <div key={index} className="p-4"><Skeleton className="h-5 w-4/5" /><Skeleton className="mt-3 h-4 w-full" /></div>)
+          ) : pageRows.length === 0 ? (
+            <p className="p-8 text-center text-[12px] text-[var(--mut)]">No content plans match the current filters.</p>
+          ) : groupedPageRows.map((group) => (
+            <React.Fragment key={group.label}>
+              {groupBy !== "none" && <p className="bg-[var(--card2)] px-4 py-2 text-[10.5px] font-bold uppercase tracking-wider text-[var(--fg2)]">{group.label} · {group.rows.length}</p>}
+              {group.rows.map((row) => {
+                const style = statusStyle(row.status);
+                const primaryAction = row.status === "PENDING" ? "start" : row.status === "FAILED" ? "retry" : row.status === "PROCESSING" ? "cancel" : null;
+                return (
+                  <article key={row.id} className="p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <Link href={`/dashboard/blogs/input/${row.id}`} className="text-[14px] font-semibold leading-snug text-[var(--fg)] hover:underline">{row.title}</Link>
+                        <p className="mt-1 truncate font-mono text-[10px] text-[var(--faint)]">{row.slug}</p>
+                      </div>
+                      <span className="shrink-0 rounded-full border px-2 py-1 text-[10px] font-bold" style={{ background: style.bg, color: style.fg, borderColor: style.bd }}>{row.status}</span>
+                    </div>
+                    <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] text-[var(--mut)]">
+                      <span>Category <strong className="ml-1 text-[var(--fg2)]">{row.category ?? "Uncategorized"}</strong></span>
+                      <span>Priority <strong className="ml-1 font-mono text-[var(--fg2)]">{row.priority}</strong></span>
+                      <span>Stage <strong className="ml-1 text-[var(--fg2)]">{row.currentStage ?? "-"}</strong></span>
+                      <span>Created <strong className="ml-1 text-[var(--fg2)]">{formatDate(row.createdAt)}</strong></span>
+                    </div>
+                    {row.failureReason && <p className="mt-2 text-[11px] text-[var(--rose)]">{row.failureReason}</p>}
+                    <div className="mt-4 flex gap-2">
+                      {primaryAction && <button type="button" onClick={() => rowAction(row.id, primaryAction)} className={`h-11 flex-1 rounded-[8px] border bg-[var(--card)] px-3 text-[11px] font-semibold ${primaryAction === "cancel" ? "border-[var(--rose)] text-[var(--rose)]" : "border-[var(--bd)] text-[var(--fg2)]"}`}>{primaryAction === "start" ? "Start" : primaryAction === "retry" ? "Retry" : "Cancel"}</button>}
+                      <button type="button" aria-label={`Edit ${row.title}`} onClick={() => { setModalError(null); setEditTarget(row); setModalVersion((version) => version + 1); setModalOpen(true); }} className="inline-flex size-11 items-center justify-center rounded-[8px] border border-[var(--bd)] bg-[var(--card)] text-[var(--fg2)]"><Pencil className="size-[15px]" /></button>
+                      <button type="button" aria-label={`Delete ${row.title}`} disabled={deletingId === row.id} onClick={() => setDeleteTarget(row)} className="inline-flex size-11 items-center justify-center rounded-[8px] border border-[var(--bd)] bg-[var(--card)] text-[var(--rose)] disabled:opacity-50"><Trash2 className="size-[15px]" /></button>
+                    </div>
+                  </article>
+                );
+              })}
+            </React.Fragment>
+          ))}
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-[10px] border-t border-[var(--bd)] p-[9px_12px] text-[11px] text-[var(--mut)]">
