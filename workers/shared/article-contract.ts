@@ -1,4 +1,4 @@
-import { containsKeyword } from "./seo-keyword";
+import { cleanBriefText, containsKeyword } from "./seo-keyword";
 
 export type ArticleOutlineSection = {
   heading?: unknown;
@@ -56,7 +56,7 @@ export function normalizeHeading(value: string): string {
 }
 
 function stringArray(value: unknown): string[] {
-  return Array.isArray(value) ? value.map(String).map((item) => item.trim()).filter(Boolean) : [];
+  return Array.isArray(value) ? value.map(String).map(cleanBriefText).filter(Boolean) : [];
 }
 
 function includesText(content: string, needle: string): boolean {
@@ -166,7 +166,7 @@ export function validateArticleContract(input: ArticleContractInput): ArticleCon
     reasons.push(`Word count ${wordCount} exceeds the briefed maximum of ${input.wordBounds.max}`);
   }
   if (h1.length !== 1) reasons.push(`Expected exactly one H1, found ${h1.length}`);
-  const requiredH1 = input.requiredH1?.trim();
+  const requiredH1 = input.requiredH1 ? cleanBriefText(input.requiredH1) : "";
   if (requiredH1 && h1.length > 0 && normalizeHeading(h1[0]) !== normalizeHeading(requiredH1)) {
     reasons.push(`H1 does not match the briefed H1: expected "${requiredH1}", found "${h1[0]}"`);
   }
@@ -222,7 +222,7 @@ export function validateArticleContract(input: ArticleContractInput): ArticleCon
     if (unansweredFaqs.length > 0) reasons.push(`Briefed FAQ question(s) need substantive answers: ${unansweredFaqs.join(" | ")}`);
   }
 
-  const focusKeyword = input.focusKeyword?.trim();
+  const focusKeyword = input.focusKeyword ? cleanBriefText(input.focusKeyword) : "";
   if (focusKeyword) {
     const intro = content.split(/^##\s+/m)[0] ?? content;
     if (!includesText(content, focusKeyword)) reasons.push(`Missing focus keyword: ${focusKeyword}`);

@@ -4,7 +4,7 @@ import { generateVertexText, slugify, VertexQuotaError, type VertexTextResult } 
 import { getSetting, MODEL_SETTING_KEYS } from "../shared/settings";
 import { buildSectionPlan, clearSectionCache, generateAllSections, generateSection, type SectionArticleContext, type SectionSpec, DEFAULT_MUST_FOLLOW_RULES } from "./sections";
 import type { GroundedSource } from "./citations";
-import { ensureKeywordInTitle, ensureKeywordInH1, extractH1 } from "../shared/seo-keyword";
+import { cleanBriefText, containsKeyword, ensureKeywordInTitle, ensureKeywordInH1, extractH1 } from "../shared/seo-keyword";
 import { buildGlobalRulesBlock, formatViolation, reviewArticle } from "../shared/editorial-rules";
 import { resolveEditorialPolicy, type EditorialPolicy } from "../shared/editorial-policy";
 import { buildBriefDirectivesBlock, readBriefSpecs } from "../shared/brief";
@@ -382,12 +382,11 @@ export function enforceSingleH1(markdown: string, title: string, focusKeyword?: 
 
 function headingIncludes(text: string, needle?: string): boolean {
   if (!needle?.trim()) return true;
-  const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
-  return normalize(text).includes(normalize(needle));
+  return containsKeyword(text, needle);
 }
 
-function ensureFocusKeywordInH2(markdown: string, focusKeyword?: string): string {
-  const keyword = focusKeyword?.trim();
+export function ensureFocusKeywordInH2(markdown: string, focusKeyword?: string | null): string {
+  const keyword = focusKeyword ? cleanBriefText(focusKeyword) : "";
   if (!keyword) return markdown;
   const lines = markdown.split("\n");
   if (lines.some((line) => line.startsWith("## ") && headingIncludes(line, keyword))) return markdown;
@@ -401,6 +400,58 @@ function ensureFocusKeywordInH2(markdown: string, focusKeyword?: string): string
   const heading = lines[targetIndex].replace(/^##\s+/, "").trim();
   lines[targetIndex] = `## ${keyword}: ${heading}`;
   return lines.join("\n");
+}
+
+function requiredFaqQuestionsFrom(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return Array.from(
+    new Set(
+      value
+        .map((faq) => (faq && typeof faq === "object" && "question" in faq ? String((faq as { question: unknown }).question) : String(faq)))
+        .map(cleanBriefText)
+        .filter(Boolean)
+    )
+  );
+}
+
+function existingFaqQuestions(markdown: string): string[] {
+  const questions: string[] = [];
+  let inFaq = false;
+  for (const line of markdown.split("\n")) {
+    if (line.startsWith("## ")) {
+      inFaq = /\bfaqs?\b|frequently asked questions/i.test(line.slice(3));
+      continue;
+    }
+    if (inFaq && line.startsWith("### ")) questions.push(cleanBriefText(line.slice(4)));
+  }
+  return questions;
+}
+
+function faqFallbackAnswer(question: string): string {
+  return `This depends on the implementation details behind "${question}". Treat the behavior as part of your application contract, validate inputs, enforce the relevant authorization checks, and test the path before relying on it in production.`;
+}
+
+export function ensureBriefedFaqs(markdown: string, faqQuestions: unknown): string {
+  const required = requiredFaqQuestionsFrom(faqQuestions);
+  if (required.length === 0) return markdown;
+
+  const existing = existingFaqQuestions(markdown);
+  const missing = required.filter((question) => !existing.some((candidate) => headingIncludes(candidate, question)));
+  if (missing.length === 0) return markdown;
+
+  const addition = missing.map((question) => `### ${question}\n\n${faqFallbackAnswer(question)}`).join("\n\n");
+  const lines = markdown.trim().split("\n");
+  const faqIndex = lines.findIndex((line) => line.startsWith("## ") && /\bfaqs?\b|frequently asked questions/i.test(line.slice(3)));
+  if (faqIndex === -1) return `${lines.join("\n").trim()}\n\n## FAQs\n\n${addition}`;
+
+  let insertAt = lines.length;
+  for (let index = faqIndex + 1; index < lines.length; index += 1) {
+    if (lines[index].startsWith("## ")) {
+      insertAt = index;
+      break;
+    }
+  }
+  return [...lines.slice(0, insertAt), "", addition, "", ...lines.slice(insertAt)].join("\n").trim();
 }
 
 function seoMetaDescription(candidate: string | undefined, title: string, keywords: string[]): string {
@@ -553,7 +604,12 @@ async function generateSectionedDraft(topic: string, description: string, contex
     .filter((draft) => !draft.fromCache)
     .map((draft) => ({ model: draft.model, usage: draft.usage }));
 
-  const assemble = () => ensureFocusKeywordInH2(enforceSingleH1(drafts.map((draft) => draft.markdown).join("\n\n"), title, focusKeyword), focusKeyword);
+  const faqQuestions = Array.isArray(context.outline?.faqs) ? context.outline.faqs : [];
+  const assemble = () =>
+    ensureBriefedFaqs(
+      ensureFocusKeywordInH2(enforceSingleH1(drafts.map((draft) => draft.markdown).join("\n\n"), title, focusKeyword), focusKeyword),
+      faqQuestions
+    );
   let markdown = assemble();
 
   // A final, bounded expansion pass avoids throwing away a nearly complete
@@ -583,7 +639,6 @@ async function generateSectionedDraft(topic: string, description: string, contex
   }
   if (countWords(markdown) < range.min) await clearSectionCache(context.blogInputId ?? "unknown");
 
-  const faqQuestions = Array.isArray(context.outline?.faqs) ? context.outline.faqs : [];
   const validateFinalDraft = () => {
     const contract = validateArticleContract({
       content: markdown,
@@ -703,6 +758,37 @@ async function generateSectionedDraft(topic: string, description: string, contex
 
   await runFinalRepairLoop();
 
+  if (range.max > 0 && (context.wordBounds ?? brief.wordBounds)?.max && countWords(markdown) > range.max) {
+    const configuredModel = await getSetting(MODEL_SETTING_KEYS.writing, env.VERTEX_MODEL);
+    const compressed = await generateTextWithQuotaFallback(
+      configuredModel,
+      `You are editing a technical article to fit a hard briefed maximum of ${range.max} words.
+
+Current word count: ${countWords(markdown)}.
+
+Compress the article without changing its contract:
+- Preserve the first H1 exactly.
+- Preserve every "## " heading exactly.
+- Preserve every "### " FAQ question exactly.
+- Preserve all [S1]-style citation markers, Markdown links, tables, and fenced code blocks that remain.
+- Keep the focus keyword "${focusKeyword ?? ""}" in the H1, introduction, and at least one H2.
+- Keep all required FAQ entries; shorten answers before deleting any FAQ.
+- Remove repetition, filler transitions, recap paragraphs, and padded examples first.
+- End with a complete sentence.
+
+Return ONLY the full compressed Markdown article.
+
+${markdown}`,
+      { maxOutputTokens: 8192, temperature: 0.2 }
+    );
+    markdown = ensureBriefedFaqs(ensureFocusKeywordInH2(enforceSingleH1(compressed.result.text, title, focusKeyword), focusKeyword), faqQuestions);
+    usage.promptTokens += compressed.result.usage.promptTokens;
+    usage.completionTokens += compressed.result.usage.completionTokens;
+    usageRecords.push({ model: compressed.model, usage: compressed.result.usage });
+    models.push(compressed.model);
+    await runFinalRepairLoop();
+  }
+
   // Optional Pro-class cohesion pass over the assembled article. Off by
   // default - enable only after measuring its value against its cost.
   // Deferrable (docs/VERTEX_429_RESOLUTION_PLAN.md Step 5): polish is
@@ -717,7 +803,7 @@ async function generateSectionedDraft(topic: string, description: string, contex
         `You are the editor of a developer blog. Polish this assembled article for voice cohesion and transitions between sections; remove any sentence duplicated across sections. Do not add, remove, or alter any specific claim (numbers, dates, versions, capabilities) - polish transitions and voice only. Preserve every "## " heading, every [S1]-style citation marker, every table, and every code block exactly as-is. Return ONLY the full article Markdown.\n\n${markdown}`,
         { maxOutputTokens: 8192, temperature: 0.2, timeoutMs: env.WRITING_TIMEOUT_MS, priority: "deferrable" }
       );
-      markdown = enforceSingleH1(edited.text, title, focusKeyword);
+      markdown = ensureBriefedFaqs(ensureFocusKeywordInH2(enforceSingleH1(edited.text, title, focusKeyword), focusKeyword), faqQuestions);
       usage.promptTokens += edited.usage.promptTokens;
       usage.completionTokens += edited.usage.completionTokens;
       usageRecords.push({ model: editorModel, usage: edited.usage });
