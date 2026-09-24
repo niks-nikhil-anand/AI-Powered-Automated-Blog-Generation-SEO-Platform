@@ -22,6 +22,7 @@
     "test:brief": "node --import tsx tests/brief-submission.test.ts",
     "migrate:manual-input": "tsx scripts/migrate-to-manual-input.ts",
     "worker:dev": "tsx workers/start.ts",
+    "worker:all": "concurrently --kill-others --names frontend,workers \"npm run dev\" \"npm run worker:dev\"",
     "worker:drill:rate-limit": "tsx workers/shared/rate-limit.drill.ts"
   },
   "dependencies": {
@@ -51,6 +52,7 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "concurrently": "^10.0.5",
     "eslint": "^9",
     "eslint-config-next": "16.2.12",
     "prisma": "^7.9.1",
