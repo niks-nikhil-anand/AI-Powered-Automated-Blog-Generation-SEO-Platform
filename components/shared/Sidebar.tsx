@@ -2,11 +2,14 @@
 
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useTheme } from "./ThemeProvider";
 
 interface SidebarProps {
   collapsed?: boolean;
+  drawer?: boolean;
+  onNavigate?: () => void;
   onToggleCollapse?: () => void;
 }
 
@@ -19,7 +22,7 @@ type WorkerHealthEntry = {
   state: string;
 };
 
-export function Sidebar({ collapsed: externalCollapsed, onToggleCollapse }: SidebarProps) {
+export function Sidebar({ collapsed: externalCollapsed, onToggleCollapse, drawer = false, onNavigate }: SidebarProps) {
   const pathname = usePathname();
   const { theme, toggleTheme } = useTheme();
   const [internalCollapsed, setInternalCollapsed] = useState(false);
@@ -128,6 +131,17 @@ export function Sidebar({ collapsed: externalCollapsed, onToggleCollapse }: Side
             </svg>
           ),
         },
+        {
+          label: "Categories",
+          href: "/dashboard/categories",
+          badge: null,
+          icon: (
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M20 13V6a2 2 0 0 0-2-2h-7l-7 7 7 7h7a2 2 0 0 0 2-2z" />
+              <circle cx="14" cy="9" r="1" />
+            </svg>
+          ),
+        },
       ],
     },
     {
@@ -179,15 +193,21 @@ export function Sidebar({ collapsed: externalCollapsed, onToggleCollapse }: Side
 
   return (
     <aside
-      className={`flex-none border-r border-[var(--bd)] bg-[var(--card)] flex flex-col sticky top-0 h-screen transition-all duration-200 z-50 ${
-        isCollapsed ? "w-[68px]" : "w-[252px]"
+      className={`dashboard-sidebar flex-none border-r border-[var(--bd)] bg-[var(--card)] flex flex-col sticky top-0 h-dvh transition-all duration-200 motion-reduce:transition-none z-50 ${
+        drawer ? "w-full" : isCollapsed ? "w-[68px]" : "w-[252px]"
       }`}
     >
       {/* Brand Header */}
-      <div className="h-[56px] flex-none flex items-center gap-[10px] px-[14px] border-b border-[var(--bd)]">
-        <div className="w-[28px] h-[28px] flex-none rounded-[8px] bg-gradient-to-br from-[var(--indigo)] to-purple-600 flex items-center justify-center font-extrabold text-[13px] tracking-tight text-white">
-          DK
-        </div>
+      <div className={`flex-none flex items-center border-b border-[var(--bd)] ${isCollapsed ? "flex-col justify-center gap-[8px] py-[12px]" : "h-[56px] gap-[10px] px-[14px]"}`}>
+        <Image
+          src="/logo/logo.png"
+          alt="DevKit Market logo"
+          width={32}
+          height={32}
+          className="h-[32px] w-[32px] flex-none rounded-[8px] object-contain"
+          priority
+          unoptimized
+        />
         {!isCollapsed && (
           <div className="min-w-0 overflow-hidden">
             <div className="font-bold text-[12.5px] tracking-tight whitespace-nowrap text-[var(--fg)]">
@@ -199,10 +219,10 @@ export function Sidebar({ collapsed: externalCollapsed, onToggleCollapse }: Side
           </div>
         )}
         <button
-          id="btn-sidebar-toggle"
-          aria-label="Collapse sidebar"
+          id={drawer ? "btn-drawer-close" : "btn-sidebar-toggle"}
+          aria-label={drawer ? "Close navigation" : isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
           onClick={handleToggle}
-          className="ml-auto flex-none w-[24px] h-[24px] rounded-[6px] border border-[var(--bd)] bg-transparent text-[var(--mut)] flex items-center justify-center hover:bg-[var(--card2)] hover:text-[var(--fg)] transition-colors"
+          className={`${isCollapsed ? "" : "ml-auto"} flex-none w-[44px] h-[44px] rounded-[6px] border border-[var(--bd)] bg-transparent text-[var(--mut)] flex items-center justify-center hover:bg-[var(--card2)] hover:text-[var(--fg)] transition-colors`}
         >
           <svg
             width="13"
@@ -214,7 +234,7 @@ export function Sidebar({ collapsed: externalCollapsed, onToggleCollapse }: Side
             strokeLinecap="round"
             className={`transition-transform duration-200 ${isCollapsed ? "rotate-180" : ""}`}
           >
-            <path d="M15 18l-6-6 6-6" />
+            <path d={drawer ? "M6 6l12 12M18 6L6 18" : "M15 18l-6-6 6-6"} />
           </svg>
         </button>
       </div>
@@ -297,7 +317,10 @@ export function Sidebar({ collapsed: externalCollapsed, onToggleCollapse }: Side
                 <Link
                   key={item.href}
                   href={item.href}
-                  className={`flex items-center gap-[10px] w-full p-[8px_9px] rounded-[8px] border text-[12.5px] font-medium whitespace-nowrap overflow-hidden transition-all ${
+                  aria-label={item.label}
+                  aria-current={isActive ? "page" : undefined}
+                  onClick={onNavigate}
+                  className={`flex min-h-[44px] items-center gap-[10px] w-full p-[8px_9px] rounded-[8px] border text-[12.5px] font-medium whitespace-nowrap overflow-hidden transition-all ${
                     isActive
                       ? "bg-[var(--tint)] text-[var(--indigo)] border-[rgba(99,102,241,0.25)] font-semibold"
                       : "border-transparent bg-transparent text-[var(--fg2)] hover:bg-[var(--card2)] hover:text-[var(--fg)]"
@@ -368,21 +391,21 @@ export function Sidebar({ collapsed: externalCollapsed, onToggleCollapse }: Side
 
         <div className="flex items-center gap-[9px] p-[5px_4px]">
           <div className="w-[28px] h-[28px] flex-none rounded-full bg-gradient-to-br from-slate-700 to-slate-900 text-white flex items-center justify-center text-[11px] font-bold">
-            --
+            NA
           </div>
           {!isCollapsed && (
             <div className="min-w-0">
               <div className="text-[11.5px] font-semibold whitespace-nowrap overflow-hidden text-ellipsis text-[var(--fg)]">
-                Account
+                Nikhil Anand
               </div>
-              <div className="text-[10px] text-[var(--mut)]">Platform Owner</div>
+              <div className="text-[10px] text-[var(--mut)]">Account admin</div>
             </div>
           )}
           <button
-            id="btn-theme-sidebar"
+            id={drawer ? "btn-theme-drawer" : "btn-theme-sidebar"}
             aria-label="Toggle light and dark mode"
             onClick={toggleTheme}
-            className="ml-auto flex-none w-[26px] h-[26px] rounded-[7px] border border-[var(--bd)] bg-[var(--card)] text-[var(--mut)] flex items-center justify-center hover:text-[var(--fg)] hover:border-[var(--bd2)] transition-colors"
+            className={`${isCollapsed ? "hidden" : "ml-auto"} flex-none w-[44px] h-[44px] rounded-[7px] border border-[var(--bd)] bg-[var(--card)] text-[var(--mut)] flex items-center justify-center hover:text-[var(--fg)] hover:border-[var(--bd2)] transition-colors`}
           >
             {theme === "dark" ? (
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
