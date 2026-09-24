@@ -57,12 +57,19 @@ model Job {
 }
 
 model Category {
-  id        String   @id @default(cuid())
-  name      String   @unique
-  slug      String   @unique
-  blogs     Blog[]
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id          String      @id @default(cuid())
+  name        String      @unique
+  slug        String      @unique
+  description String?
+  color       String      @default("#6366f1")
+  isActive    Boolean     @default(true)
+  sortOrder   Int         @default(0)
+  blogs       Blog[]
+  blogInputs  BlogInput[]
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@index([isActive, sortOrder])
 }
 
 model Asset {
@@ -237,6 +244,8 @@ model BlogInput {
   /// Target word count for the finished article.
   contentLength     Int?     @default(2000)
   category          String?
+  categoryId        String?
+  categoryRef       Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
 
   /// Optional pre-structured outline supplied by the user:
   /// { sections: [{ heading, intent, bullets }], faqs: [{ question, answer }] }.
@@ -278,6 +287,7 @@ model BlogInput {
 
   @@index([status])
   @@index([priority])
+  @@index([categoryId])
   @@index([createdAt])
   @@index([processedAt])
 }
