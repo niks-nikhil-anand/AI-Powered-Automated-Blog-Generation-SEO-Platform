@@ -1,3 +1,5 @@
+import { cleanBriefText } from "../../../../workers/shared/seo-keyword";
+
 /**
  * The rich authoring brief (schemaVersion "1.0") - the nested JSON an editor
  * writes - normalized onto the flat submission the pipeline speaks.
@@ -33,7 +35,7 @@ function record(value: unknown): Record<string, unknown> {
 
 function str(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
-  const trimmed = value.trim();
+  const trimmed = cleanBriefText(value);
   return trimmed.length > 0 ? trimmed : undefined;
 }
 

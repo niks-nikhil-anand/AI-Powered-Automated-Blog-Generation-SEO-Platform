@@ -584,7 +584,7 @@ export default function NewBlogPage() {
   const statuses = statusCounts.map((row) => row.status).sort();
 
   return (
-    <div className="flex max-w-[1180px] flex-col gap-[13px]">
+    <div className="flex w-full flex-col gap-[13px]">
       <div className="flex flex-wrap items-end justify-between gap-[14px]">
         <div>
           <h1 className="text-[19px] font-extrabold tracking-tight text-[var(--fg)]">Content Plan</h1>

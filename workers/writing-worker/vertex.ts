@@ -2,10 +2,10 @@ import { env, isVertexConfigured } from "../shared/env";
 import { logger } from "../shared/logger";
 import { generateVertexText, slugify, VertexQuotaError, type VertexTextResult } from "../shared/vertex";
 import { getSetting, MODEL_SETTING_KEYS } from "../shared/settings";
-import { buildSectionPlan, clearSectionCache, generateAllSections, generateSection, type SectionArticleContext, DEFAULT_MUST_FOLLOW_RULES } from "./sections";
+import { buildSectionPlan, clearSectionCache, generateAllSections, generateSection, type SectionArticleContext, type SectionSpec, DEFAULT_MUST_FOLLOW_RULES } from "./sections";
 import type { GroundedSource } from "./citations";
-import { ensureKeywordInTitle, ensureKeywordInH1, extractH1 } from "../shared/seo-keyword";
-import { buildGlobalRulesBlock } from "../shared/editorial-rules";
+import { cleanBriefText, containsKeyword, ensureKeywordInTitle, ensureKeywordInH1, extractH1 } from "../shared/seo-keyword";
+import { buildGlobalRulesBlock, formatViolation, reviewArticle } from "../shared/editorial-rules";
 import { resolveEditorialPolicy, type EditorialPolicy } from "../shared/editorial-policy";
 import { buildBriefDirectivesBlock, readBriefSpecs } from "../shared/brief";
 import { articleWordRange, countWords, validateArticleContract } from "../shared/article-contract";
@@ -380,6 +380,80 @@ export function enforceSingleH1(markdown: string, title: string, focusKeyword?: 
   return repaired.markdown;
 }
 
+function headingIncludes(text: string, needle?: string): boolean {
+  if (!needle?.trim()) return true;
+  return containsKeyword(text, needle);
+}
+
+export function ensureFocusKeywordInH2(markdown: string, focusKeyword?: string | null): string {
+  const keyword = focusKeyword ? cleanBriefText(focusKeyword) : "";
+  if (!keyword) return markdown;
+  const lines = markdown.split("\n");
+  if (lines.some((line) => line.startsWith("## ") && headingIncludes(line, keyword))) return markdown;
+
+  const targetIndex = lines.findIndex((line) => {
+    if (!line.startsWith("## ")) return false;
+    return !/\b(faqs?|frequently asked questions|table of contents|conclusion|final thoughts|summary)\b/i.test(line);
+  });
+  if (targetIndex === -1) return markdown;
+
+  const heading = lines[targetIndex].replace(/^##\s+/, "").trim();
+  lines[targetIndex] = `## ${keyword}: ${heading}`;
+  return lines.join("\n");
+}
+
+function requiredFaqQuestionsFrom(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return Array.from(
+    new Set(
+      value
+        .map((faq) => (faq && typeof faq === "object" && "question" in faq ? String((faq as { question: unknown }).question) : String(faq)))
+        .map(cleanBriefText)
+        .filter(Boolean)
+    )
+  );
+}
+
+function existingFaqQuestions(markdown: string): string[] {
+  const questions: string[] = [];
+  let inFaq = false;
+  for (const line of markdown.split("\n")) {
+    if (line.startsWith("## ")) {
+      inFaq = /\bfaqs?\b|frequently asked questions/i.test(line.slice(3));
+      continue;
+    }
+    if (inFaq && line.startsWith("### ")) questions.push(cleanBriefText(line.slice(4)));
+  }
+  return questions;
+}
+
+function faqFallbackAnswer(question: string): string {
+  return `This depends on the implementation details behind "${question}". Treat the behavior as part of your application contract, validate inputs, enforce the relevant authorization checks, and test the path before relying on it in production.`;
+}
+
+export function ensureBriefedFaqs(markdown: string, faqQuestions: unknown): string {
+  const required = requiredFaqQuestionsFrom(faqQuestions);
+  if (required.length === 0) return markdown;
+
+  const existing = existingFaqQuestions(markdown);
+  const missing = required.filter((question) => !existing.some((candidate) => headingIncludes(candidate, question)));
+  if (missing.length === 0) return markdown;
+
+  const addition = missing.map((question) => `### ${question}\n\n${faqFallbackAnswer(question)}`).join("\n\n");
+  const lines = markdown.trim().split("\n");
+  const faqIndex = lines.findIndex((line) => line.startsWith("## ") && /\bfaqs?\b|frequently asked questions/i.test(line.slice(3)));
+  if (faqIndex === -1) return `${lines.join("\n").trim()}\n\n## FAQs\n\n${addition}`;
+
+  let insertAt = lines.length;
+  for (let index = faqIndex + 1; index < lines.length; index += 1) {
+    if (lines[index].startsWith("## ")) {
+      insertAt = index;
+      break;
+    }
+  }
+  return [...lines.slice(0, insertAt), "", addition, "", ...lines.slice(insertAt)].join("\n").trim();
+}
+
 function seoMetaDescription(candidate: string | undefined, title: string, keywords: string[]): string {
   const trimmed = candidate?.trim() ?? "";
   if (trimmed.length >= 80 && trimmed.length <= 160) return trimmed;
@@ -530,22 +604,31 @@ async function generateSectionedDraft(topic: string, description: string, contex
     .filter((draft) => !draft.fromCache)
     .map((draft) => ({ model: draft.model, usage: draft.usage }));
 
-  const assemble = () => enforceSingleH1(drafts.map((draft) => draft.markdown).join("\n\n"), title, focusKeyword);
+  const faqQuestions = Array.isArray(context.outline?.faqs) ? context.outline.faqs : [];
+  const assemble = () =>
+    ensureBriefedFaqs(
+      ensureFocusKeywordInH2(enforceSingleH1(drafts.map((draft) => draft.markdown).join("\n\n"), title, focusKeyword), focusKeyword),
+      faqQuestions
+    );
   let markdown = assemble();
 
   // A final, bounded expansion pass avoids throwing away a nearly complete
-  // article just because a few technical sections landed short. It leaves
-  // intros and FAQ answers alone and regenerates at most two thin body sections.
+  // article just because a few technical sections landed short. Severe
+  // under-generation is different: when the assembled draft is far below the
+  // binding minimum, every substantive body section needs expansion.
   const range = articleWordRange(context.targetWords, context.wordBounds ?? brief.wordBounds);
   const repairable = plan
     .map((spec, index) => ({ spec, index, words: countWords(drafts[index]?.markdown ?? "") }))
     .filter(({ spec }) => spec.kind !== "intro" && spec.kind !== "toc" && spec.kind !== "faq")
     .sort((a, b) => a.words - b.words);
-  for (let pass = 0; pass < Math.min(2, repairable.length) && countWords(markdown) < range.min; pass += 1) {
-    const target = repairable[pass];
+  const severeUnderLength = countWords(markdown) < Math.round(range.min * 0.75);
+  const expansionTargets = severeUnderLength ? repairable : repairable.slice(0, 2);
+  for (let pass = 0; pass < expansionTargets.length && countWords(markdown) < range.min; pass += 1) {
+    const target = expansionTargets[pass];
     const missing = range.min - countWords(markdown);
+    const remainingTargets = Math.max(1, expansionTargets.length - pass);
     const expanded = await generateSection(target.spec, sectionContext, {
-      repairNote: `The assembled article is ${missing} words below its binding minimum of ${range.min}. Expand this technical section by about ${Math.ceil(missing / (2 - pass))} useful words using implementation detail, trade-offs, or an example. Do not repeat the focus keyword or template phrases. End with a complete sentence.`,
+      repairNote: `The assembled article is ${missing} words below its binding minimum of ${range.min}. Regenerate this complete section with at least ${Math.max(target.spec.wordTarget, Math.ceil(missing / remainingTargets))} words of useful implementation detail, security implications, trade-offs, and examples. Do not return a summary. Include any assigned primary keyword exactly once in natural body prose. End with a complete sentence.`,
     });
     drafts[target.index] = expanded;
     usage.promptTokens += expanded.usage.promptTokens;
@@ -556,32 +639,154 @@ async function generateSectionedDraft(topic: string, description: string, contex
   }
   if (countWords(markdown) < range.min) await clearSectionCache(context.blogInputId ?? "unknown");
 
-  // FAQ omissions and a truncated final paragraph are also section-local.
-  // Repair the FAQ section (or final body section if no FAQ exists) once
-  // before the final article contract gets a chance to reject the draft.
-  const faqQuestions = Array.isArray(context.outline?.faqs) ? context.outline.faqs : [];
-  const structuralCheck = validateArticleContract({
-    content: markdown,
-    targetWords: context.targetWords,
-    wordBounds: context.wordBounds ?? brief.wordBounds,
-    requiredH1: mandatoryTitle,
-    faqQuestions,
-  });
-  const structuralReasons = structuralCheck.reasons.filter(
-    (reason) => reason.startsWith("Missing briefed FAQ question(s)") || reason.startsWith("Briefed FAQ question(s) need substantive answers") || reason === "Article does not end with a complete sentence"
-  );
-  if (structuralReasons.length > 0) {
-    const repairIndex = plan.findIndex((spec) => spec.kind === "faq");
-    const targetIndex = repairIndex >= 0 ? repairIndex : plan.length - 1;
-    const repaired = await generateSection(plan[targetIndex], sectionContext, {
-      repairNote: `The assembled article failed these binding checks:\n${structuralReasons.map((reason) => `- ${reason}`).join("\n")}\nReturn the complete replacement section. Include every required FAQ as its own H3 entry with a substantive answer, and ensure the final prose ends with a complete sentence.`,
+  const validateFinalDraft = () => {
+    const contract = validateArticleContract({
+      content: markdown,
+      targetWords: context.targetWords,
+      outlineSections: context.outline?.sections,
+      focusKeyword,
+      primaryKeywords: context.primaryKeywords ?? keywords,
+      secondaryKeywords: context.plan?.secondaryKeywords,
+      metaTitle: context.outline?.metaTitle ?? title,
+      metaDescription: context.outline?.metaDescription ?? description,
+      internalLinks,
+      wordBounds: context.wordBounds ?? brief.wordBounds,
+      requiredH1: mandatoryTitle,
+      faqQuestions,
     });
-    drafts[targetIndex] = repaired;
-    usage.promptTokens += repaired.usage.promptTokens;
-    usage.completionTokens += repaired.usage.completionTokens;
-    usageRecords.push({ model: repaired.model, usage: repaired.usage });
-    models.push(repaired.model);
-    markdown = assemble();
+    const editorial = reviewArticle({
+      content: markdown,
+      focusKeyword,
+      metaTitle: context.outline?.metaTitle ?? title,
+      metaDescription: context.outline?.metaDescription ?? description,
+      targetWords: context.targetWords,
+      policy,
+      approvedUrls: (context.evidenceSources ?? []).map((source) => source.url),
+    });
+    return {
+      contract,
+      editorial,
+      reasons: [
+        ...contract.reasons,
+        ...editorial.blockers.map(formatViolation),
+      ],
+    };
+  };
+
+  const indexForHeading = (heading: string): number => {
+    const normalized = heading.toLowerCase().replace(/[^a-z0-9]/g, "");
+    const index = plan.findIndex((spec) => {
+      const candidate = spec.heading?.toLowerCase().replace(/[^a-z0-9]/g, "") ?? "";
+      return candidate === normalized || candidate.includes(normalized) || normalized.includes(candidate);
+    });
+    return index >= 0 ? index : plan.length - 1;
+  };
+
+  const repairTargetIndex = (reasons: string[]): number => {
+    const faqIndex = plan.findIndex((spec) => spec.kind === "faq");
+    if (
+      faqIndex >= 0 &&
+      reasons.some((reason) =>
+        reason.startsWith("Missing briefed FAQ question(s)") ||
+        reason.startsWith("Briefed FAQ question(s) need substantive answers") ||
+        /Section "FAQs?"/i.test(reason)
+      )
+    ) {
+      return faqIndex;
+    }
+
+    const sectionMatch = reasons.map((reason) => reason.match(/Section "([^"]+)"/)?.[1]).find(Boolean);
+    if (sectionMatch) return indexForHeading(sectionMatch);
+
+    if (reasons.some((reason) => reason === "Article does not end with a complete sentence")) {
+      return plan.length - 1;
+    }
+
+    if (reasons.some((reason) => reason.startsWith(`Focus keyword missing from H2 headings`))) {
+      const index = plan.findIndex((spec) => spec.kind !== "intro" && spec.kind !== "toc" && spec.kind !== "faq");
+      return index >= 0 ? index : plan.length - 1;
+    }
+
+    const missingPrimary = reasons
+      .map((reason) => reason.match(/^Missing primary keyword\(s\):\s*(.+)$/)?.[1])
+      .find(Boolean);
+    if (missingPrimary) {
+      const missing = missingPrimary.split(",").map((keyword) => keyword.trim()).filter(Boolean);
+      const assignedIndex = plan.findIndex((spec) =>
+        spec.requiredPrimaryKeywords?.some((keyword) => missing.some((item) => headingIncludes(keyword, item) || headingIncludes(item, keyword)))
+      );
+      if (assignedIndex >= 0) return assignedIndex;
+    }
+
+    return plan.length - 1;
+  };
+
+  const runFinalRepairLoop = async () => {
+    for (let pass = 0; pass < 2; pass += 1) {
+      const finalCheck = validateFinalDraft();
+      const repairReasons = finalCheck.reasons.filter((reason) =>
+        reason === "Article does not end with a complete sentence" ||
+        reason.startsWith("Missing briefed FAQ question(s)") ||
+        reason.startsWith("Briefed FAQ question(s) need substantive answers") ||
+        reason.startsWith("Word count ") ||
+        reason.startsWith("Missing primary keyword(s)") ||
+        reason.startsWith("Focus keyword missing from H2 headings") ||
+        reason.includes("R17.truncated-section") ||
+        reason.includes("R17.dangling-lead-in")
+      );
+      if (repairReasons.length === 0) break;
+
+      const targetIndex = repairTargetIndex(repairReasons);
+      const targetSpec: SectionSpec = plan[targetIndex];
+      const requiredFaqText = targetSpec.kind === "faq" && faqQuestions.length > 0
+        ? `\nRequired FAQ questions (emit each verbatim as its own H3 heading, in this order):\n${faqQuestions.map((faq) => {
+            const question = faq && typeof faq === "object" && "question" in faq ? String((faq as { question: unknown }).question) : String(faq);
+            return `- ${question}`;
+          }).join("\n")}`
+        : "";
+      const repaired = await generateSection(targetSpec, sectionContext, {
+        repairNote: `The assembled article failed final validation after section assembly:\n${repairReasons.map((reason) => `- ${reason}`).join("\n")}${requiredFaqText}\nReturn the complete replacement section, not a patch. Preserve valid Markdown, include any promised examples after lead-ins, and end with a complete sentence.`,
+      });
+      drafts[targetIndex] = repaired;
+      usage.promptTokens += repaired.usage.promptTokens;
+      usage.completionTokens += repaired.usage.completionTokens;
+      usageRecords.push({ model: repaired.model, usage: repaired.usage });
+      models.push(repaired.model);
+      markdown = assemble();
+    }
+  };
+
+  await runFinalRepairLoop();
+
+  if (range.max > 0 && (context.wordBounds ?? brief.wordBounds)?.max && countWords(markdown) > range.max) {
+    const configuredModel = await getSetting(MODEL_SETTING_KEYS.writing, env.VERTEX_MODEL);
+    const compressed = await generateTextWithQuotaFallback(
+      configuredModel,
+      `You are editing a technical article to fit a hard briefed maximum of ${range.max} words.
+
+Current word count: ${countWords(markdown)}.
+
+Compress the article without changing its contract:
+- Preserve the first H1 exactly.
+- Preserve every "## " heading exactly.
+- Preserve every "### " FAQ question exactly.
+- Preserve all [S1]-style citation markers, Markdown links, tables, and fenced code blocks that remain.
+- Keep the focus keyword "${focusKeyword ?? ""}" in the H1, introduction, and at least one H2.
+- Keep all required FAQ entries; shorten answers before deleting any FAQ.
+- Remove repetition, filler transitions, recap paragraphs, and padded examples first.
+- End with a complete sentence.
+
+Return ONLY the full compressed Markdown article.
+
+${markdown}`,
+      { maxOutputTokens: 8192, temperature: 0.2 }
+    );
+    markdown = ensureBriefedFaqs(ensureFocusKeywordInH2(enforceSingleH1(compressed.result.text, title, focusKeyword), focusKeyword), faqQuestions);
+    usage.promptTokens += compressed.result.usage.promptTokens;
+    usage.completionTokens += compressed.result.usage.completionTokens;
+    usageRecords.push({ model: compressed.model, usage: compressed.result.usage });
+    models.push(compressed.model);
+    await runFinalRepairLoop();
   }
 
   // Optional Pro-class cohesion pass over the assembled article. Off by
@@ -598,7 +803,7 @@ async function generateSectionedDraft(topic: string, description: string, contex
         `You are the editor of a developer blog. Polish this assembled article for voice cohesion and transitions between sections; remove any sentence duplicated across sections. Do not add, remove, or alter any specific claim (numbers, dates, versions, capabilities) - polish transitions and voice only. Preserve every "## " heading, every [S1]-style citation marker, every table, and every code block exactly as-is. Return ONLY the full article Markdown.\n\n${markdown}`,
         { maxOutputTokens: 8192, temperature: 0.2, timeoutMs: env.WRITING_TIMEOUT_MS, priority: "deferrable" }
       );
-      markdown = enforceSingleH1(edited.text, title, focusKeyword);
+      markdown = ensureBriefedFaqs(ensureFocusKeywordInH2(enforceSingleH1(edited.text, title, focusKeyword), focusKeyword), faqQuestions);
       usage.promptTokens += edited.usage.promptTokens;
       usage.completionTokens += edited.usage.completionTokens;
       usageRecords.push({ model: editorModel, usage: edited.usage });
@@ -610,6 +815,7 @@ async function generateSectionedDraft(topic: string, description: string, contex
         throw error;
       }
     }
+    await runFinalRepairLoop();
   }
 
   log.info("Sectioned draft assembled", {

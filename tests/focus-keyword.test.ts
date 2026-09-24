@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  cleanBriefText,
   containsKeyword,
   ensureKeywordInH1,
   ensureKeywordInTitle,
@@ -7,7 +8,7 @@ import {
   truncateAtWordBoundary,
 } from "../workers/shared/seo-keyword";
 import { validateArticleContract } from "../workers/shared/article-contract";
-import { enforceSingleH1 } from "../workers/writing-worker/vertex";
+import { enforceSingleH1, ensureBriefedFaqs, ensureFocusKeywordInH2 } from "../workers/writing-worker/vertex";
 import { enforceFocusKeyword } from "../workers/outline-worker/vertex";
 import { outlineFromUserInput } from "../workers/outline-worker/user-outline";
 
@@ -32,6 +33,8 @@ assert.equal(containsKeyword("next.js seo for beginners", KEYWORD), true);
 assert.equal(containsKeyword("Next.js SEO in 2026", KEYWORD), true);
 assert.equal(containsKeyword("Advanced Next.js SEO — Part 2", KEYWORD), true);
 assert.equal(containsKeyword("The developer’s guide to Next.js SEO", "The developer's guide to Next.js SEO"), true);
+assert.equal(cleanBriefText("Next.js Middleware to Proxy &#x20;"), "Next.js Middleware to Proxy");
+assert.equal(containsKeyword("## Next.js Middleware to Proxy patterns", "Next.js Middleware to Proxy &#x20;"), true);
 // The match stays literal: a reworded variant is a different search phrase.
 assert.equal(containsKeyword("Next JS SEO tips", KEYWORD), false);
 assert.equal(containsKeyword("SEO for Next.js", KEYWORD), false);
@@ -247,6 +250,55 @@ const noKeywordH2 = validateArticleContract({
   ].join("\n"),
 });
 assert.deepEqual(noKeywordH2.reasons, [`Focus keyword missing from H2 headings: ${KEYWORD}`]);
+
+const repairedH2 = ensureFocusKeywordInH2(
+  [
+    "# Next.js Middleware to Proxy Guide",
+    "",
+    "Next.js Middleware to Proxy helps teams reason about routing behavior.",
+    "",
+    "## Security patterns",
+    "",
+    "Body.",
+  ].join("\n"),
+  "Next.js Middleware to Proxy &#x20;"
+);
+assert.ok(repairedH2.includes("## Next.js Middleware to Proxy: Security patterns"));
+assert.deepEqual(
+  validateArticleContract({
+    targetWords: 20,
+    focusKeyword: "Next.js Middleware to Proxy &#x20;",
+    metaTitle: "Next.js Middleware to Proxy Guide",
+    metaDescription: "A practical guide to Next.js Middleware to Proxy behavior, security considerations, and production implementation details.",
+    content: repairedH2,
+  }).reasons,
+  []
+);
+
+const faqRepaired = ensureBriefedFaqs(
+  [
+    "# Next.js Server Actions",
+    "",
+    "Next.js Server Actions can mutate application state when called from the application interface.",
+    "",
+    "## Next.js Server Actions security",
+    "",
+    "Validate inputs and authorize the operation near the server-side mutation.",
+  ].join("\n"),
+  [{ question: "Are Next.js Server Actions public endpoints?" }]
+);
+assert.ok(faqRepaired.includes("## FAQs"));
+assert.ok(faqRepaired.includes("### Are Next.js Server Actions public endpoints?"));
+assert.ok(
+  !validateArticleContract({
+    targetWords: 40,
+    focusKeyword: "Next.js Server Actions",
+    metaTitle: "Next.js Server Actions security",
+    metaDescription: "A practical guide to Next.js Server Actions security, validation, authorization, and production behavior for developers.",
+    faqQuestions: [{ question: "Are Next.js Server Actions public endpoints?" }],
+    content: faqRepaired,
+  }).reasons.some((reason) => reason.startsWith("Missing briefed FAQ question(s)"))
+);
 
 console.log("All focus-keyword tests passed successfully!");
 // The Prisma/pg client imported transitively by the worker modules keeps a

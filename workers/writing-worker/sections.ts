@@ -244,14 +244,20 @@ function requiredFaqQuestions(faqs: OutlineFaqLike[]): string[] {
 
 function budgetSectionPlan(plan: SectionSpec[], context: SectionArticleContext): SectionSpec[] {
   const ceiling = (context.wordBounds ?? readBriefSpecs(context.specs).wordBounds)?.max;
+  const explicitMin = (context.wordBounds ?? readBriefSpecs(context.specs).wordBounds)?.min;
   // Stay below a binding ceiling so assembly, FAQ answers, and light editing
   // have room. The brief's maximum remains the final validator's authority.
-  const desired = ceiling && ceiling > 0
+  const desiredBase = ceiling && ceiling > 0
     ? Math.min(context.targetWords ?? Math.round(ceiling * 0.93), Math.floor(ceiling * 0.93))
     // Models commonly land below a per-section target. For briefs without a
     // ceiling, generate against a 40% larger internal budget so the assembled
     // draft reliably clears its required minimum.
     : context.targetWords ? Math.round(context.targetWords * 1.4) : undefined;
+  const desired = explicitMin && explicitMin > 0 && desiredBase
+    ? Math.max(desiredBase, Math.round(explicitMin * 1.15))
+    : explicitMin && explicitMin > 0
+      ? Math.round(explicitMin * 1.15)
+      : desiredBase;
   if (!desired || desired <= 0) return plan;
   const total = plan.reduce((sum, section) => sum + section.wordTarget, 0);
   if (total === desired) return plan;
@@ -470,7 +476,7 @@ Citation rules: when this section makes a factual claim about the topic, attach 
       ? `\nWeave in these keywords naturally into headings and sentences where relevant: ${context.keywords.join(", ")}.`
       : "";
   const requiredPrimaryBlock = spec.requiredPrimaryKeywords?.length
-    ? `\nRequired primary keyword coverage: use each phrase below exactly once in natural body prose in this section. Do not force it into a heading, title, or repeated sentence.\n${spec.requiredPrimaryKeywords.map((keyword) => `- ${keyword}`).join("\n")}`
+    ? `\nRequired primary keyword coverage: use each exact phrase below once in natural body prose in this section. Do not satisfy this requirement only in a heading, title, list of keywords, or repeated template sentence.\n${spec.requiredPrimaryKeywords.map((keyword) => `- ${keyword}`).join("\n")}`
     : "";
 
   // Only the intro section can satisfy the contract's "focus keyword in the
@@ -590,12 +596,13 @@ ${context.plan ? `Audience: ${context.plan.audience}\nAngle: ${context.plan.angl
 
 Section to write: ${spec.heading ? `"## ${spec.heading}"` : "the introduction"}
 Section intent: ${spec.intent}
-Target length: about ${spec.wordTarget} words. Do not exceed this budget by more than 10%; concise, complete coverage is better than filler. Paragraphs under 100 words each; sentences average 15-20 words.
+Length requirement: write at least ${Math.round(spec.wordTarget * 0.9)} words and aim for ${spec.wordTarget}-${Math.round(spec.wordTarget * 1.15)} words. Do not return a short outline, abstract, or one-paragraph summary. Use 2-4 substantive paragraphs unless the required format is a table, list, code example, or FAQ. Paragraphs under 100 words each; sentences average 15-20 words.
 ${kindInstruction(spec.kind, spec.heading)}${subsectionsBlock}${tableBlock}${bulletsBlock}${requiredFaqBlock}${requiredPrimaryBlock}${sectionDirectivesBlock}${keywordsBlock}${focusKeywordBlock}${internalLinksBlock}${writingInstructionsBlock}${briefBlock}${sourcesBlock}${legacyEvidenceBlock}${repairBlock}${context.repairReasons?.length ? `\nPrior gate failures to correct in this rewrite:\n${context.repairReasons.map((reason) => `- ${reason}`).join("\n")}\n` : ""}
 ${mustFollowBlock}${globalRulesBlock}
 Rules:
 - GitHub Flavored Markdown. Technical, practical, zero fluff.
 - Explain architecture, mechanisms, and developer trade-offs thoroughly.
+- Hit the section length requirement with implementation detail, security implications, examples, and concrete decision guidance.
 - For empirical benchmarks, specific quotes, and external claims, cite the supplied SOURCES with markers (e.g. [S1]).
 - Avoid unsupported speed rankings or declaring an unqualified "best" framework without evidence.
 - Do not invent pricing, adoption statistics, or fake capabilities.
@@ -615,7 +622,7 @@ export async function generateSection(
 ): Promise<SectionDraft> {
   if (!isVertexConfigured) throw new Error("Vertex AI is not configured");
   const model = options.modelOverride ?? (await getSetting(MODEL_SETTING_KEYS.writingSections, env.VERTEX_FLASH));
-  const maxTokens = Math.max(2048, Math.ceil(spec.wordTarget * 6));
+  const maxTokens = Math.max(3072, Math.ceil(spec.wordTarget * 8));
   const prompt = buildSectionPrompt(spec, context, options.repairNote);
 
   let result = await generateVertexText(model, prompt, {
@@ -628,7 +635,8 @@ export async function generateSection(
   // combine into an article that misses the brief's minimum.
   const generatedWords = result.text.trim().split(/\s+/).filter(Boolean).length;
   const endsComplete = /[.!?:)"'\]]\s*$/.test(result.text);
-  if (spec.wordTarget >= 100 && (generatedWords < Math.round(spec.wordTarget * 0.9) || !endsComplete)) {
+  const minimumWords = Math.round(spec.wordTarget * 0.9);
+  if (spec.wordTarget >= 100 && (generatedWords < minimumWords || !endsComplete)) {
     log.warn(
       `Section "${spec.heading ?? "intro"}" needs local repair (${generatedWords}/${spec.wordTarget} words, complete=${endsComplete})`,
       { heading: spec.heading, generatedWords, wordTarget: spec.wordTarget, endsComplete }
@@ -636,14 +644,15 @@ export async function generateSection(
     try {
       const expandedResult = await generateVertexText(
         model,
-        `${prompt}\n\nIMPORTANT: The previous attempt was ${generatedWords} words and ${endsComplete ? "too brief" : "ended mid-thought"}. Return a complete replacement section with thorough technical analysis, architectural details, and code or comparison points. Reach at least ${spec.wordTarget} words and end with a full sentence.`,
+        `${prompt}\n\nIMPORTANT: The previous attempt was ${generatedWords} words and ${endsComplete ? "too brief" : "ended mid-thought"}. Return a complete replacement section with thorough technical analysis, architectural details, security implications, examples, and trade-offs. Reach at least ${minimumWords} words, include every assigned primary keyword exactly once in natural body prose, and end with a full sentence.`,
         {
           maxOutputTokens: maxTokens,
           temperature: sectionTemperature(spec.kind),
           timeoutMs: env.WRITING_TIMEOUT_MS,
         }
       );
-      if (expandedResult.text.trim().split(/\s+/).filter(Boolean).length > generatedWords) {
+      const expandedWords = expandedResult.text.trim().split(/\s+/).filter(Boolean).length;
+      if (expandedWords >= minimumWords || expandedWords > generatedWords) {
         result = expandedResult;
       }
     } catch {

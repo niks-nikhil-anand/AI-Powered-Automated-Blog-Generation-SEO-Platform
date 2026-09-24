@@ -18,10 +18,21 @@ declare global {
 }
 
 function createClient() {
+  let poolConnectionString = env.DATABASE_URL;
   let password = "";
+  let ssl: pg.PoolConfig["ssl"] | undefined;
   if (env.DATABASE_URL) {
     try {
-      password = new URL(env.DATABASE_URL).password || "";
+      const url = new URL(env.DATABASE_URL);
+      password = url.password || "";
+      const sslMode = url.searchParams.get("sslmode");
+      if (sslMode === "require" || sslMode === "no-verify") {
+        ssl = { rejectUnauthorized: false };
+        url.searchParams.delete("sslmode");
+        poolConnectionString = url.toString();
+      } else if (sslMode === "verify-full" || sslMode === "verify-ca") {
+        ssl = { rejectUnauthorized: true };
+      }
     } catch (e) {
       console.warn("Warning: Failed to parse DATABASE_URL as URL. Using empty password fallback.", e);
     }
@@ -30,8 +41,9 @@ function createClient() {
   const pool =
     globalThis.__workerPgPool ??
     new pg.Pool({
-      connectionString: env.DATABASE_URL || undefined,
+      connectionString: poolConnectionString || undefined,
       password,
+      ssl,
     });
   const adapter = new PrismaPg(pool);
   globalThis.__workerPgPool = pool;

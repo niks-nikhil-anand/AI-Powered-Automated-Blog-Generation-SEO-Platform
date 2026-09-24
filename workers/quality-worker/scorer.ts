@@ -546,6 +546,7 @@ export async function scoreBlogQuality(blog: BlogForQuality) {
   // demanding every single claim read as fully "supported".
   const CRITICAL_FACT_CHECK_THRESHOLD = 70;
   const factCheckOk = !env.EVIDENCE_VALIDATION_ENABLED || !factCheck || factCheck.score >= CRITICAL_FACT_CHECK_THRESHOLD;
+  const editorialOk = editorialReview.passed;
 
   // Task 4 (live mode only): per-dimension floor - one collapsed dimension
   // (e.g. Readability 4/10) can no longer be averaged into a pass. Fact
@@ -554,13 +555,15 @@ export async function scoreBlogQuality(blog: BlogForQuality) {
     !judgeLive ||
     heuristicChecks.every((check) => check.score >= env.DIMENSION_FLOOR || check.label === "Fact Verification");
 
-  const passed = overallScore >= 90 && factCheckOk && floorsOk && articleContract.passed;
+  const passed = overallScore >= 90 && factCheckOk && editorialOk && floorsOk && articleContract.passed;
 
   return {
     overallScore,
     passed,
     recommendation: !articleContract.passed
       ? "Failed - article contract violations"
+      : !editorialOk
+        ? "Blocked - editorial rule violations"
       : !factCheckOk
         ? "Blocked - unverified facts"
         : recommendation(overallScore),

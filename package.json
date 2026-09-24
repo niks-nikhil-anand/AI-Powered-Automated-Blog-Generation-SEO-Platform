@@ -7,6 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "db:push": "node scripts/check-db-and-run-prisma.js db push",
+    "db:migrate": "node scripts/check-db-and-run-prisma.js migrate deploy",
     "worker:scheduler": "tsx workers/scheduler-worker/index.ts",
     "worker:planning": "tsx workers/planning-worker/index.ts",
     "worker:outline": "tsx workers/outline-worker/index.ts",
@@ -21,8 +23,7 @@
     "test:editorial-rules": "node --import tsx tests/editorial-rules.test.ts",
     "test:brief": "node --import tsx tests/brief-submission.test.ts",
     "migrate:manual-input": "tsx scripts/migrate-to-manual-input.ts",
-    "worker:dev": "tsx workers/start.ts",
-    "worker:all": "concurrently --kill-others --names frontend,workers \"npm run dev\" \"npm run worker:dev\"",
+    "worker:all": "tsx workers/start.ts",
     "worker:drill:rate-limit": "tsx workers/shared/rate-limit.drill.ts"
   },
   "dependencies": {

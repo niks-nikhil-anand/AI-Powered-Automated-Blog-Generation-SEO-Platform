@@ -3,7 +3,7 @@ import { generateVertexJson, slugify } from "../shared/vertex";
 import { getSetting, MODEL_SETTING_KEYS } from "../shared/settings";
 import { logger } from "../shared/logger";
 import { OutlineResult, OutlineResultSchema } from "./types";
-import { containsKeyword, ensureKeywordInTitle } from "../shared/seo-keyword";
+import { cleanBriefText, containsKeyword, ensureKeywordInTitle } from "../shared/seo-keyword";
 
 const log = logger.child({ worker: "outline-worker" });
 
@@ -143,7 +143,7 @@ function fallbackOutline(topic: string, plan: PlanInput, spec: OutlineSpec): Out
  * keyword, and never the introduction's.
  */
 export function enforceFocusKeyword(outline: OutlineResult, focusKeyword?: string | null): OutlineResult {
-  const keyword = focusKeyword?.trim();
+  const keyword = focusKeyword ? cleanBriefText(focusKeyword) : "";
   if (!keyword) return outline;
 
   const title = ensureKeywordInTitle(outline.title, keyword);

@@ -247,6 +247,35 @@ assert.ok(
   )
 );
 
+const truncatedExamples = [
+  "For a solo developer building an MVP, implementing...",
+  "The trade-offs involve maintenance,",
+  "This pattern enhances maintainability, especially when auditing a Next.js starter kit or managing",
+  "Ensure all API keys, database credentials, and other secrets are stored securely (e.g., environment variables,",
+];
+
+for (const ending of truncatedExamples) {
+  assert.ok(
+    rules(`# Next.js SEO basics\n\nIntro prose for the reader.\n\n## Implementation Notes\n\n${ending}\n`).blockers.some(
+      (violation) => violation.rule === "R17.truncated-section"
+    ),
+    `Expected truncated section blocker for: ${ending}`
+  );
+}
+
+assert.equal(
+  rules(
+    "# Next.js SEO basics\n\nIntro prose for the reader.\n\n## Implementation Notes\n\nStore credentials in environment variables, rotate them regularly, and keep the deployment checklist tied to each environment. This keeps local, staging, and production configuration auditable without exposing secrets in source control.\n"
+  ).blockers.some((violation) => violation.rule === "R17.truncated-section"),
+  false
+);
+
+assert.ok(
+  rules(
+    "# Next.js SEO basics\n\nIntro prose.\n\n## Settings update\n\nConsider this example for updating user settings and preventing cross-tenant access:\n"
+  ).blockers.some((violation) => violation.rule === "R17.dangling-lead-in")
+);
+
 assert.ok(
   rules("# Next.js SEO basics\n\nIntro prose.\n\n## Rendering\n\nProse.\n\n## Rendering\n\nMore prose.\n").blockers.some(
     (violation) => violation.rule === "R16.duplicate-heading"
