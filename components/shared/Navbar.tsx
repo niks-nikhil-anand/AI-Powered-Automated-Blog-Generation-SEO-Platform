@@ -2,17 +2,19 @@
 
 import React, { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
+import { Menu } from "lucide-react";
 import { useTheme } from "./ThemeProvider";
 
 interface NavbarProps {
+  onOpenNavigation?: () => void;
+  navigationOpen?: boolean;
   onOpenCmdk?: () => void;
   onOpenRunPipeline?: () => void;
 }
 
-export function Navbar({ onOpenCmdk, onOpenRunPipeline }: NavbarProps) {
+export function Navbar({ onOpenCmdk, onOpenRunPipeline, onOpenNavigation, navigationOpen }: NavbarProps) {
   const pathname = usePathname();
   const { theme, toggleTheme } = useTheme();
-  const [notifOpen, setNotifOpen] = useState(false);
   const [pipeline, setPipeline] = useState({
     active: 0,
     waiting: 0,
@@ -39,6 +41,8 @@ export function Navbar({ onOpenCmdk, onOpenRunPipeline }: NavbarProps) {
     };
   }, []);
 
+  const shortTitle = ({ blogs: "Blogs", new: "New blog", assets: "Assets", categories: "Categories", quality: "Quality", workers: "Workers", logs: "Logs", settings: "Settings" } as Record<string, string>)[pathname.split("/").pop() || ""] || "Dashboard";
+
   const getBreadcrumb = () => {
     switch (pathname) {
       case "/dashboard/blogs":
@@ -47,6 +51,8 @@ export function Navbar({ onOpenCmdk, onOpenRunPipeline }: NavbarProps) {
         return "New Blog Submission";
       case "/dashboard/assets":
         return "Asset Library";
+      case "/dashboard/categories":
+        return "Category Management";
       case "/dashboard/quality":
         return "SEO & Quality Audit Hub";
       case "/dashboard/workers":
@@ -59,13 +65,6 @@ export function Navbar({ onOpenCmdk, onOpenRunPipeline }: NavbarProps) {
         return "Executive Dashboard";
     }
   };
-
-  const notifications: {
-    title: string;
-    meta: string;
-    time: string;
-    color: string;
-  }[] = [];
 
   const handleRunNow = () => {
     onOpenRunPipeline?.();
@@ -97,16 +96,18 @@ export function Navbar({ onOpenCmdk, onOpenRunPipeline }: NavbarProps) {
           : "0 active";
 
   return (
-    <header className="sticky top-0 z-40 h-[56px] flex-none flex items-center gap-[12px] px-[18px] border-b border-[var(--bd)] bg-[var(--glass)] backdrop-blur-md">
+    <header className="dashboard-navbar sticky top-0 z-40 h-[56px] flex-none flex items-center gap-[12px] px-[18px] border-b border-[var(--bd)] bg-[var(--glass)] backdrop-blur-md">
+      <button type="button" onClick={onOpenNavigation} aria-label="Open navigation" aria-expanded={navigationOpen} aria-controls="dashboard-navigation-drawer" className="mobile-navigation flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-[var(--bd)] md:hidden"><Menu size={20} /></button>
       {/* Breadcrumb */}
-      <div className="flex items-center gap-[7px] text-[12px] text-[var(--mut)] whitespace-nowrap">
-        <span>Dashboard</span>
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <div className="navbar-breadcrumb flex min-w-0 items-center gap-[7px] text-[12px] text-[var(--mut)] whitespace-nowrap">
+        <span className="breadcrumb-parent">Dashboard</span>
+        <svg className="breadcrumb-parent shrink-0" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
           <path d="M9 6l6 6-6 6" />
         </svg>
-        <span className="color-[var(--fg)] font-semibold text-[var(--fg)]">
+        <span className="hidden min-[1440px]:block truncate font-semibold text-[var(--fg)]">
           {getBreadcrumb()}
         </span>
+        <span className="truncate font-semibold text-[var(--fg)] min-[1440px]:hidden">{shortTitle}</span>
       </div>
 
       {/* Global Search Button */}
@@ -114,7 +115,7 @@ export function Navbar({ onOpenCmdk, onOpenRunPipeline }: NavbarProps) {
         id="btn-global-search"
         aria-label="Open global search"
         onClick={onOpenCmdk}
-        className="ml-[14px] flex-1 max-w-[400px] flex items-center gap-[8px] h-[32px] px-[10px] rounded-[9px] border border-[var(--bd)] bg-[var(--card)] text-[var(--faint)] text-[12px] text-left hover:border-[var(--bd2)] transition-colors"
+        className="navbar-search ml-[14px] flex-1 max-w-[400px] flex items-center gap-[8px] h-[32px] px-[10px] rounded-[9px] border border-[var(--bd)] bg-[var(--card)] text-[var(--faint)] text-[12px] text-left hover:border-[var(--bd2)] transition-colors"
       >
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
           <circle cx="11" cy="11" r="7" />
@@ -127,9 +128,9 @@ export function Navbar({ onOpenCmdk, onOpenRunPipeline }: NavbarProps) {
       </button>
 
       {/* Right Controls */}
-      <div className="ml-auto flex items-center gap-[9px]">
+      <div className="navbar-controls ml-auto flex shrink-0 items-center gap-[9px]">
         {/* Pipeline Status Pill */}
-        <div className={`flex items-center gap-[7px] h-[28px] px-[10px] rounded-full border ${
+        <div className={`navbar-pipeline flex items-center gap-[7px] h-[28px] px-[10px] rounded-full border ${
           pillState === "error"
             ? "border-[rgba(244,63,94,0.3)] bg-[rgba(244,63,94,0.10)]"
             : pillState === "queued"
@@ -152,72 +153,12 @@ export function Navbar({ onOpenCmdk, onOpenRunPipeline }: NavbarProps) {
             {pillCount}
           </span>
         </div>
-        {/* Notifications Button & Dropdown */}
-        <div className="relative">
-          <button
-            id="btn-notifications"
-            aria-label="Notifications"
-            onClick={() => setNotifOpen(!notifOpen)}
-            className="w-[32px] h-[32px] rounded-[9px] border border-[var(--bd)] bg-[var(--card)] text-[var(--fg2)] flex items-center justify-center relative hover:border-[var(--bd2)] transition-colors"
-          >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-              <path d="M6 9a6 6 0 1112 0c0 5 2 6 2 6H4s2-1 2-6z" />
-              <path d="M10 20a2 2 0 004 0" />
-            </svg>
-            {notifications.length > 0 && (
-              <span className="absolute top-[5px] right-[6px] w-[6px] h-[6px] rounded-full bg-[var(--rose)]" />
-            )}
-          </button>
-
-          {notifOpen && (
-            <div className="absolute top-[38px] right-0 w-[330px] border border-[var(--bd)] rounded-[12px] bg-[var(--card)] shadow-[var(--shadow)] overflow-hidden animate-dkfade z-50">
-              <div className="p-[10px_12px] border-b border-[var(--bd)] flex items-center justify-between">
-                <span className="text-[12px] font-bold text-[var(--fg)]">Notifications</span>
-                <span className="text-[10.5px] text-[var(--mut)]">0 new</span>
-              </div>
-              <div className="max-h-[300px] overflow-y-auto">
-                {notifications.length > 0 ? notifications.map((n, idx) => (
-                  <div
-                    key={idx}
-                    className="flex gap-[9px] p-[10px_12px] border-b border-[var(--bd)] hover:bg-[var(--card2)] transition-colors"
-                  >
-                    <span
-                      className="flex-none mt-[4px] w-[7px] h-[7px] rounded-full"
-                      style={{ background: n.color }}
-                    />
-                    <div className="min-w-0">
-                      <div className="text-[11.5px] font-semibold leading-snug text-[var(--fg)]">
-                        {n.title}
-                      </div>
-                      <div className="text-[10.5px] text-[var(--mut)] mt-[2px]">
-                        {n.meta}
-                      </div>
-                    </div>
-                    <span className="ml-auto flex-none font-mono text-[10px] font-medium text-[var(--faint)]">
-                      {n.time}
-                    </span>
-                  </div>
-                )) : (
-                  <div className="p-[24px_12px] text-center text-[12px] text-[var(--mut)]">
-                    No notifications yet.
-                  </div>
-                )}
-              </div>
-              <div className="p-[8px_12px] text-center border-t border-[var(--bd)]">
-                <a href="/dashboard/logs" className="text-[11px] font-semibold text-[var(--indigo)] hover:underline">
-                  View all system activity
-                </a>
-              </div>
-            </div>
-          )}
-        </div>
-
         {/* Light / Dark Mode Toggle */}
         <button
           id="btn-theme-toggle"
           aria-label="Toggle light and dark mode"
           onClick={toggleTheme}
-          className="w-[32px] h-[32px] rounded-[9px] border border-[var(--bd)] bg-[var(--card)] text-[var(--fg2)] flex items-center justify-center hover:border-[var(--bd2)] hover:text-[var(--indigo)] transition-colors"
+          className="w-[44px] h-[44px] rounded-[9px] border border-[var(--bd)] bg-[var(--card)] text-[var(--fg2)] flex items-center justify-center hover:border-[var(--bd2)] hover:text-[var(--indigo)] transition-colors"
         >
           {theme === "dark" ? (
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
@@ -236,7 +177,7 @@ export function Navbar({ onOpenCmdk, onOpenRunPipeline }: NavbarProps) {
           id="btn-run-now"
           aria-label="Trigger generation run now"
           onClick={handleRunNow}
-          className="h-[32px] px-[13px] rounded-[9px] border border-transparent bg-[var(--indigo)] text-white text-[12px] font-semibold flex items-center gap-[6px] hover:bg-[#4f46e5] transition-colors shadow-sm"
+          className="h-[44px] px-[13px] rounded-[9px] border border-transparent bg-[var(--indigo)] text-white text-[12px] font-semibold flex items-center gap-[6px] hover:bg-[#4f46e5] transition-colors shadow-sm"
         >
           <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
             <path d="M7 4l13 8-13 8z" />
