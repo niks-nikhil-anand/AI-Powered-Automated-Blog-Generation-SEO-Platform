@@ -1,8 +1,10 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
+import { MoreHorizontal } from "lucide-react";
 import { SeoSnippetPreview } from "./SeoSnippetPreview";
 import { OverridePublishModal } from "./OverridePublishModal";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import {
   META_DESCRIPTION_BUDGET,
   META_TITLE_BUDGET,
@@ -127,9 +129,12 @@ const qualityParameterLabels = [
 
 export function BlogDetailModal({ blog, isOpen, onClose, initialTab, onActionComplete }: BlogDetailModalProps) {
   const [activeTab, setActiveTab] = useState<DetailTab>(initialTab ?? "overview");
+  const [mobilePanel, setMobilePanel] = useState<"article" | "details">("article");
   const [actionPending, setActionPending] = useState<"requeue-quality" | "publish" | null>(null);
   const [actionMessage, setActionMessage] = useState<{ text: string; tone: "ok" | "error" } | null>(null);
   const [overrideModalOpen, setOverrideModalOpen] = useState(false);
+  const modalRef = useRef<HTMLDivElement>(null);
+  const openerRef = useRef<HTMLElement | null>(null);
   const tabs: { key: typeof activeTab; label: string }[] = [
     { key: "overview", label: "Overview" },
     { key: "seo", label: "SEO & Meta" },
@@ -151,9 +156,19 @@ export function BlogDetailModal({ blog, isOpen, onClose, initialTab, onActionCom
     setWasOpen(isOpen);
     if (isOpen) {
       setActiveTab(initialTab ?? "overview");
+      setMobilePanel("article");
       setActionMessage(null);
     }
   }
+
+  useEffect(() => {
+    if (!isOpen) return;
+    openerRef.current = document.activeElement as HTMLElement | null;
+    modalRef.current?.focus();
+    return () => {
+      if (openerRef.current?.isConnected) openerRef.current.focus();
+    };
+  }, [isOpen]);
 
   if (!isOpen || !blog) return null;
 
@@ -220,6 +235,29 @@ export function BlogDetailModal({ blog, isOpen, onClose, initialTab, onActionCom
       onActionComplete?.();
     } finally {
       setActionPending(null);
+    }
+  };
+
+  const handleModalKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "Escape" && !overrideModalOpen) {
+      event.preventDefault();
+      onClose();
+      return;
+    }
+    if (event.key !== "Tab") return;
+    const candidates = modalRef.current?.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), [href], select:not([disabled]), textarea:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    );
+    const focusable = candidates ? Array.from(candidates).filter((element) => element.offsetParent !== null) : [];
+    if (!focusable?.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
     }
   };
 
@@ -297,15 +335,21 @@ export function BlogDetailModal({ blog, isOpen, onClose, initialTab, onActionCom
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-[rgba(2,6,23,0.55)] backdrop-blur-[3px] flex items-center justify-center p-[16px] sm:p-[26px] animate-dkfade overflow-y-auto"
+      className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-[rgba(2,6,23,0.55)] p-0 backdrop-blur-[3px] animate-dkfade sm:p-[26px]"
       onClick={onClose}
     >
       <div
-        className="w-[min(1180px,100%)] h-[calc(100dvh-32px)] sm:h-[min(860px,calc(100dvh-52px))] bg-[var(--card)] border border-[var(--bd)] rounded-[14px] shadow-[var(--shadow)] flex flex-col overflow-hidden my-auto"
+        ref={modalRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Details for ${blog.title}`}
+        tabIndex={-1}
+        onKeyDown={handleModalKeyDown}
+        className="my-auto flex h-[100dvh] w-full flex-col overflow-hidden bg-[var(--card)] shadow-[var(--shadow)] sm:h-[min(860px,calc(100dvh-52px))] sm:w-[min(1180px,100%)] sm:rounded-[14px] sm:border sm:border-[var(--bd)]"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex-none flex items-center gap-[10px] p-[12px_14px] border-b border-[var(--bd)]">
+        <div className="flex-none flex flex-wrap items-center gap-[8px] border-b border-[var(--bd)] p-[12px] sm:flex-nowrap sm:gap-[10px] sm:p-[12px_14px]">
           <span
             className="text-[10.5px] font-semibold p-[2.5px_8px] rounded-full border"
             style={{
@@ -317,22 +361,22 @@ export function BlogDetailModal({ blog, isOpen, onClose, initialTab, onActionCom
             {blog.status}
           </span>
           <div className="min-w-0 flex-1">
-            <div className="text-[13.5px] font-bold tracking-tight whitespace-nowrap overflow-hidden text-ellipsis text-[var(--fg)]">
+            <div className="line-clamp-2 text-[13.5px] font-bold tracking-tight text-[var(--fg)] sm:truncate sm:whitespace-nowrap">
               {blog.title}
             </div>
-            <div className="font-mono text-[10px] font-medium text-[var(--faint)]">
+            <div className="hidden font-mono text-[10px] font-medium text-[var(--faint)] sm:block">
               {blog.slug} · {blog.words || "0"} words · {blog.cost || "$0.00"}
             </div>
-            <div className="font-mono text-[10px] font-medium text-[var(--faint)] mt-[2px]">
+            <div className="mt-[2px] hidden font-mono text-[10px] font-medium text-[var(--faint)] sm:block">
               Created {blog.createdAtLabel || "-"} · Updated {blog.updatedAtLabel || blog.updated || "-"}
             </div>
           </div>
-          <div className="ml-auto flex gap-[7px]">
+          <div className="ml-auto hidden gap-[7px] sm:flex">
             <button
               aria-label="Re-run quality QA"
               disabled={actionPending !== null}
               onClick={handleReRunQa}
-              className="h-[28px] px-[11px] rounded-[8px] border border-[var(--bd)] bg-[var(--card)] text-[var(--fg2)] text-[11.5px] font-semibold hover:border-[var(--bd2)] transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+              className="h-[40px] rounded-[8px] border border-[var(--bd)] bg-[var(--card)] px-[10px] text-[11px] font-semibold text-[var(--fg2)] transition-colors hover:border-[var(--bd2)] disabled:cursor-not-allowed disabled:opacity-60 sm:h-[28px] sm:px-[11px] sm:text-[11.5px]"
             >
               {actionPending === "requeue-quality" ? "Queueing…" : "Re-run QA"}
             </button>
@@ -347,7 +391,7 @@ export function BlogDetailModal({ blog, isOpen, onClose, initialTab, onActionCom
                     ? "Publish now"
                     : "Score is below the quality gate - publishing requires an override reason"
               }
-              className="h-[28px] px-[12px] rounded-[8px] border border-transparent bg-[var(--emerald)] text-white text-[11.5px] font-bold hover:bg-emerald-600 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+              className="h-[40px] rounded-[8px] border border-transparent bg-[var(--emerald)] px-[10px] text-[11px] font-bold text-white transition-colors hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-60 sm:h-[28px] sm:px-[12px] sm:text-[11.5px]"
             >
               {actionPending === "publish"
                 ? "Publishing…"
@@ -362,12 +406,24 @@ export function BlogDetailModal({ blog, isOpen, onClose, initialTab, onActionCom
             <button
               aria-label="Close detail"
               onClick={onClose}
-              className="w-[28px] h-[28px] rounded-[8px] border border-[var(--bd)] bg-[var(--card)] text-[var(--mut)] flex items-center justify-center hover:text-[var(--fg)] transition-colors"
+              className="flex size-10 items-center justify-center rounded-[8px] border border-[var(--bd)] bg-[var(--card)] text-[var(--mut)] transition-colors hover:text-[var(--fg)] sm:size-[28px]"
             >
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
                 <path d="M6 6l12 12M18 6L6 18" />
               </svg>
             </button>
+          </div>
+          <div className="ml-auto flex items-center gap-2 sm:hidden">
+            <DropdownMenu>
+              <DropdownMenuTrigger aria-label="Article actions" className="inline-flex size-10 items-center justify-center rounded-[8px] border border-[var(--bd)] bg-[var(--card)] text-[var(--fg2)]">
+                <MoreHorizontal className="size-5" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-48 border border-[var(--bd)] bg-[var(--card)] p-1 text-[var(--fg)]">
+                <DropdownMenuItem disabled={actionPending !== null} onClick={handleReRunQa} className="min-h-11 px-3 text-[12px]">{actionPending === "requeue-quality" ? "Queueing…" : "Re-run quality QA"}</DropdownMenuItem>
+                <DropdownMenuItem disabled={actionPending !== null || blog.status === "Published" || !hasQualityReport} onClick={handlePublish} className="min-h-11 px-3 text-[12px]">{blog.status === "Published" ? "Published" : !hasQualityReport ? "Awaiting QA" : qualityPassed ? "Publish" : "Override & publish"}</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <button aria-label="Close detail" onClick={onClose} className="inline-flex size-10 items-center justify-center rounded-[8px] border border-[var(--bd)] bg-[var(--card)] text-[var(--mut)]"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg></button>
           </div>
         </div>
 
@@ -383,10 +439,15 @@ export function BlogDetailModal({ blog, isOpen, onClose, initialTab, onActionCom
           </div>
         )}
 
+        <div className="flex border-b border-[var(--bd)] bg-[var(--card2)] p-1 md:hidden" role="tablist" aria-label="Detail panel">
+          <button type="button" role="tab" aria-selected={mobilePanel === "article"} onClick={() => setMobilePanel("article")} className={`h-10 flex-1 rounded-[7px] text-[12px] font-semibold ${mobilePanel === "article" ? "bg-[var(--card)] text-[var(--indigo)] shadow-sm" : "text-[var(--mut)]"}`}>Article</button>
+          <button type="button" role="tab" aria-selected={mobilePanel === "details"} onClick={() => setMobilePanel("details")} className={`h-10 flex-1 rounded-[7px] text-[12px] font-semibold ${mobilePanel === "details" ? "bg-[var(--card)] text-[var(--indigo)] shadow-sm" : "text-[var(--mut)]"}`}>Details</button>
+        </div>
+
         {/* Content Body Grid */}
-        <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_400px] overflow-hidden">
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden md:grid md:grid-cols-1 lg:grid-cols-[minmax(0,1fr)_400px]">
           {/* Left Pane - Markdown Source */}
-          <div className="min-w-0 min-h-0 flex flex-col border-r border-[var(--bd)]">
+          <div className={`${mobilePanel === "article" ? "flex" : "hidden"} min-h-0 min-w-0 flex-1 flex-col border-b border-[var(--bd)] md:min-h-0 lg:border-r lg:border-b-0`}>
             <div className="flex-none flex items-center gap-[6px] p-[8px_12px] border-b border-[var(--bd)] bg-[var(--card2)]">
               <span className="text-[10.5px] font-bold tracking-wider uppercase text-[var(--mut)]">
                 Markdown Source
@@ -395,15 +456,21 @@ export function BlogDetailModal({ blog, isOpen, onClose, initialTab, onActionCom
                 No source generated yet
               </span>
             </div>
-            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-[14px_16px] font-mono text-[12px] leading-[1.75] text-[var(--fg2)] whitespace-pre-wrap">
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-[14px_16px] font-mono text-[12px] leading-[1.75] text-[var(--fg2)] whitespace-pre-wrap">
               {markdownBody || "No markdown source yet."}
             </div>
           </div>
 
           {/* Right Pane - Inspection Details */}
-          <div className="min-w-0 min-h-0 flex flex-col bg-[var(--card)]">
+          <div className={`${mobilePanel === "details" ? "flex" : "hidden"} min-h-0 min-w-0 flex-1 flex-col bg-[var(--card)]`}>
             {/* Inspector Tabs */}
-            <div className="flex-none flex border-b border-[var(--bd)] overflow-x-auto">
+            <label className="block border-b border-[var(--bd)] p-3 md:hidden">
+              <span className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-[var(--mut)]">Detail section</span>
+              <select aria-label="Detail section" value={activeTab} onChange={(event) => setActiveTab(event.target.value as DetailTab)} className="h-11 w-full rounded-[8px] border border-[var(--bd)] bg-[var(--card)] px-3 text-[12px] font-semibold text-[var(--fg)] outline-none">
+                {tabs.map((tab) => <option key={tab.key} value={tab.key}>{tab.label}</option>)}
+              </select>
+            </label>
+            <div className="hidden flex-none border-b border-[var(--bd)] overflow-x-auto md:flex">
               {tabs.map((t) => (
                 <button
                   key={t.key}
@@ -420,7 +487,7 @@ export function BlogDetailModal({ blog, isOpen, onClose, initialTab, onActionCom
             </div>
 
             {/* Tab Panels */}
-            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-[13px]">
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-[13px]">
               {activeTab === "overview" && (
                 <div className="flex flex-col gap-[11px]">
                   <div className="grid grid-cols-2 gap-[8px]">
@@ -667,7 +734,7 @@ export function BlogDetailModal({ blog, isOpen, onClose, initialTab, onActionCom
                       <div className="text-[11px] text-[var(--fg2)] leading-snug mb-[7px]">
                         {blog.qualityReport.judgeDetail.critique}
                       </div>
-                      <div className="grid grid-cols-4 gap-[6px] mb-[7px]">
+                      <div className="mb-[7px] grid grid-cols-2 gap-[6px] sm:grid-cols-4">
                         {([
                           ["Depth", blog.qualityReport.judgeDetail.scores.depth],
                           ["Tone", blog.qualityReport.judgeDetail.scores.accuracyOfTone],
@@ -768,9 +835,9 @@ export function BlogDetailModal({ blog, isOpen, onClose, initialTab, onActionCom
                           {asset.label}
                         </div>
                       )}
-                      <div className="mt-[8px] flex items-center justify-between text-[11px]">
-                        <span className="font-semibold text-[var(--fg)]">{asset.name}</span>
-                        <span className="font-mono text-[var(--faint)]">{asset.size}</span>
+                      <div className="mt-[8px] flex items-start justify-between gap-3 text-[11px]">
+                        <span className="min-w-0 break-words font-semibold text-[var(--fg)]">{asset.name}</span>
+                        <span className="shrink-0 font-mono text-[var(--faint)]">{asset.size}</span>
                       </div>
                       <div className="text-[10px] text-[var(--mut)] mt-[5px] font-mono break-all">
                         s3://{asset.bucket}/{asset.path}
@@ -791,9 +858,9 @@ export function BlogDetailModal({ blog, isOpen, onClose, initialTab, onActionCom
                 <div className="flex flex-col gap-[8px] font-mono text-[11px]">
                   {blog.workflow && (
                     <div className="p-[8px] rounded-[8px] bg-[var(--card2)] border border-[var(--bd)]">
-                      <div className="flex items-center justify-between text-[10px] font-bold">
+                      <div className="flex items-start justify-between gap-3 text-[10px] font-bold">
                         <span className="text-[var(--fg)]">Workflow {blog.workflow.status}</span>
-                        <span className="text-[var(--faint)]">{blog.workflow.currentStage}</span>
+                        <span className="text-right text-[var(--faint)]">{blog.workflow.currentStage}</span>
                       </div>
                       {blog.workflow.failureReason && (
                         <div className="mt-[5px] text-[var(--rose)] whitespace-pre-wrap">
@@ -804,9 +871,9 @@ export function BlogDetailModal({ blog, isOpen, onClose, initialTab, onActionCom
                   )}
                   {timeline.length > 0 ? timeline.map((row, i) => (
                     <div key={i} className="p-[6px_8px] rounded-[6px] bg-[var(--card2)] border border-[var(--bd)] flex flex-col gap-[2px]">
-                      <div className="flex items-center justify-between text-[10px] text-[var(--indigo)] font-bold">
-                        <span>{row.worker}</span>
-                        <span className="text-[var(--faint)]">{row.time}</span>
+                      <div className="flex items-start justify-between gap-3 text-[10px] font-bold text-[var(--indigo)]">
+                        <span className="min-w-0 break-words">{row.worker}</span>
+                        <span className="shrink-0 text-right text-[var(--faint)]">{row.time}</span>
                       </div>
                       <div className="text-[var(--fg2)]">
                         {row.status ? `${row.status}: ` : ""}{row.msg}
