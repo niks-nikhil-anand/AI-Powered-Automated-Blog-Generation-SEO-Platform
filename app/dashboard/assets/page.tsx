@@ -181,7 +181,7 @@ export default function AssetLibraryPage() {
   return (
     <div className="flex flex-col gap-[13px]">
       {/* Header */}
-      <div className="flex items-end justify-between gap-[16px] flex-wrap">
+      <div className="flex flex-col items-stretch justify-between gap-[12px] sm:flex-row sm:items-end sm:gap-[16px]">
         <div>
           <h1 className="margin-0 text-[19px] font-extrabold tracking-tight text-[var(--fg)]">
             Asset Library 
@@ -191,12 +191,12 @@ export default function AssetLibraryPage() {
             <span className="font-mono text-[var(--fg2)]">blogs/2026/08/</span> · {assets.length} objects
           </p>
         </div>
-        <div className="flex gap-[7px] items-center flex-wrap">
+        <div className="grid grid-cols-2 gap-[7px] items-center sm:flex sm:flex-wrap">
           {/* View Switcher */}
-          <div className="flex bg-[var(--card2)] border border-[var(--bd)] p-[2px] rounded-[8px] h-[30px] items-center">
+          <div className="col-span-2 flex bg-[var(--card2)] border border-[var(--bd)] p-[2px] rounded-[8px] h-[44px] items-center sm:col-span-1 sm:h-[30px]">
             <button
               onClick={() => setViewMode("card")}
-              className={`p-[4px_8px] rounded-[6px] transition-colors flex items-center gap-[4px] text-[11px] font-semibold ${
+                className={`h-full flex-1 p-[4px_8px] rounded-[6px] transition-colors flex items-center justify-center gap-[4px] text-[11px] font-semibold sm:h-auto sm:flex-none ${
                 viewMode === "card"
                   ? "bg-[var(--indigo)] text-white"
                   : "text-[var(--mut)] hover:text-[var(--fg)]"
@@ -208,7 +208,7 @@ export default function AssetLibraryPage() {
             </button>
             <button
               onClick={() => setViewMode("table")}
-              className={`p-[4px_8px] rounded-[6px] transition-colors flex items-center gap-[4px] text-[11px] font-semibold ${
+                className={`h-full flex-1 p-[4px_8px] rounded-[6px] transition-colors flex items-center justify-center gap-[4px] text-[11px] font-semibold sm:h-auto sm:flex-none ${
                 viewMode === "table"
                   ? "bg-[var(--indigo)] text-white"
                   : "text-[var(--mut)] hover:text-[var(--fg)]"
@@ -222,7 +222,7 @@ export default function AssetLibraryPage() {
 
           {/* Month Selector */}
           <Select value={selectedMonth} onValueChange={(val) => setSelectedMonth(val ?? "All months")}>
-            <SelectTrigger className="h-[30px] min-w-[110px] text-[11.5px] font-semibold border-[var(--bd)] bg-[var(--card)] text-[var(--fg2)] rounded-[8px] outline-none">
+            <SelectTrigger className="h-[44px] min-w-0 text-[11.5px] font-semibold border-[var(--bd)] bg-[var(--card)] text-[var(--fg2)] rounded-[8px] outline-none sm:h-[30px] sm:min-w-[110px]">
               <SelectValue placeholder="All months" />
             </SelectTrigger>
             <SelectContent className="bg-[var(--card)] border border-[var(--bd)] text-[var(--fg)]">
@@ -235,7 +235,7 @@ export default function AssetLibraryPage() {
 
           {/* Type Selector */}
           <Select value={selectedType} onValueChange={(val) => setSelectedType(val ?? "All types")}>
-            <SelectTrigger className="h-[30px] min-w-[110px] text-[11.5px] font-semibold border-[var(--bd)] bg-[var(--card)] text-[var(--fg2)] rounded-[8px] outline-none">
+            <SelectTrigger className="h-[44px] min-w-0 text-[11.5px] font-semibold border-[var(--bd)] bg-[var(--card)] text-[var(--fg2)] rounded-[8px] outline-none sm:h-[30px] sm:min-w-[110px]">
               <SelectValue placeholder="All types" />
             </SelectTrigger>
             <SelectContent className="bg-[var(--card)] border border-[var(--bd)] text-[var(--fg)]">
@@ -288,8 +288,29 @@ export default function AssetLibraryPage() {
           </div>
         )
       ) : filteredAssets.length > 0 ? (
-        viewMode === "card" ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-[12px]">
+        <>
+          <div className="grid grid-cols-1 gap-[10px] md:hidden">
+            {pagedAssets.map((a, idx) => (
+              <button
+                key={`mobile-${idx}`}
+                aria-label="Open asset preview"
+                onClick={() => { setSelectedAsset(a); setIsDetailOpen(true); }}
+                className="text-left p-[10px] bg-[var(--card)] border border-[var(--bd)] rounded-[10px] shadow-[var(--shadow)] flex items-center gap-[10px] hover:border-[var(--indigo)] transition-colors"
+              >
+                <div className="w-[58px] h-[58px] shrink-0 bg-[var(--card2)] border border-[var(--bd)] rounded-[7px] flex items-center justify-center overflow-hidden">
+                  {a.publicUrl && a.mimeType?.includes("image") ? <img src={a.publicUrl} alt={a.name} className="w-full h-full object-cover" /> : <span className="font-mono text-[8px] text-[var(--mut)]">{a.placeholder}</span>}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-[11.5px] font-semibold text-[var(--fg)] truncate">{a.name}</div>
+                  <div className="mt-[4px] flex items-center gap-[5px] font-mono text-[9.5px] text-[var(--faint)]"><span>{a.kind}</span><span>·</span><span>{a.dim}</span><span>·</span><span>{a.size}</span></div>
+                  <div className="mt-[4px] font-mono text-[9px] text-[var(--faint)] truncate">{a.bucket ? `s3://${a.bucket}/${a.path}` : a.path}</div>
+                </div>
+                <Eye size={15} className="shrink-0 text-[var(--mut)]" />
+              </button>
+            ))}
+          </div>
+          {viewMode === "card" ? (
+          <div className="hidden grid-cols-1 gap-[12px] sm:grid sm:grid-cols-2 md:grid md:grid-cols-3 lg:grid-cols-4">
             {pagedAssets.map((a, idx) => (
               <button
                 key={idx}
@@ -344,7 +365,7 @@ export default function AssetLibraryPage() {
             ))}
           </div>
         ) : (
-          <div className="bg-[var(--card)] border border-[var(--bd)] rounded-[12px] shadow-[var(--shadow)] overflow-hidden">
+          <div className="hidden bg-[var(--card)] border border-[var(--bd)] rounded-[12px] shadow-[var(--shadow)] overflow-hidden md:block">
             <DataTable
               columns={columns}
               data={pagedAssets}
@@ -354,7 +375,8 @@ export default function AssetLibraryPage() {
               }}
             />
           </div>
-        )
+          )}
+        </>
       ) : (
         <div className="bg-[var(--card)] border border-[var(--bd)] rounded-[12px] p-[32px] text-center text-[12px] text-[var(--mut)] shadow-[var(--shadow)]">
           No assets yet.
@@ -415,5 +437,3 @@ export default function AssetLibraryPage() {
     </div>
   );
 }
-
-
