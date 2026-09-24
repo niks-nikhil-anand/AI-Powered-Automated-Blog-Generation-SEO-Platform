@@ -379,6 +379,7 @@ npm run worker:image         # Generate feature images
 npm run worker:quality       # Validate quality & assign scores
 npm run worker:publish       # Publish to production
 npm run worker:dev           # Start all workers concurrently
+npm run worker:all           # Start the frontend dev server and all workers
 ```
 
 **Post-refactor cutover check** (after `npx prisma migrate deploy`):

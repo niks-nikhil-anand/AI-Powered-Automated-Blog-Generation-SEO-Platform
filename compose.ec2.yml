@@ -1,0 +1,54 @@
+name: auto-blog
+
+x-app: &app
+  image: nikhil2ananddev/auto-blog:${IMAGE_TAG:-v1}
+  env_file: .env
+  environment:
+    NODE_ENV: production
+    HOSTNAME: 0.0.0.0
+    PORT: 3000
+    DATABASE_URL: ${DATABASE_URL:?Set your AWS RDS DATABASE_URL in .env}
+    REDIS_URL: redis://redis:6379
+    GOOGLE_APPLICATION_CREDENTIALS: /tmp/gcp-credentials.json
+  init: true
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+  depends_on:
+    redis:
+      condition: service_healthy
+
+services:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  web:
+    <<: *app
+    ports:
+      - "3000:3000"
+
+  workers:
+    <<: *app
+    command: ["node_modules/.bin/tsx", "workers/start.ts"]
+    stop_grace_period: 30s
+
+  migrate:
+    <<: *app
+    command: ["node_modules/.bin/prisma", "migrate", "deploy"]
+    profiles: ["tools"]
+    restart: "no"
+
+volumes:
+  redis_data:
