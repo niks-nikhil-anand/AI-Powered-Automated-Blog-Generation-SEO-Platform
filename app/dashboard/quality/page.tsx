@@ -538,7 +538,7 @@ export default function QualityAuditPage() {
             )}
           </div>
           <Select value={categoryFilter} onValueChange={(val) => setCategoryFilter(val ?? "All categories")}>
-            <SelectTrigger className="h-[28px] min-w-[130px] text-[11px] font-semibold border-[var(--bd)] bg-[var(--card)] text-[var(--fg2)] rounded-[8px] outline-none">
+            <SelectTrigger className="h-[42px] min-w-[150px] text-[11px] font-semibold border-[var(--bd)] bg-[var(--card)] text-[var(--fg2)] rounded-[8px] outline-none sm:h-[28px] sm:min-w-[130px]">
               <SelectValue placeholder="All categories" />
             </SelectTrigger>
             <SelectContent>
