@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef, useSyncExternalStore } from "react";
 import { ThemeProvider } from "../../components/shared/ThemeProvider";
 import { ErrorBoundary } from "../../components/shared/ErrorBoundary";
 import { Sidebar } from "../../components/shared/Sidebar";
@@ -9,7 +9,34 @@ import { GlobalSearchModal } from "../../components/shared/GlobalSearchModal";
 import { BlogDetailModal, BlogItem } from "../../components/shared/BlogDetailModal";
 import { RunPipelineModal } from "../../components/shared/RunPipelineModal";
 
+const desktopQuery = "(min-width: 1200px)";
+function subscribeDesktop(callback: () => void) {
+  const media = window.matchMedia(desktopQuery);
+  media.addEventListener("change", callback);
+  return () => media.removeEventListener("change", callback);
+}
+
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
+  const desktop = useSyncExternalStore(subscribeDesktop, () => window.matchMedia(desktopQuery).matches, () => false);
+  const [navigationOpen, setNavigationOpen] = useState(false);
+  const drawerRef = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    if (!navigationOpen) return;
+    const dialog = drawerRef.current!;
+    const opener = document.activeElement as HTMLElement | null;
+    const previousOverflow = document.body.style.overflow;
+    dialog.showModal();
+    document.body.style.overflow = "hidden";
+    const media = window.matchMedia(desktopQuery);
+    const closeOnDesktop = () => { if (media.matches) setNavigationOpen(false); };
+    media.addEventListener("change", closeOnDesktop);
+    return () => {
+      dialog.close();
+      document.body.style.overflow = previousOverflow;
+      media.removeEventListener("change", closeOnDesktop);
+      if (opener?.isConnected) opener.focus();
+    };
+  }, [navigationOpen]);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [cmdkOpen, setCmdkOpen] = useState(false);
   const [selectedBlog, setSelectedBlog] = useState<BlogItem | null>(null);
@@ -25,21 +52,35 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     <ThemeProvider>
       <div className="min-h-screen bg-[var(--bg)] text-[var(--fg)] flex text-[13px]">
         {/* Persistent Sidebar */}
-        <Sidebar
-          collapsed={sidebarCollapsed}
-          onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
-        />
+        <div className="hidden md:block">
+          <Sidebar
+            collapsed={!desktop || sidebarCollapsed}
+            onToggleCollapse={() => desktop ? setSidebarCollapsed(!sidebarCollapsed) : setNavigationOpen(true)}
+          />
+        </div>
+        <dialog
+          id="dashboard-navigation-drawer"
+          ref={drawerRef}
+          aria-label="Main navigation"
+          className="navigation-drawer"
+          onCancel={() => setNavigationOpen(false)}
+          onClick={(event) => { if (event.target === event.currentTarget) setNavigationOpen(false); }}
+        >
+          {navigationOpen && <Sidebar drawer collapsed={false} onToggleCollapse={() => setNavigationOpen(false)} onNavigate={() => setNavigationOpen(false)} />}
+        </dialog>
 
         {/* Main Content Area */}
         <div className="flex-1 min-w-0 flex flex-col">
           {/* Top Navbar */}
           <Navbar
+            onOpenNavigation={() => setNavigationOpen(true)}
+            navigationOpen={navigationOpen}
             onOpenCmdk={() => setCmdkOpen(true)}
             onOpenRunPipeline={() => setRunPipelineOpen(true)}
           />
 
           {/* Main Page Content */}
-          <main className="flex-1 min-w-0 p-[18px]">
+          <main className="flex-1 min-w-0 p-3 md:p-4 min-[1200px]:p-[18px]">
             <ErrorBoundary>
               {React.isValidElement(children)
                 ? React.cloneElement(children as React.ReactElement<{
