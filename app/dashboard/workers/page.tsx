@@ -219,7 +219,7 @@ export default function WorkersPage() {
   return (
     <div className="flex flex-col gap-[13px]">
       {/* Header */}
-      <div className="flex items-end justify-between gap-[16px] flex-wrap">
+      <div className="flex flex-col items-stretch justify-between gap-[12px] sm:flex-row sm:items-end sm:gap-[16px]">
         <div>
           <h1 className="margin-0 text-[19px] font-extrabold tracking-tight text-[var(--fg)]">
             Queue & Worker Operations
@@ -231,14 +231,14 @@ export default function WorkersPage() {
             </span>
           </p>
         </div>
-        <div className="flex gap-[7px]">
+        <div className="grid grid-cols-2 gap-[7px] sm:flex">
           <button
             aria-label={allPaused ? "Resume all queues" : "Pause all queues"}
             disabled={busyAction !== null}
             onClick={() =>
               runAction(allPaused ? "resume-all" : "pause-all", undefined, allPaused ? "Queues resumed" : "Queues paused")
             }
-            className="h-[30px] px-[12px] rounded-[8px] border border-[var(--bd)] bg-[var(--card)] text-[var(--amber)] text-[11.5px] font-semibold hover:border-[var(--amber)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="h-[42px] px-[8px] rounded-[8px] border border-[var(--bd)] bg-[var(--card)] text-[11.5px] font-semibold hover:border-[var(--amber)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed sm:h-[30px] sm:px-[12px]"
           >
             {busyAction === "pause-all" || busyAction === "resume-all"
               ? "Working…"
@@ -250,7 +250,7 @@ export default function WorkersPage() {
             aria-label="Retry all failed jobs"
             disabled={busyAction !== null}
             onClick={() => runAction("retry-all-failed", undefined, "Failed jobs re-queued")}
-            className="h-[30px] px-[12px] rounded-[8px] border border-transparent bg-[var(--indigo)] text-white text-[11.5px] font-semibold hover:bg-[#4f46e5] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="h-[42px] px-[8px] rounded-[8px] border border-transparent bg-[var(--indigo)] text-white text-[11.5px] font-semibold hover:bg-[#4f46e5] transition-colors disabled:opacity-50 disabled:cursor-not-allowed sm:h-[30px] sm:px-[12px]"
           >
             {busyAction === "retry-all-failed" ? "Working…" : "Retry all failed"}
           </button>
