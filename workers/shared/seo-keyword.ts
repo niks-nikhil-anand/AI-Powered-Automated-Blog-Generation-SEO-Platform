@@ -11,8 +11,28 @@
  * case, curly quotes, unicode dashes, and collapsed/non-breaking whitespace
  * (the kinds of characters an editor pastes in from a doc without meaning to).
  */
-export function normalizeForKeywordMatch(value: string): string {
+function decodeHtmlEntities(value: string): string {
   return value
+    .replace(/&#x([0-9a-f]+);?/gi, (_, hex: string) => String.fromCodePoint(Number.parseInt(hex, 16)))
+    .replace(/&#([0-9]+);?/g, (_, dec: string) => String.fromCodePoint(Number.parseInt(dec, 10)))
+    .replace(/&nbsp;?/gi, " ")
+    .replace(/&amp;?/gi, "&")
+    .replace(/&quot;?/gi, '"')
+    .replace(/&apos;?/gi, "'")
+    .replace(/&lt;?/gi, "<")
+    .replace(/&gt;?/gi, ">");
+}
+
+export function cleanBriefText(value: string): string {
+  return decodeHtmlEntities(value)
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .replace(/\u00a0/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function normalizeForKeywordMatch(value: string): string {
+  return cleanBriefText(value)
     .toLowerCase()
     .replace(/[‘’‛]/g, "'")
     .replace(/[“”]/g, '"')
@@ -57,8 +77,8 @@ export function ensureKeywordInTitle(
   options: { maxLength?: number } = {}
 ): string {
   const { maxLength } = options;
-  const base = title.trim();
-  const phrase = keyword?.trim() ?? "";
+  const base = cleanBriefText(title);
+  const phrase = keyword ? cleanBriefText(keyword) : "";
 
   if (!phrase) return maxLength ? truncateAtWordBoundary(base, maxLength) : base;
   if (containsKeyword(base, phrase)) return maxLength ? truncateAtWordBoundary(base, maxLength) : base;
@@ -89,7 +109,7 @@ export function ensureKeywordInH1(
   markdown: string,
   focusKeyword?: string | null
 ): { markdown: string; repairedH1: string | null; previousH1: string | null } {
-  const keyword = focusKeyword?.trim();
+  const keyword = focusKeyword ? cleanBriefText(focusKeyword) : "";
   const h1 = extractH1(markdown);
   if (!keyword || !h1 || containsKeyword(h1, keyword)) {
     return { markdown, repairedH1: null, previousH1: h1 };
