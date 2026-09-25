@@ -3,6 +3,7 @@ import { prisma } from "./prisma";
 import { logger } from "./logger";
 import { JOB_IDS, planningQueue, outlineQueue, writingQueue } from "./queues";
 import { getSetting, DAILY_TARGET_KEY } from "./settings";
+import { ELIGIBLE_BACKLOG_STATUSES, compareBacklogCandidates } from "./backlog-selection";
 
 const log = logger.child({ worker: "daily-target" });
 
@@ -18,10 +19,10 @@ export type DailyTargetStatus = {
   inFlight: number;
   remaining: number;
   backlogAvailable: number;
+  backlogPending: number;
+  backlogCancelled: number;
+  backlogFailed: number;
 };
-
-/** Highest-priority first, then oldest submission - the order the backlog drains in. */
-const BACKLOG_ORDER = [{ priority: "desc" as const }, { createdAt: "asc" as const }];
 
 /**
  * publishedToday + inFlight (DRAFT/PENDING_REVIEW - the two non-terminal
@@ -29,20 +30,28 @@ const BACKLOG_ORDER = [{ priority: "desc" as const }, { createdAt: "asc" as cons
  * double-counting: a blog that later publishes drops out of inFlight and
  * into publishedToday, a blog that permanently fails drops out of both.
  *
- * backlogAvailable is the submission backlog: BlogInput rows the user
- * submitted but chose not to start immediately (status PENDING). That
- * replaced the research worker's "qualified but undispatched trend" pool.
+ * backlogAvailable is the reusable submission backlog: PENDING rows first,
+ * then CANCELLED rows, then FAILED rows as last-resort backfill.
  */
 export async function getDailyTargetStatus(): Promise<DailyTargetStatus> {
   const target = await getSetting(DAILY_TARGET_KEY, env.DAILY_BLOG_TARGET);
-  const [publishedToday, inFlight, backlogAvailable] = await Promise.all([
+  const [publishedToday, inFlight, backlogCounts] = await Promise.all([
     prisma.blog.count({ where: { status: "PUBLISHED", updatedAt: { gte: startOfToday() } } }),
     prisma.blog.count({ where: { status: { in: ["DRAFT", "PENDING_REVIEW"] } } }),
-    prisma.blogInput.count({ where: { status: "PENDING" } }),
+    prisma.blogInput.groupBy({
+      by: ["status"],
+      where: { status: { in: [...ELIGIBLE_BACKLOG_STATUSES] } },
+      _count: { _all: true },
+    }),
   ]);
+  const countFor = (status: string) => backlogCounts.find((row) => row.status === status)?._count._all ?? 0;
+  const backlogPending = countFor("PENDING");
+  const backlogCancelled = countFor("CANCELLED");
+  const backlogFailed = countFor("FAILED");
+  const backlogAvailable = backlogPending + backlogCancelled + backlogFailed;
   const remaining = Math.max(0, target - publishedToday - inFlight);
 
-  return { target, publishedToday, inFlight, remaining, backlogAvailable };
+  return { target, publishedToday, inFlight, remaining, backlogAvailable, backlogPending, backlogCancelled, backlogFailed };
 }
 
 /**
@@ -81,13 +90,25 @@ export async function dispatchBlogInput(input: {
   );
   await prisma.blogInput.update({
     where: { id: input.id },
-    data: { status: "PROCESSING", dispatchedAt: new Date(), failureReason: null },
+    data: { status: "PROCESSING", dispatchedAt: new Date(), processedAt: null, failureReason: null },
   });
 }
 
-/** The next PENDING submission a slot or reconcile tick should pick up. */
-export async function nextPendingBlogInput() {
-  return prisma.blogInput.findFirst({ where: { status: "PENDING" }, orderBy: BACKLOG_ORDER });
+/** The next eligible submission a slot or reconcile tick should pick up. */
+export async function nextEligibleBlogInput() {
+  const inputs = await prisma.blogInput.findMany({
+    where: { status: { in: [...ELIGIBLE_BACKLOG_STATUSES] } },
+    orderBy: { createdAt: "asc" },
+  });
+  return inputs.sort(compareBacklogCandidates)[0] ?? null;
+}
+
+async function nextEligibleBlogInputs(take: number) {
+  const inputs = await prisma.blogInput.findMany({
+    where: { status: { in: [...ELIGIBLE_BACKLOG_STATUSES] } },
+    orderBy: { createdAt: "asc" },
+  });
+  return inputs.sort(compareBacklogCandidates).slice(0, take);
 }
 
 /**
@@ -106,23 +127,19 @@ export async function reconcileDailyTarget() {
 
   if (status.backlogAvailable === 0) {
     log.warn(
-      `Daily target short by ${status.remaining}, but no PENDING blog submissions are queued - add one at /dashboard/blogs/new`,
+      `Daily target short by ${status.remaining}, but no eligible blog submissions are queued - add one at /dashboard/blogs/new`,
       status
     );
     return { ...status, dispatched: 0 };
   }
 
   const take = Math.min(status.remaining, status.backlogAvailable);
-  const inputs = await prisma.blogInput.findMany({
-    where: { status: "PENDING" },
-    orderBy: BACKLOG_ORDER,
-    take,
-  });
+  const inputs = await nextEligibleBlogInputs(take);
 
   for (const input of inputs) {
     await dispatchBlogInput(input);
   }
 
-  log.info(`Reconciled daily target: dispatched ${inputs.length}/${status.remaining} from the submission backlog`, status);
+  log.info(`Reconciled daily target: dispatched ${inputs.length}/${status.remaining} from the eligible submission backlog`, status);
   return { ...status, dispatched: inputs.length };
 }
