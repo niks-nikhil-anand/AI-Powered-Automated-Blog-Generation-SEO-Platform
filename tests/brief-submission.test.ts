@@ -581,6 +581,19 @@ assert.equal(minimal.outlineJson, undefined);
 assert.equal(minimal.briefDirectives, undefined);
 assert.equal(minimal.contentBounds, undefined);
 
+// A mixed editor payload can contain a stale top-level blogTitle and a
+// corrected title selected by the form. The selected title must win.
+const mixedPayload = blogInputSchema.parse({
+  title: "Modern Web Development Stack in 2026: A Practical Guide to Choosing Your Stack",
+  blogTitle: "Next.js 16 Migration Guide: How to Upgrade from Next.js 15 Safely",
+  slug: "modern-web-development-stack-2026",
+  seo: { focusKeyword: "modern web development stack 2026" },
+  brief: {
+    blogTitle: "Modern Web Development Stack in 2026: A Practical Guide to Choosing Your Stack",
+  },
+});
+assert.equal(mixedPayload.title, "Modern Web Development Stack in 2026: A Practical Guide to Choosing Your Stack");
+
 // Partial nesting: only an outline, only a length, only links.
 const outlineOnly = blogInputSchema.parse({
   blogTitle: "A brief with only an outline block",

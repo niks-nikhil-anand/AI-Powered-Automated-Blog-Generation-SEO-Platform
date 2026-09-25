@@ -18,6 +18,8 @@ export interface ScheduleSlot {
   generationStart?: string | null;
   /** True when the slot has a publish time configured. */
   configured?: boolean;
+  /** Present right after saving a slot inside the generation lead window. */
+  catchupQueued?: boolean;
 }
 
 interface ScheduleSlotCardProps {
@@ -100,11 +102,11 @@ export function ScheduleSlotCard({ slot, color, onUpdated }: ScheduleSlotCardPro
   };
 
   return (
-    <div className="border border-[var(--bd)] rounded-[12px] p-[13px] bg-[var(--card2)] flex flex-col gap-[10px]">
-      <div className="flex items-center gap-[7px]">
+    <div className="flex min-w-0 flex-col gap-[10px] rounded-[12px] border border-[var(--bd)] bg-[var(--card2)] p-[12px] sm:p-[13px]">
+      <div className="flex min-w-0 items-center gap-[7px]">
         <span className="w-[7px] h-[7px] rounded-full flex-none" style={{ background: color }} />
-        <span className="text-[11.5px] font-bold text-[var(--fg)]">{slot.label}</span>
-        <span className="ml-auto text-[9.5px] font-mono text-[var(--faint)]">{slot.tz ?? "Asia/Kolkata"}</span>
+        <span className="min-w-0 truncate text-[11.5px] font-bold text-[var(--fg)]">{slot.label}</span>
+        <span className="ml-auto shrink-0 text-[9.5px] font-mono text-[var(--faint)]">{slot.tz ?? "Asia/Kolkata"}</span>
       </div>
 
       {editing ? (
@@ -116,7 +118,7 @@ export function ScheduleSlotCard({ slot, color, onUpdated }: ScheduleSlotCardPro
             onChange={(e) => setTimeValue(e.target.value)}
             className="h-[34px] px-[10px] rounded-[8px] border border-[var(--bd)] bg-[var(--card)] text-[var(--fg)] font-mono font-bold text-[15px] outline-none focus:border-[var(--indigo)]"
           />
-          <div className="flex gap-[7px]">
+          <div className="flex flex-wrap gap-[7px]">
             <button
               type="button"
               disabled={saving}
@@ -136,9 +138,9 @@ export function ScheduleSlotCard({ slot, color, onUpdated }: ScheduleSlotCardPro
           </div>
         </div>
       ) : (
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-[8px]">
           <div
-            className="font-mono text-[26px] font-extrabold tracking-wider px-[10px] py-[3px] rounded-[7px]"
+            className="rounded-[7px] px-[10px] py-[3px] font-mono text-[24px] font-extrabold tracking-wider sm:text-[26px]"
             style={{ background: "var(--card)", color }}
           >
             {parsed ? formatHourMinute(parsed.hour, parsed.minute) : "--:--"}
@@ -153,10 +155,12 @@ export function ScheduleSlotCard({ slot, color, onUpdated }: ScheduleSlotCardPro
         </div>
       )}
 
-      <div className="flex items-center justify-between gap-[8px]">
-        <span className="text-[10.5px] text-[var(--mut)]">
+      <div className="flex flex-wrap items-center justify-between gap-[8px]">
+        <span className="min-w-[180px] flex-1 text-[10.5px] leading-relaxed text-[var(--mut)]">
           {!parsed
             ? "Not set - Edit to pick a publish time"
+            : slot.catchupQueued
+              ? `Generation queued now · on air ${slot.publishTime ?? formatHourMinute(parsed.hour, parsed.minute)}`
             : slot.next
               ? `Generation ${formatCountdown(slot.next, now)} · on air ${slot.publishTime ?? formatHourMinute(parsed.hour, parsed.minute)}`
               : `On air ${slot.publishTime ?? formatHourMinute(parsed.hour, parsed.minute)} daily`}
