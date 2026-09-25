@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Prisma } from "@/app/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { blogInputSchema, slugifyTitle } from "@/app/dashboard/blogs/new/types";
 import { dispatchBlogInput } from "@/workers/shared/daily-target";
@@ -37,6 +38,18 @@ async function uniqueInputSlug(base: string): Promise<string> {
   throw new Error(`Failed to generate a unique slug for "${safeBase}"`);
 }
 
+/** BlogInput.title is unique in the DB; keep submissions moving by suffixing hidden/stale duplicates. */
+async function uniqueInputTitle(base: string): Promise<string> {
+  const safeBase = base.trim() || "Untitled blog";
+  let title = safeBase;
+  for (let suffix = 1; suffix < 100; suffix += 1) {
+    const existing = await prisma.blogInput.findUnique({ where: { title }, select: { id: true } });
+    if (!existing) return title;
+    title = `${safeBase} (${suffix + 1})`;
+  }
+  throw new Error(`Failed to generate a unique title for "${safeBase}"`);
+}
+
 /**
  * Accepts a manual blog specification and starts the pipeline.
  *
@@ -57,12 +70,8 @@ export async function POST(req: NextRequest) {
     }
     const validated = parsed.data;
 
-    const existing = await prisma.blogInput.findUnique({ where: { title: validated.title } });
-    if (existing) {
-      return NextResponse.json({ error: "A blog with this title has already been submitted" }, { status: 409 });
-    }
-
-    const slug = await uniqueInputSlug(validated.slug ? slugifyTitle(validated.slug) : slugifyTitle(validated.title));
+    const title = await uniqueInputTitle(validated.title);
+    const slug = await uniqueInputSlug(validated.slug ? slugifyTitle(validated.slug) : slugifyTitle(title));
 
     // Reference sources get the [S1]..[Sn] ids the whole grounding stack
     // keys on (workers/shared/evidence.ts), plus the digest the legacy
@@ -89,7 +98,7 @@ export async function POST(req: NextRequest) {
 
     const blogInput = await prisma.blogInput.create({
       data: {
-        title: validated.title,
+        title,
         slug,
         category: validated.category || (body as Record<string, unknown>).category as string || undefined,
         keywords: validated.primaryKeywords,
@@ -101,14 +110,14 @@ export async function POST(req: NextRequest) {
         focusKeyword: validated.focusKeyword,
         metaTitle: validated.metaTitle,
         metaDescription: validated.metaDescription,
-        outlineJson: (validated.outlineJson as any) ?? undefined,
-        evidenceArticles: evidenceArticles.length > 0 ? (evidenceArticles as any) : undefined,
+        outlineJson: (validated.outlineJson as Prisma.InputJsonValue) ?? undefined,
+        evidenceArticles: evidenceArticles.length > 0 ? (evidenceArticles as Prisma.InputJsonValue) : undefined,
         evidenceSummary,
         priority: validated.priority,
-        status: "PENDING",
+        status: validated.startNow ? "PENDING" : validated.status,
         // The normalized submission is what every worker reads; the original
         // payload rides along under `brief` so nothing the editor wrote is lost.
-        specs: { ...(validated as Record<string, unknown>), brief: (body as Record<string, unknown>) ?? null } as any,
+        specs: { ...(validated as Record<string, unknown>), title, brief: (body as Record<string, unknown>) ?? null } as Prisma.InputJsonValue,
       },
     });
 
@@ -125,8 +134,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: true,
       id: blogInput.id,
-      status: "PENDING",
-      message: "Blog saved to the backlog - the next publish slot will pick it up",
+      status: validated.status,
+      message: "Blog saved with the selected status",
     });
   } catch (error) {
     console.error("Blog input error:", error);
