@@ -136,8 +136,6 @@ export const JOB_IDS = {
   publish: (blogId: string) => `publish-${blogId}`,
   /** dashboard "Run pipeline": double-click within the same minute dedupes. */
   manualReconcile: () => `manual-reconcile-${Math.floor(Date.now() / 60_000)}`,
-  /** schedule edit catch-up: one immediate dispatch per slot/publish target. */
-  slotCatchup: (slot: number, targetPublishAtMs: number) => `scheduled-slot-catchup-${slot}-${targetPublishAtMs}`,
 } as const;
 
 export type PlanningJobPayload = {

@@ -15,7 +15,6 @@ import {
   RECONCILE_SLOT_ID,
   blogSlotId,
   getPublishSlotView,
-  nextOccurrenceOf,
   parseSlotTime,
   reconcilePublishSlots,
   setPublishTarget,
@@ -33,26 +32,21 @@ const log = logger.child({ worker: "scheduler-worker" });
  * Two job kinds:
  *  - "reconcile-daily-target": the safety-net tick (workers/shared/daily-target.ts)
  *    that tops today's pipeline up from the eligible submission backlog.
- *  - "scheduled-slot": one publish slot fired; take the next eligible
- *    submission (PENDING, then CANCELLED, then FAILED) and aim it at that
- *    slot's publish time.
+ *  - "scheduled-slot": one configured run time fired; take the next eligible
+ *    submission (PENDING, then CANCELLED, then FAILED) and start it now.
  *
  * This replaced the research worker, which used to own both schedulers on
  * top of doing trend discovery. Discovery is gone; the schedules are not.
  */
-async function runScheduledSlot(slotNumber: number, targetPublishAtOverride?: number) {
+async function runScheduledSlot(slotNumber: number) {
   const parsed = parseSlotTime(await getSetting<string | null>(slotSettingKey(slotNumber), null));
   if (!parsed) {
     log.warn(`Publish slot ${slotNumber} fired without a configured time - skipping (set it in Settings)`);
     return { slot: slotNumber, dispatchedCount: 0, reason: "slot_unconfigured" };
   }
 
-  const targetPublishAt = Number.isFinite(targetPublishAtOverride)
-    ? Number(targetPublishAtOverride)
-    : nextOccurrenceOf(parsed.hour, parsed.minute, env.TIMEZONE, Date.now());
-  log.info(
-    `Publish slot ${slotNumber} fired - one blog targeting ${new Date(targetPublishAt).toISOString()} (${env.TIMEZONE})`
-  );
+  const targetPublishAt = Date.now();
+  log.info(`Publish slot ${slotNumber} fired - starting one blog now (${env.TIMEZONE})`);
 
   const attempt = await startWorkerAttempt({
     worker: "scheduler-worker",
@@ -170,11 +164,7 @@ export function startSchedulerWorker() {
     QUEUE_NAMES.scheduler,
     (job: Job) =>
       withPipelineRetryPolicy(async () => {
-        if (job.name === "scheduled-slot") {
-          const targetPublishAt =
-            typeof job.data.targetPublishAt === "string" ? Date.parse(job.data.targetPublishAt) : Number.NaN;
-          return await runScheduledSlot(Number(job.data.slot), targetPublishAt);
-        }
+        if (job.name === "scheduled-slot") return await runScheduledSlot(Number(job.data.slot));
         return await reconcileDailyTarget();
       }),
     { ...workerOptions(1) }
