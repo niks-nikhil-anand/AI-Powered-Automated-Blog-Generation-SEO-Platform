@@ -1,6 +1,6 @@
 import { env } from "./env";
 import { redis } from "./redis";
-import { schedulerQueue } from "./queues";
+import { JOB_IDS, schedulerQueue } from "./queues";
 import { DAILY_TARGET_KEY, deleteSetting, getAllSettings, getSetting, setSetting } from "./settings";
 
 /**
@@ -146,6 +146,8 @@ export type PublishSlotView = {
   /** Next generation fire time (epoch ms) straight from BullMQ; null = not registered. */
   next: number | null;
   configured: boolean;
+  /** True only on the immediate response after saving inside the lead window. */
+  catchupQueued?: boolean;
 };
 
 /**
@@ -230,6 +232,17 @@ export async function upsertSlotTime(n: number, hour: number, minute: number): P
   const schedulers = await schedulerQueue.getJobSchedulers();
   const registered = schedulers.find((scheduler) => scheduler.key === blogSlotId(n));
   const fire = fireClockTime(hour, minute, env.SLOT_GENERATION_LEAD_MINUTES);
+  const now = Date.now();
+  const targetPublishAt = nextOccurrenceOf(hour, minute, env.TIMEZONE, now);
+  const fireAt = targetPublishAt - env.SLOT_GENERATION_LEAD_MINUTES * 60_000;
+  const catchupQueued = fireAt <= now && now < targetPublishAt;
+  if (catchupQueued) {
+    await schedulerQueue.add(
+      "scheduled-slot",
+      { slot: n, targetPublishAt: new Date(targetPublishAt).toISOString(), catchup: true },
+      { jobId: JOB_IDS.slotCatchup(n, targetPublishAt) }
+    );
+  }
   return {
     id: blogSlotId(n),
     n,
@@ -237,8 +250,9 @@ export async function upsertSlotTime(n: number, hour: number, minute: number): P
     pattern: `${minute} ${hour} * * *`,
     publishTime: formatHHMM(hour, minute),
     generationStart: formatHHMM(fire.hour, fire.minute),
-    next: typeof registered?.next === "number" ? registered.next : null,
+    next: catchupQueued ? now : typeof registered?.next === "number" ? registered.next : null,
     configured: true,
+    catchupQueued,
   };
 }
 

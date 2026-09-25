@@ -7,7 +7,7 @@ import { workerOptions } from "../shared/worker-options";
 import {
   dispatchBlogInput,
   getDailyTargetStatus,
-  nextPendingBlogInput,
+  nextEligibleBlogInput,
   reconcileDailyTarget,
 } from "../shared/daily-target";
 import { getSetting } from "../shared/settings";
@@ -32,21 +32,24 @@ const log = logger.child({ worker: "scheduler-worker" });
  *
  * Two job kinds:
  *  - "reconcile-daily-target": the safety-net tick (workers/shared/daily-target.ts)
- *    that tops today's pipeline up from the PENDING submission backlog.
- *  - "scheduled-slot": one publish slot fired; take the next PENDING
- *    submission and aim it at that slot's publish time.
+ *    that tops today's pipeline up from the eligible submission backlog.
+ *  - "scheduled-slot": one publish slot fired; take the next eligible
+ *    submission (PENDING, then CANCELLED, then FAILED) and aim it at that
+ *    slot's publish time.
  *
  * This replaced the research worker, which used to own both schedulers on
  * top of doing trend discovery. Discovery is gone; the schedules are not.
  */
-async function runScheduledSlot(slotNumber: number) {
+async function runScheduledSlot(slotNumber: number, targetPublishAtOverride?: number) {
   const parsed = parseSlotTime(await getSetting<string | null>(slotSettingKey(slotNumber), null));
   if (!parsed) {
     log.warn(`Publish slot ${slotNumber} fired without a configured time - skipping (set it in Settings)`);
     return { slot: slotNumber, dispatchedCount: 0, reason: "slot_unconfigured" };
   }
 
-  const targetPublishAt = nextOccurrenceOf(parsed.hour, parsed.minute, env.TIMEZONE, Date.now());
+  const targetPublishAt = Number.isFinite(targetPublishAtOverride)
+    ? Number(targetPublishAtOverride)
+    : nextOccurrenceOf(parsed.hour, parsed.minute, env.TIMEZONE, Date.now());
   log.info(
     `Publish slot ${slotNumber} fired - one blog targeting ${new Date(targetPublishAt).toISOString()} (${env.TIMEZONE})`
   );
@@ -72,11 +75,11 @@ async function runScheduledSlot(slotNumber: number) {
       return output;
     }
 
-    const input = await nextPendingBlogInput();
+    const input = await nextEligibleBlogInput();
     if (!input) {
-      const output = { slot: slotNumber, dispatchedCount: 0, reason: "no_pending_submission", ...status };
+      const output = { slot: slotNumber, dispatchedCount: 0, reason: "no_eligible_submission", ...status };
       log.warn(
-        `Publish slot ${slotNumber}: no PENDING blog submission in the backlog - queue one at /dashboard/blogs/new`,
+        `Publish slot ${slotNumber}: no eligible blog submission in the backlog - queue one at /dashboard/blogs/new`,
         output
       );
       await passWorkerAttempt({
@@ -94,7 +97,7 @@ async function runScheduledSlot(slotNumber: number) {
     await setPublishTarget(input.id, targetPublishAt);
     await dispatchBlogInput(input);
 
-    const output = { slot: slotNumber, dispatchedCount: 1, blogInputId: input.id, title: input.title };
+    const output = { slot: slotNumber, dispatchedCount: 1, blogInputId: input.id, title: input.title, pickedStatus: input.status };
     log.info(
       `Publish slot ${slotNumber}: dispatched "${input.title}" targeting ${new Date(targetPublishAt).toISOString()}`,
       output
@@ -167,7 +170,11 @@ export function startSchedulerWorker() {
     QUEUE_NAMES.scheduler,
     (job: Job) =>
       withPipelineRetryPolicy(async () => {
-        if (job.name === "scheduled-slot") return await runScheduledSlot(Number(job.data.slot));
+        if (job.name === "scheduled-slot") {
+          const targetPublishAt =
+            typeof job.data.targetPublishAt === "string" ? Date.parse(job.data.targetPublishAt) : Number.NaN;
+          return await runScheduledSlot(Number(job.data.slot), targetPublishAt);
+        }
         return await reconcileDailyTarget();
       }),
     { ...workerOptions(1) }
