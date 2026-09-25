@@ -43,6 +43,17 @@ async function uniqueInputSlug(base: string, currentId: string): Promise<string>
   throw new Error(`Failed to generate a unique slug for "${safeBase}"`);
 }
 
+async function uniqueInputTitle(base: string, currentId: string): Promise<string> {
+  const safeBase = base.trim() || "Untitled blog";
+  let title = safeBase;
+  for (let suffix = 1; suffix < 100; suffix += 1) {
+    const existing = await prisma.blogInput.findUnique({ where: { title }, select: { id: true } });
+    if (!existing || existing.id === currentId) return title;
+    title = `${safeBase} (${suffix + 1})`;
+  }
+  throw new Error(`Failed to generate a unique title for "${safeBase}"`);
+}
+
 /** One submission with everything the detail view needs. */
 export async function GET(_request: Request, context: RouteContext) {
   const { id } = await context.params;
@@ -121,15 +132,8 @@ export async function PATCH(request: Request, context: RouteContext) {
     }
     const validated = parsed.data;
 
-    const titleClash = await prisma.blogInput.findFirst({
-      where: { title: validated.title, NOT: { id } },
-      select: { id: true },
-    });
-    if (titleClash) {
-      return NextResponse.json({ error: "A different content plan already uses this title" }, { status: 409 });
-    }
-
-    const slug = await uniqueInputSlug(validated.slug ? slugifyTitle(validated.slug) : slugifyTitle(validated.title), id);
+    const title = await uniqueInputTitle(validated.title, id);
+    const slug = await uniqueInputSlug(validated.slug ? slugifyTitle(validated.slug) : slugifyTitle(title), id);
     const { evidenceArticles, evidenceSummary } = evidenceFromSources(validated.sources ?? []);
 
     const updated = await prisma.$transaction(async (tx) => {
@@ -137,7 +141,7 @@ export async function PATCH(request: Request, context: RouteContext) {
       return tx.blogInput.update({
         where: { id },
         data: {
-          title: validated.title,
+          title,
           slug,
           category: validated.category || (body as Record<string, unknown>).category as string || null,
           keywords: validated.primaryKeywords,
@@ -148,17 +152,17 @@ export async function PATCH(request: Request, context: RouteContext) {
           contentLength: validated.contentLength,
           focusKeyword: validated.focusKeyword ?? null,
           metaTitle: validated.metaTitle ?? null,
-          outlineJson: (validated.outlineJson as any) ?? Prisma.JsonNull,
-          evidenceArticles: evidenceArticles.length > 0 ? (evidenceArticles as any) : Prisma.JsonNull,
+          outlineJson: (validated.outlineJson as Prisma.InputJsonValue) ?? Prisma.JsonNull,
+          evidenceArticles: evidenceArticles.length > 0 ? (evidenceArticles as Prisma.InputJsonValue) : Prisma.JsonNull,
           evidenceSummary,
           priority: validated.priority,
-          status: "PENDING",
+          status: validated.startNow ? "PENDING" : validated.status,
           failureReason: null,
           processedAt: null,
           dispatchedAt: null,
           // Workers read the normalized submission; the original payload is kept
           // under `brief` (same contract as POST /api/blogs/input).
-          specs: { ...(validated as Record<string, unknown>), brief: (body as Record<string, unknown>) ?? null } as any,
+          specs: { ...(validated as Record<string, unknown>), title, brief: (body as Record<string, unknown>) ?? null } as Prisma.InputJsonValue,
         },
       });
     });

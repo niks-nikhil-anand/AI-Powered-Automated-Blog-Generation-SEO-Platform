@@ -364,7 +364,11 @@ export function normalizeBrief(raw: unknown): NormalizedBrief {
   // Start from the payload so unmapped/flat keys survive untouched.
   const out: Record<string, unknown> = { ...brief };
 
-  put(out, "title", first(str(brief.blogTitle), str(brief.title), str(metadata.title), str(record(brief.outlineJson).h1)));
+  // When the modal/API has already selected a title from the pasted JSON,
+  // keep that explicit value. Some pasted briefs contain an older top-level
+  // blogTitle plus the intended brief nested under `brief`, so letting
+  // blogTitle win here can resurrect the stale title during validation.
+  put(out, "title", first(str(brief.title), str(brief.blogTitle), str(metadata.title), str(record(brief.outlineJson).h1)));
   put(out, "slug", first(str(brief.slug), str(metadata.slug)));
   put(out, "category", first(str(brief.category), str(metadata.category)));
   put(out, "metaTitle", first(str(brief.metaTitle), str(metadata.metaTitle)));
