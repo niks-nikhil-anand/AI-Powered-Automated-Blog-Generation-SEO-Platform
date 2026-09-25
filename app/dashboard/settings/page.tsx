@@ -345,7 +345,7 @@ export default function SettingsPage() {
             )}
             <span className="max-w-[900px] text-[11px] leading-relaxed text-[var(--mut)] sm:text-right">
               One slot per blog in the Daily Blog Goal. The time you set is when the scheduler starts that
-              blog pipeline. Future times run today; passed times run tomorrow. Edits apply instantly.
+              blog pipeline. Future minutes run today; a minute that already passed, even by seconds, runs tomorrow.
             </span>
           </div>
         </div>

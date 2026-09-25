@@ -32,6 +32,12 @@ services:
   # worker entrypoint writes them to an ephemeral in-container JSON file for
   # Google auth; no host credential file is mounted or baked into the image.
   scheduler-worker:
+    # Disabled by default for local development because `npm run worker:all`
+    # also starts a scheduler consumer against the same Redis queue. Running
+    # both lets an old Docker image race the local patched worker and consume
+    # scheduled jobs with stale code. Use `--profile docker-scheduler` only
+    # when you intentionally want the Docker image to own scheduling.
+    profiles: ["docker-scheduler"]
     build:
       context: .
       dockerfile: docker/Dockerfile.worker
@@ -138,4 +144,3 @@ services:
 
 volumes:
   redis_data:
-
