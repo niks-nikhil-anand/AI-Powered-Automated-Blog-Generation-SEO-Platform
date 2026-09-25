@@ -42,6 +42,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [selectedBlog, setSelectedBlog] = useState<BlogItem | null>(null);
   const [blogModalOpen, setBlogModalOpen] = useState(false);
   const [runPipelineOpen, setRunPipelineOpen] = useState(false);
+  const desktopSidebarCollapsed = !desktop || sidebarCollapsed;
+  const desktopSidebarWidth = desktopSidebarCollapsed ? "md:w-[76px]" : "md:w-[252px]";
 
   const handleOpenBlogDetail = (blog: BlogItem) => {
     setSelectedBlog(blog);
@@ -52,11 +54,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     <ThemeProvider>
       <div className="min-h-screen bg-[var(--bg)] text-[var(--fg)] flex text-[13px]">
         {/* Persistent Sidebar */}
-        <div className="hidden md:block">
-          <Sidebar
-            collapsed={!desktop || sidebarCollapsed}
-            onToggleCollapse={() => desktop ? setSidebarCollapsed(!sidebarCollapsed) : setNavigationOpen(true)}
-          />
+        <div className={`hidden md:block md:flex-none ${desktopSidebarWidth} transition-[width] duration-200 motion-reduce:transition-none`}>
+          <div className="fixed inset-y-0 left-0 z-50">
+            <Sidebar
+              collapsed={desktopSidebarCollapsed}
+              onToggleCollapse={() => desktop ? setSidebarCollapsed(!sidebarCollapsed) : setNavigationOpen(true)}
+            />
+          </div>
         </div>
         <dialog
           id="dashboard-navigation-drawer"
