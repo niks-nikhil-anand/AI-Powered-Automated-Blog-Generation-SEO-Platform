@@ -105,6 +105,16 @@ type Analytics = {
   avgLatencyMs: number;
 };
 
+type BlogStatusSummary = {
+  total: number;
+  published: number;
+  pending: number;
+  processing: number;
+  cancelled: number;
+  failed: number;
+  completed: number;
+};
+
 const emptyAnalytics: Analytics = {
   cost: {
     today: 0,
@@ -126,6 +136,16 @@ const emptyAnalytics: Analytics = {
   maxDailyCost: 0,
   calls: 0,
   avgLatencyMs: 0,
+};
+
+const emptyBlogStatus: BlogStatusSummary = {
+  total: 0,
+  published: 0,
+  pending: 0,
+  processing: 0,
+  cancelled: 0,
+  failed: 0,
+  completed: 0,
 };
 
 export default function ExecutiveDashboard({ onOpenBlogModal, onOpenRunPipeline }: DashboardPageProps) {
@@ -159,6 +179,7 @@ export default function ExecutiveDashboard({ onOpenBlogModal, onOpenRunPipeline 
     publish: 0,
   });
   const [stageStatus, setStageStatus] = useState<Record<StageKey, StageStatus>>(emptyStageStatus);
+  const [blogStatus, setBlogStatus] = useState<BlogStatusSummary>(emptyBlogStatus);
   const [pipeline, setPipeline] = useState({
     active: 0,
     waiting: 0,
@@ -185,6 +206,7 @@ export default function ExecutiveDashboard({ onOpenBlogModal, onOpenRunPipeline 
           setAnalytics(data.analytics ?? emptyAnalytics);
           setStageCounts(data.stages);
           setStageStatus({ ...emptyStageStatus, ...(data.stageStatus ?? {}) });
+          setBlogStatus({ ...emptyBlogStatus, ...(data.blogStatus ?? {}) });
           setPipeline(data.pipeline ?? { active: 0, waiting: 0, delayed: 0, failed: 0, completed: 0, state: "idle" });
           setRecentBlogs((data.blogs ?? []).slice(0, 6));
           setLoadError(null);
@@ -317,6 +339,48 @@ export default function ExecutiveDashboard({ onOpenBlogModal, onOpenRunPipeline 
           : pipeline.failed > 0
             ? `${pipeline.failed} failed jobs`
             : "No active jobs";
+  const statusItems = [
+    {
+      label: "Published",
+      value: blogStatus.published,
+      hint: "live blogs",
+      color: "var(--emerald)",
+      bg: "rgba(16,185,129,0.12)",
+      border: "rgba(16,185,129,0.28)",
+    },
+    {
+      label: "Processing",
+      value: blogStatus.processing,
+      hint: "in pipeline",
+      color: "var(--indigo)",
+      bg: "rgba(99,102,241,0.13)",
+      border: "rgba(99,102,241,0.3)",
+    },
+    {
+      label: "Pending",
+      value: blogStatus.pending,
+      hint: "backlog",
+      color: "var(--amber)",
+      bg: "rgba(245,158,11,0.12)",
+      border: "rgba(245,158,11,0.28)",
+    },
+    {
+      label: "Cancelled",
+      value: blogStatus.cancelled,
+      hint: "paused",
+      color: "var(--mut)",
+      bg: "var(--card2)",
+      border: "var(--bd)",
+    },
+    {
+      label: "Failed",
+      value: blogStatus.failed,
+      hint: "needs attention",
+      color: "var(--rose)",
+      bg: "rgba(244,63,94,0.11)",
+      border: "rgba(244,63,94,0.28)",
+    },
+  ];
 
   return (
     <div className="flex flex-col gap-[14px]">
@@ -392,6 +456,42 @@ export default function ExecutiveDashboard({ onOpenBlogModal, onOpenRunPipeline 
         {metrics.map((m, idx) => (
           <MetricCard key={idx} {...m} />
         ))}
+      </div>
+
+      {/* Blog Status Summary */}
+      <div className="bg-[var(--card)] border border-[var(--bd)] rounded-[12px] shadow-[var(--shadow)] overflow-hidden">
+        <div className="flex flex-col gap-[8px] p-[12px_14px] border-b border-[var(--bd)] sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <div className="text-[13px] font-bold text-[var(--fg)]">Blog status</div>
+            <div className="text-[11px] text-[var(--mut)] mt-[2px]">
+              All submitted blogs by current lifecycle state
+            </div>
+          </div>
+          <div className="inline-flex w-fit items-center gap-[8px] rounded-[8px] border border-[var(--bd)] bg-[var(--card2)] px-[10px] py-[6px]">
+            <span className="text-[10px] font-bold uppercase tracking-[0.08em] text-[var(--mut)]">Total</span>
+            <span className="font-mono text-[15px] font-extrabold text-[var(--fg)]">{blogStatus.total}</span>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-[8px] p-[12px] sm:grid-cols-3 lg:grid-cols-5">
+          {statusItems.map((item) => (
+            <div
+              key={item.label}
+              className="rounded-[9px] border p-[10px] min-h-[86px] flex flex-col justify-between"
+              style={{ background: item.bg, borderColor: item.border }}
+            >
+              <div className="flex items-center gap-[7px]">
+                <span className="h-[8px] w-[8px] rounded-full" style={{ background: item.color }} />
+                <span className="text-[11px] font-bold text-[var(--fg2)]">{item.label}</span>
+              </div>
+              <div>
+                <div className="font-mono text-[24px] font-extrabold leading-none text-[var(--fg)]">
+                  {item.value}
+                </div>
+                <div className="mt-[5px] text-[10px] font-medium text-[var(--mut)]">{item.hint}</div>
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* Real-Time Worker Pipeline Flow */}

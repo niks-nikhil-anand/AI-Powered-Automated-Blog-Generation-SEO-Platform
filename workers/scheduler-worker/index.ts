@@ -10,7 +10,7 @@ import {
   nextEligibleBlogInput,
   reconcileDailyTarget,
 } from "../shared/daily-target";
-import { getSetting } from "../shared/settings";
+import { getSetting, getSettingFresh } from "../shared/settings";
 import {
   RECONCILE_SLOT_ID,
   blogSlotId,
@@ -39,21 +39,28 @@ const log = logger.child({ worker: "scheduler-worker" });
  * top of doing trend discovery. Discovery is gone; the schedules are not.
  */
 async function runScheduledSlot(slotNumber: number) {
-  const parsed = parseSlotTime(await getSetting<string | null>(slotSettingKey(slotNumber), null));
-  if (!parsed) {
-    log.warn(`Publish slot ${slotNumber} fired without a configured time - skipping (set it in Settings)`);
-    return { slot: slotNumber, dispatchedCount: 0, reason: "slot_unconfigured" };
-  }
-
   const targetPublishAt = Date.now();
-  log.info(`Publish slot ${slotNumber} fired - starting one blog now (${env.TIMEZONE})`);
-
   const attempt = await startWorkerAttempt({
     worker: "scheduler-worker",
     input: { slot: slotNumber, targetPublishAt: new Date(targetPublishAt).toISOString() },
   });
 
   try {
+    const parsed = parseSlotTime(await getSettingFresh<string | null>(slotSettingKey(slotNumber), null));
+    if (!parsed) {
+      const output = { slot: slotNumber, dispatchedCount: 0, reason: "slot_unconfigured" };
+      log.warn(`Publish slot ${slotNumber} fired without a configured time - skipping (set it in Settings)`);
+      await passWorkerAttempt({
+        workflowRunId: attempt.workflow.id,
+        attemptId: attempt.attempt.id,
+        output,
+        nextStage: "stopped",
+      });
+      return output;
+    }
+
+    log.info(`Publish slot ${slotNumber} fired - starting one blog now (${env.TIMEZONE})`);
+
     // The Daily Blog Goal is a ceiling as well as a floor: a slot that fires
     // after the day is already covered leaves the backlog alone.
     const status = await getDailyTargetStatus();
