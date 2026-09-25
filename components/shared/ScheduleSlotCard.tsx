@@ -7,19 +7,17 @@ import { useLiveNow } from "./WorldClocks";
 export interface ScheduleSlot {
   id: string;
   label: string;
-  /** Publish-time daily cron ("M H * * *") - the time the blog goes live. Null = not configured. */
+  /** Run-time daily cron ("M H * * *") - the time the scheduler starts this slot. Null = not configured. */
   pattern: string | null;
   tz?: string | null;
-  /** Next generation fire time (epoch ms) from BullMQ - earlier than publish by the lead. */
+  /** Next scheduler fire time (epoch ms) from BullMQ. */
   next: number | null;
-  /** "HH:MM" target publish time, straight from the API. */
+  /** "HH:MM" configured run time, straight from the API. */
   publishTime?: string | null;
-  /** "HH:MM" wall-clock generation start (publish minus lead). */
+  /** Back-compat alias for the configured run time. */
   generationStart?: string | null;
-  /** True when the slot has a publish time configured. */
+  /** True when the slot has a run time configured. */
   configured?: boolean;
-  /** Present right after saving a slot inside the generation lead window. */
-  catchupQueued?: boolean;
 }
 
 interface ScheduleSlotCardProps {
@@ -30,10 +28,8 @@ interface ScheduleSlotCardProps {
 
 /**
  * Editable digital-clock card for one publish slot. The time shown and
- * edited is the TARGET PUBLISH time (when the blog goes live), not the
- * generation start - generation fires earlier by the lead and a finished
- * blog is held until this time. Saves immediately against the live BullMQ
- * scheduler and persists to AppSetting, so it survives worker restarts.
+ * edited is the scheduler RUN time. Saves immediately against the live
+ * BullMQ scheduler and persists to AppSetting, so it survives worker restarts.
  */
 export function ScheduleSlotCard({ slot, color, onUpdated }: ScheduleSlotCardProps) {
   const now = useLiveNow();
@@ -69,7 +65,7 @@ export function ScheduleSlotCard({ slot, color, onUpdated }: ScheduleSlotCardPro
       if (!res.ok || !data.ok) throw new Error(data.error || "Failed to update schedule");
       onUpdated({ ...slot, ...data });
       setMessage({
-        text: `Saved - publishes daily at ${formatHourMinute(hour, minute)} (survives restarts).`,
+        text: `Saved - starts daily at ${formatHourMinute(hour, minute)} (survives restarts).`,
         tone: "ok",
       });
       setEditing(false);
@@ -80,7 +76,7 @@ export function ScheduleSlotCard({ slot, color, onUpdated }: ScheduleSlotCardPro
     }
   };
 
-  /** Clears the slot's publish time (AppSetting row + Redis scheduler both removed server-side). */
+  /** Clears the slot's run time (AppSetting row + Redis scheduler both removed server-side). */
   const handleClear = async () => {
     setSaving(true);
     setMessage(null);
@@ -113,7 +109,7 @@ export function ScheduleSlotCard({ slot, color, onUpdated }: ScheduleSlotCardPro
         <div className="flex flex-col gap-[8px]">
           <input
             type="time"
-            aria-label={`Set publish time for ${slot.label}`}
+            aria-label={`Set run time for ${slot.label}`}
             value={timeValue}
             onChange={(e) => setTimeValue(e.target.value)}
             className="h-[34px] px-[10px] rounded-[8px] border border-[var(--bd)] bg-[var(--card)] text-[var(--fg)] font-mono font-bold text-[15px] outline-none focus:border-[var(--indigo)]"
@@ -158,19 +154,17 @@ export function ScheduleSlotCard({ slot, color, onUpdated }: ScheduleSlotCardPro
       <div className="flex flex-wrap items-center justify-between gap-[8px]">
         <span className="min-w-[180px] flex-1 text-[10.5px] leading-relaxed text-[var(--mut)]">
           {!parsed
-            ? "Not set - Edit to pick a publish time"
-            : slot.catchupQueued
-              ? `Generation queued now · on air ${slot.publishTime ?? formatHourMinute(parsed.hour, parsed.minute)}`
+            ? "Not set - Edit to pick a run time"
             : slot.next
-              ? `Generation ${formatCountdown(slot.next, now)} · on air ${slot.publishTime ?? formatHourMinute(parsed.hour, parsed.minute)}`
-              : `On air ${slot.publishTime ?? formatHourMinute(parsed.hour, parsed.minute)} daily`}
+              ? `Starts ${formatCountdown(slot.next, now)} · run time ${slot.publishTime ?? formatHourMinute(parsed.hour, parsed.minute)}`
+              : `Starts daily at ${slot.publishTime ?? formatHourMinute(parsed.hour, parsed.minute)}`}
         </span>
         {parsed && !editing && (
           <button
             type="button"
             disabled={saving}
             onClick={handleClear}
-            title="Clear this slot's publish time"
+            title="Clear this slot's run time"
             className="flex-none text-[9.5px] font-semibold text-[var(--amber)] hover:text-[var(--indigo)] cursor-pointer bg-transparent border-0 p-0 disabled:opacity-60"
           >
             {saving ? "…" : "set · Clear"}

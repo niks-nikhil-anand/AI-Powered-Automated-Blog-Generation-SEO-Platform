@@ -103,8 +103,8 @@ export async function GET() {
     lastRun,
     queues,
     stageOrder: STAGE_ORDER,
-    // Minutes generation starts before a slot's publish time - the settings
-    // page shows this as the "starts ~Xm earlier" note on each slot card.
+    // Legacy field kept for older clients. Slots now fire exactly at the
+    // configured run time; the settings page no longer uses this value.
     slotLeadMinutes: env.SLOT_GENERATION_LEAD_MINUTES,
     // `delayed` deliberately excluded: BullMQ's job scheduler always keeps one
     // delayed placeholder job per registered cron schedule (one per entry in
