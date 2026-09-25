@@ -19,6 +19,7 @@
     "worker:vertex-gateway": "tsx workers/vertex-gateway/index.ts",
     "test:evidence": "node --import tsx tests/evidence-pipeline.test.ts",
     "test:blog-input": "node --import tsx tests/manual-blog-input.test.ts",
+    "test:backlog-selection": "node --import tsx tests/backlog-selection.test.ts",
     "test:focus-keyword": "node --import tsx tests/focus-keyword.test.ts",
     "test:editorial-rules": "node --import tsx tests/editorial-rules.test.ts",
     "test:brief": "node --import tsx tests/brief-submission.test.ts",
