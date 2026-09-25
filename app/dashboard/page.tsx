@@ -291,14 +291,23 @@ export default function ExecutiveDashboard({ onOpenBlogModal, onOpenRunPipeline 
     },
   ];
 
-  const stageMeta: { key: StageKey; name: string; rate: string; doneLabel: string; arrow: "block" | "none" }[] = [
-    { key: "scheduler", name: "Submissions", rate: "queued", doneLabel: "queued", arrow: "block" },
-    { key: "planning", name: "Planning", rate: "plans", doneLabel: "planned", arrow: "block" },
-    { key: "outline", name: "Outline", rate: "outlines", doneLabel: "outlined", arrow: "block" },
-    { key: "writing", name: "Writing", rate: "drafts", doneLabel: "drafted", arrow: "block" },
-    { key: "image", name: "Image", rate: "files", doneLabel: "assets", arrow: "block" },
-    { key: "quality", name: "Quality QA", rate: "checks", doneLabel: "scored", arrow: "block" },
-    { key: "publish", name: "Publish", rate: "published", doneLabel: "published", arrow: "none" },
+  const stageMeta: {
+    key: StageKey;
+    name: string;
+    rate: string;
+    doneLabel: string;
+    arrow: "block" | "none";
+    accent: string;
+    bg: string;
+    bd: string;
+  }[] = [
+    { key: "scheduler", name: "Submissions", rate: "queued", doneLabel: "queued", arrow: "block", accent: "#38bdf8", bg: "rgba(56,189,248,0.10)", bd: "rgba(56,189,248,0.30)" },
+    { key: "planning", name: "Planning", rate: "plans", doneLabel: "planned", arrow: "block", accent: "#6366f1", bg: "rgba(99,102,241,0.11)", bd: "rgba(99,102,241,0.32)" },
+    { key: "outline", name: "Outline", rate: "outlines", doneLabel: "outlined", arrow: "block", accent: "#14b8a6", bg: "rgba(20,184,166,0.10)", bd: "rgba(20,184,166,0.28)" },
+    { key: "writing", name: "Writing", rate: "drafts", doneLabel: "drafted", arrow: "block", accent: "#f59e0b", bg: "rgba(245,158,11,0.11)", bd: "rgba(245,158,11,0.32)" },
+    { key: "image", name: "Image", rate: "files", doneLabel: "assets", arrow: "block", accent: "#ec4899", bg: "rgba(236,72,153,0.10)", bd: "rgba(236,72,153,0.28)" },
+    { key: "quality", name: "Quality QA", rate: "checks", doneLabel: "scored", arrow: "block", accent: "#10b981", bg: "rgba(16,185,129,0.10)", bd: "rgba(16,185,129,0.28)" },
+    { key: "publish", name: "Publish", rate: "published", doneLabel: "published", arrow: "none", accent: "#a855f7", bg: "rgba(168,85,247,0.10)", bd: "rgba(168,85,247,0.28)" },
   ];
   const stages = stageMeta.map((meta) => {
     const live = stageStatus[meta.key] ?? emptyStageStatus[meta.key];
@@ -312,23 +321,24 @@ export default function ExecutiveDashboard({ onOpenBlogModal, onOpenRunPipeline 
       state,
       pct,
       dot: live.dot,
+      accent: meta.accent,
       anim: live.anim,
       bg:
         live.state === "running"
-          ? "rgba(99,102,241,0.14)"
+          ? meta.bg
           : live.state === "queued" || live.state === "scheduled"
-            ? "rgba(245,158,11,0.12)"
+            ? meta.bg
             : live.state === "failed"
               ? "rgba(244,63,94,0.12)"
-              : "var(--card2)",
+              : meta.bg,
       bd:
         live.state === "running"
-          ? "rgba(99,102,241,0.45)"
+          ? meta.bd
           : live.state === "queued" || live.state === "scheduled"
-            ? "rgba(245,158,11,0.42)"
+            ? meta.bd
             : live.state === "failed"
               ? "rgba(244,63,94,0.42)"
-              : "var(--bd)",
+              : meta.bd,
     };
   });
   const pipelineText =
@@ -530,12 +540,12 @@ export default function ExecutiveDashboard({ onOpenBlogModal, onOpenRunPipeline 
             <div key={idx} className="flex-1 min-w-[132px] flex items-center gap-0">
               <div
                 className="flex-1 border rounded-[11px] p-[10px] transition-colors"
-                style={{ borderColor: s.bd, background: s.bg }}
+                style={{ borderColor: s.bd, background: s.bg, boxShadow: `inset 0 2px 0 ${s.accent}` }}
               >
                 <div className="flex items-center gap-[6px]">
                   <span
                     className={`w-[6px] h-[6px] rounded-full ${s.anim}`}
-                    style={{ background: s.dot }}
+                    style={{ background: s.state === "failed" ? "var(--rose)" : s.accent }}
                   />
                   <span className="text-[11.5px] font-bold tracking-tight text-[var(--fg)]">
                     {s.name}
@@ -544,7 +554,7 @@ export default function ExecutiveDashboard({ onOpenBlogModal, onOpenRunPipeline 
                 <div className="mt-[8px] h-[4px] rounded-[3px] bg-[var(--bd)] overflow-hidden">
                   <div
                     className="h-full rounded-[3px]"
-                    style={{ width: s.pct, background: s.dot }}
+                    style={{ width: s.pct, background: s.state === "failed" ? "var(--rose)" : s.accent }}
                   />
                 </div>
                 <div className="mt-[7px] flex items-baseline justify-between">
