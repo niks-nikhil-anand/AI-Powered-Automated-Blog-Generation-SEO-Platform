@@ -159,7 +159,6 @@ export default function SettingsPage() {
   const now = useLiveNow();
   const [slots, setSlots] = useState<ScheduleSlot[]>([]);
   const [reconcile, setReconcile] = useState<ReconcileInfo>(null);
-  const [slotLeadMinutes, setSlotLeadMinutes] = useState(30);
   const [workersConnected, setWorkersConnected] = useState<number | null>(null);
   const [isLoadingSlots, setIsLoadingSlots] = useState(true);
   const [workerHealth, setWorkerHealth] = useState<WorkerHealthRow[]>([]);
@@ -192,7 +191,6 @@ export default function SettingsPage() {
         setSlots(data.schedules ?? []);
         setReconcile(data.reconcile ?? null);
         setWorkersConnected(typeof data.workersConnected === "number" ? data.workersConnected : null);
-        if (typeof data.slotLeadMinutes === "number") setSlotLeadMinutes(data.slotLeadMinutes);
       })
       .catch(() => {})
       .finally(() => setIsLoadingSlots(false));
@@ -346,8 +344,8 @@ export default function SettingsPage() {
               </span>
             )}
             <span className="max-w-[900px] text-[11px] leading-relaxed text-[var(--mut)] sm:text-right">
-              One slot per blog in the Daily Blog Goal. The time you set is when the blog goes live - generation
-              starts ~{slotLeadMinutes}m earlier. Edits apply instantly and survive restarts.
+              One slot per blog in the Daily Blog Goal. The time you set is when the scheduler starts that
+              blog pipeline. Future times run today; passed times run tomorrow. Edits apply instantly.
             </span>
           </div>
         </div>
