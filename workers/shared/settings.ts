@@ -60,6 +60,17 @@ export async function getSetting<T>(key: string, fallback: T): Promise<T> {
   }
 }
 
+/**
+ * Bypass the small in-process cache for settings that must reflect a just-saved
+ * dashboard edit. Scheduled publish slots use this at fire time so a worker
+ * process that previously cached an unset slot cannot skip a newly configured
+ * run.
+ */
+export async function getSettingFresh<T>(key: string, fallback: T): Promise<T> {
+  cache.delete(key);
+  return getSetting(key, fallback);
+}
+
 export async function setSetting(key: string, value: unknown) {
   const row = await prisma.appSetting.upsert({
     where: { key },

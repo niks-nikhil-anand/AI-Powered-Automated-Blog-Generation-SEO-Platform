@@ -26,6 +26,23 @@ interface ScheduleSlotCardProps {
   onUpdated: (slot: ScheduleSlot) => void;
 }
 
+function dayKey(value: number, tz: string) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(value));
+}
+
+function nextDayLabel(next: number | null | undefined, now: number, tz: string) {
+  if (!next) return null;
+  if (dayKey(next, tz) === dayKey(now, tz)) return "today";
+  const tomorrow = now + 24 * 60 * 60 * 1000;
+  if (dayKey(next, tz) === dayKey(tomorrow, tz)) return "tomorrow";
+  return "later";
+}
+
 /**
  * Editable digital-clock card for one publish slot. The time shown and
  * edited is the scheduler RUN time. Saves immediately against the live
@@ -34,6 +51,8 @@ interface ScheduleSlotCardProps {
 export function ScheduleSlotCard({ slot, color, onUpdated }: ScheduleSlotCardProps) {
   const now = useLiveNow();
   const parsed = parseDailyCron(slot.pattern);
+  const tz = slot.tz ?? "Asia/Kolkata";
+  const nextLabel = nextDayLabel(slot.next, now, tz);
   const [editing, setEditing] = useState(false);
   const [timeValue, setTimeValue] = useState(parsed ? formatHourMinute(parsed.hour, parsed.minute) : "06:00");
   const [saving, setSaving] = useState(false);
@@ -64,8 +83,12 @@ export function ScheduleSlotCard({ slot, color, onUpdated }: ScheduleSlotCardPro
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || "Failed to update schedule");
       onUpdated({ ...slot, ...data });
+      const savedNextLabel = nextDayLabel(typeof data.next === "number" ? data.next : null, Date.now(), tz);
       setMessage({
-        text: `Saved - starts daily at ${formatHourMinute(hour, minute)} (survives restarts).`,
+        text:
+          savedNextLabel === "tomorrow"
+            ? `Saved - ${formatHourMinute(hour, minute)} already passed today, so the next start is tomorrow. Pick the next minute to run today.`
+            : `Saved - starts daily at ${formatHourMinute(hour, minute)} (survives restarts).`,
         tone: "ok",
       });
       setEditing(false);
@@ -102,7 +125,7 @@ export function ScheduleSlotCard({ slot, color, onUpdated }: ScheduleSlotCardPro
       <div className="flex min-w-0 items-center gap-[7px]">
         <span className="w-[7px] h-[7px] rounded-full flex-none" style={{ background: color }} />
         <span className="min-w-0 truncate text-[11.5px] font-bold text-[var(--fg)]">{slot.label}</span>
-        <span className="ml-auto shrink-0 text-[9.5px] font-mono text-[var(--faint)]">{slot.tz ?? "Asia/Kolkata"}</span>
+        <span className="ml-auto shrink-0 text-[9.5px] font-mono text-[var(--faint)]">{tz}</span>
       </div>
 
       {editing ? (
@@ -156,7 +179,7 @@ export function ScheduleSlotCard({ slot, color, onUpdated }: ScheduleSlotCardPro
           {!parsed
             ? "Not set - Edit to pick a run time"
             : slot.next
-              ? `Starts ${formatCountdown(slot.next, now)} · run time ${slot.publishTime ?? formatHourMinute(parsed.hour, parsed.minute)}`
+              ? `Starts ${nextLabel === "tomorrow" ? "tomorrow " : ""}${formatCountdown(slot.next, now)} · run time ${slot.publishTime ?? formatHourMinute(parsed.hour, parsed.minute)}`
               : `Starts daily at ${slot.publishTime ?? formatHourMinute(parsed.hour, parsed.minute)}`}
         </span>
         {parsed && !editing && (
