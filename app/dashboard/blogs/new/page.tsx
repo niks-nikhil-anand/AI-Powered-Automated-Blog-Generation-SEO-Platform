@@ -28,7 +28,7 @@ import {
   PaginationPrevious,
 } from "@/components/ui/pagination";
 import { getPaginationRange } from "@/lib/utils";
-import { blogInputSchema, CATEGORIES, slugifyTitle } from "./types";
+import { blogInputSchema, CATEGORIES, PRIORITIES, slugifyTitle } from "./types";
 
 type SubmissionRow = {
   id: string;
@@ -73,6 +73,15 @@ const STATUS_STYLE: Record<string, { bg: string; fg: string; bd: string }> = {
   CANCELLED: { bg: "rgba(245,158,11,0.14)", fg: "var(--amber)", bd: "rgba(245,158,11,0.26)" },
 };
 
+const PRIORITY_STYLE: Record<string, { bg: string; fg: string; bd: string }> = {
+  LOW: { bg: "rgba(148,163,184,0.16)", fg: "var(--mut)", bd: "rgba(148,163,184,0.28)" },
+  NORMAL: { bg: "rgba(99,102,241,0.14)", fg: "var(--indigo)", bd: "rgba(99,102,241,0.26)" },
+  HIGH: { bg: "rgba(245,158,11,0.14)", fg: "var(--amber)", bd: "rgba(245,158,11,0.26)" },
+  URGENT: { bg: "rgba(244,63,94,0.14)", fg: "var(--rose)", bd: "rgba(244,63,94,0.26)" },
+};
+
+const CATEGORY_COLORS = ["#6366f1", "#10b981", "#f59e0b", "#ec4899", "#06b6d4", "#8b5cf6", "#f43f5e", "#84cc16"];
+
 const JSON_PLACEHOLDER = `{
   "focusKeyword": "ai content planning",
   "primaryKeywords": ["content plan", "blog workflow"],
@@ -88,6 +97,56 @@ const JSON_PLACEHOLDER = `{
     ]
   }
 }`;
+
+const TITLE_KEYS = ["blogTitle", "title", "headline", "articleTitle", "h1", "briefedH1", "metaTitle", "topic"] as const;
+
+function extractTitleFromJson(value: unknown): string | null {
+  const candidates: { title: string; keyRank: number; depth: number }[] = [];
+
+  function visit(node: unknown, depth: number) {
+    if (!node || typeof node !== "object") return;
+    if (Array.isArray(node)) {
+      node.forEach((item) => visit(item, depth + 1));
+      return;
+    }
+
+    const record = node as Record<string, unknown>;
+    TITLE_KEYS.forEach((key, keyRank) => {
+      if (typeof record[key] === "string" && record[key].trim().length >= 3) {
+        candidates.push({ title: record[key].trim(), keyRank, depth });
+      }
+    });
+    Object.values(record).forEach((child) => visit(child, depth + 1));
+  }
+
+  visit(value, 0);
+  candidates.sort((a, b) => a.keyRank - b.keyRank || b.depth - a.depth);
+  return candidates[0]?.title ?? null;
+}
+
+function extractTitleFromIncompleteJson(value: string): string | null {
+  const patterns = [
+    /"blogTitle"\s*:\s*"((?:\\.|[^"\\])*)"/i,
+    /"(?:title|headline|articleTitle|h1|briefedH1|metaTitle)"\s*:\s*"((?:\\.|[^"\\])*)"/i,
+    /"topic"\s*:\s*"((?:\\.|[^"\\])*)"/i,
+  ];
+  const match = patterns.map((pattern) => value.match(pattern)).find((item) => item?.[1]);
+  if (!match?.[1]) return null;
+  try {
+    return JSON.parse(`"${match[1]}"`);
+  } catch {
+    return match[1].replace(/\\n/g, " ").replace(/\\"/g, '"').trim() || null;
+  }
+}
+
+function extractTitleFromJsonText(value: string): string | null {
+  if (!value.trim()) return null;
+  try {
+    return extractTitleFromJson(JSON.parse(value));
+  } catch {
+    return extractTitleFromIncompleteJson(value);
+  }
+}
 
 const inputClass =
   "w-full h-[34px] px-[10px] rounded-[8px] border border-[var(--bd)] bg-[var(--card)] text-[12px] text-[var(--fg)] outline-none transition-colors focus:border-[var(--indigo)]";
@@ -105,6 +164,15 @@ function formatDate(value: string | null): string {
 
 function statusStyle(status: string) {
   return STATUS_STYLE[status] ?? STATUS_STYLE.PENDING;
+}
+
+function categoryColor(category: string | null): string {
+  const value = (category ?? "Uncategorized").trim() || "Uncategorized";
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 31 + value.charCodeAt(index)) >>> 0;
+  }
+  return CATEGORY_COLORS[hash % CATEGORY_COLORS.length];
 }
 
 function groupValue(row: SubmissionRow, groupKey: GroupKey): string {
@@ -150,17 +218,36 @@ function ContentPlanModal({
 }: {
   open: boolean;
   mode: "create" | "edit";
-  initialValues?: { title: string; category: string; json: string };
+  initialValues?: { title: string; category: string; json: string; status: string; priority: string };
   saving: boolean;
   error: string | null;
   onClose: () => void;
-  onSubmit: (data: { title: string; category: string; json: string; startNow: boolean }) => void;
+  onSubmit: (data: { title: string; category: string; json: string; status: string; priority: string; startNow: boolean }) => void;
 }) {
-  const [title, setTitle] = useState(initialValues?.title ?? "");
+  const initialJsonTitle = initialValues?.json ? extractTitleFromJsonText(initialValues.json) : null;
+  const [title, setTitle] = useState(initialValues?.title || initialJsonTitle || "");
+  const [titleAutoFilled, setTitleAutoFilled] = useState(Boolean(!initialValues?.title && initialJsonTitle));
   const [category, setCategory] = useState(initialValues?.category ?? "");
   const [json, setJson] = useState(initialValues?.json ?? "");
-  const [startNow, setStartNow] = useState(mode === "create");
+  const status = initialValues?.status ?? "PENDING";
+  const [priority, setPriority] = useState(initialValues?.priority ?? "NORMAL");
+  const [startNow, setStartNow] = useState(false);
   const [categoryOptions, setCategoryOptions] = useState(CATEGORIES);
+
+  const applyTitleFromJsonText = useCallback((value: string) => {
+    if (!value.trim()) {
+      if (titleAutoFilled) setTitle("");
+      setTitleAutoFilled(false);
+      return;
+    }
+
+    const parsedTitle = extractTitleFromJsonText(value);
+
+    if (parsedTitle && (mode === "create" || !title || titleAutoFilled)) {
+      setTitle(parsedTitle);
+      setTitleAutoFilled(true);
+    }
+  }, [mode, title, titleAutoFilled]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -180,19 +267,15 @@ function ContentPlanModal({
 
   const handleJsonChange = (val: string) => {
     setJson(val);
+    applyTitleFromJsonText(val);
     try {
       const parsed = JSON.parse(val);
-      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-        if (!title && typeof parsed.title === "string" && parsed.title.trim()) {
-          setTitle(parsed.title.trim());
-        }
+      if (!category && parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
         if (!category && typeof parsed.category === "string" && parsed.category.trim()) {
           setCategory(parsed.category.trim());
         }
       }
-    } catch {
-      // JSON still being typed/pasted
-    }
+    } catch {}
   };
 
   const knownCategories = categoryOptions.map((c) => c.value);
@@ -221,26 +304,30 @@ function ContentPlanModal({
         <form
           onSubmit={(event) => {
             event.preventDefault();
-            onSubmit({ title, category, json, startNow });
+            onSubmit({ title, category, json, status, priority, startNow });
           }}
           className="flex min-h-0 flex-col gap-[13px] overflow-y-auto p-[16px]"
         >
-          <div className="grid grid-cols-1 gap-[12px] md:grid-cols-[1fr_190px]">
-            <div>
-              <label className={labelClass} htmlFor="content-plan-title">
-                Blog title
-              </label>
-              <input
-                id="content-plan-title"
-                required
-                minLength={10}
-                maxLength={200}
-                value={title}
-                onChange={(event) => setTitle(event.target.value)}
-                placeholder="e.g. How to Build a Content Planning Workflow"
-                className={inputClass}
-              />
-            </div>
+          <div>
+            <label className={labelClass} htmlFor="content-plan-title">
+              Blog title
+            </label>
+            <input
+              id="content-plan-title"
+              required
+              minLength={10}
+              maxLength={200}
+              value={title}
+              onChange={(event) => {
+                setTitle(event.target.value);
+                setTitleAutoFilled(false);
+              }}
+              placeholder="e.g. How to Build a Content Planning Workflow"
+              className={inputClass}
+            />
+          </div>
+
+          <div className="grid grid-cols-1 gap-[12px] md:grid-cols-[minmax(0,1fr)_220px]">
             <div>
               <label className={labelClass} htmlFor="content-plan-category">
                 Category
@@ -267,6 +354,34 @@ function ContentPlanModal({
                   <Plus className="mr-[5px] size-[13px]" />
                   Add category
                 </Link>
+              </div>
+            </div>
+            <div>
+              <label className={labelClass} htmlFor="content-plan-priority">
+                Generation priority
+              </label>
+              <div className="relative">
+                <span
+                  aria-hidden="true"
+                  className="pointer-events-none absolute left-[10px] top-1/2 size-[7px] -translate-y-1/2 rounded-full"
+                  style={{ backgroundColor: PRIORITY_STYLE[priority]?.fg ?? PRIORITY_STYLE.NORMAL.fg }}
+                />
+                <select
+                  id="content-plan-priority"
+                  value={priority}
+                  onChange={(event) => setPriority(event.target.value)}
+                  className={`${inputClass} pl-[24px]`}
+                  style={{
+                    borderColor: PRIORITY_STYLE[priority]?.bd ?? PRIORITY_STYLE.NORMAL.bd,
+                    backgroundColor: PRIORITY_STYLE[priority]?.bg ?? PRIORITY_STYLE.NORMAL.bg,
+                  }}
+                >
+                  {PRIORITIES.map((option) => (
+                    <option key={option} value={option}>
+                      {option === "NORMAL" ? "Normal" : option.charAt(0) + option.slice(1).toLowerCase()}
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
           </div>
@@ -496,11 +611,15 @@ export default function NewBlogPage() {
     title,
     category,
     json,
+    status,
+    priority,
     startNow,
   }: {
     title: string;
     category: string;
     json: string;
+    status: string;
+    priority: string;
     startNow: boolean;
   }) => {
     setModalError(null);
@@ -521,19 +640,21 @@ export default function NewBlogPage() {
       }
     }
 
-    const finalTitle = title.trim() || (typeof jsonData.title === "string" ? jsonData.title.trim() : "");
+    const jsonTitle = extractTitleFromJsonText(json) || extractTitleFromJson(jsonData);
+    const finalTitle = (editTarget ? title.trim() || jsonTitle : jsonTitle || title.trim()) || "";
     const finalCategory = (category && category.trim()) || (typeof jsonData.category === "string" ? jsonData.category.trim() : undefined);
 
     const payload = {
       tone: "professional",
       contentLength: 2000,
-      priority: "NORMAL",
       primaryKeywords: [],
       secondaryKeywords: [],
       ...jsonData,
       title: finalTitle,
       slug: typeof jsonData.slug === "string" ? jsonData.slug : slugifyTitle(finalTitle),
       category: finalCategory,
+      status,
+      priority,
       startNow,
     };
 
@@ -578,7 +699,8 @@ export default function NewBlogPage() {
       body: JSON.stringify({ action }),
     });
     const data = await response.json().catch(() => ({}));
-    setNotice(response.ok ? `Plan ${action === "start" ? "started" : `${action}ed`}.` : data.error ?? `Failed to ${action} plan`);
+    const actionText = action === "start" ? "started" : action === "retry" ? "queued to re-run" : "cancelled";
+    setNotice(response.ok ? `Plan ${actionText}.` : data.error ?? `Failed to ${action} plan`);
     loadRows();
   };
 
@@ -786,6 +908,8 @@ export default function NewBlogPage() {
                     )}
                     {group.rows.map((row) => {
                       const style = statusStyle(row.status);
+                      const categoryName = row.category ?? "Uncategorized";
+                      const categoryDot = categoryColor(row.category);
                       return (
                         <tr key={row.id} className="border-b border-[var(--bd)] transition-colors hover:bg-[var(--card2)]">
                           <td className="max-w-[360px] p-[10px_12px]">
@@ -798,8 +922,9 @@ export default function NewBlogPage() {
                             )}
                           </td>
                           <td className="p-[10px_8px]">
-                            <span className="rounded-[6px] bg-[var(--card2)] px-[7px] py-[2px] text-[10.5px] font-semibold text-[var(--fg2)]">
-                              {row.category ?? "Uncategorized"}
+                            <span className="inline-flex max-w-[150px] items-center gap-[6px] rounded-[6px] bg-[var(--card2)] px-[7px] py-[2px] text-[10.5px] font-semibold text-[var(--fg2)]">
+                              <span aria-hidden="true" className="size-[7px] shrink-0 rounded-full" style={{ backgroundColor: categoryDot }} />
+                              <span className="truncate">{categoryName}</span>
                             </span>
                           </td>
                           <td className="p-[10px_8px]">
@@ -829,13 +954,13 @@ export default function NewBlogPage() {
                                   Start
                                 </button>
                               )}
-                              {row.status === "FAILED" && (
+                              {["FAILED", "CANCELLED"].includes(row.status) && (
                                 <button
                                   type="button"
                                   onClick={() => rowAction(row.id, "retry")}
                                   className="h-[27px] rounded-[7px] border border-[var(--bd)] bg-[var(--card)] px-[9px] text-[11px] font-semibold text-[var(--fg2)] hover:border-[var(--indigo)] hover:text-[var(--indigo)]"
                                 >
-                                  Retry
+                                  {row.status === "CANCELLED" ? "Re-run" : "Retry"}
                                 </button>
                               )}
                               {["PENDING", "PROCESSING"].includes(row.status) && (
@@ -893,7 +1018,18 @@ export default function NewBlogPage() {
               {groupBy !== "none" && <p className="bg-[var(--card2)] px-4 py-2 text-[10.5px] font-bold uppercase tracking-wider text-[var(--fg2)]">{group.label} · {group.rows.length}</p>}
               {group.rows.map((row) => {
                 const style = statusStyle(row.status);
-                const primaryAction = row.status === "PENDING" ? "start" : row.status === "FAILED" ? "retry" : row.status === "PROCESSING" ? "cancel" : null;
+                const categoryName = row.category ?? "Uncategorized";
+                const categoryDot = categoryColor(row.category);
+                const primaryAction =
+                  row.status === "PENDING"
+                    ? "start"
+                    : row.status === "FAILED" || row.status === "CANCELLED"
+                      ? "retry"
+                      : row.status === "PROCESSING"
+                        ? "cancel"
+                        : null;
+                const primaryActionLabel =
+                  row.status === "CANCELLED" ? "Re-run" : primaryAction === "start" ? "Start" : primaryAction === "retry" ? "Retry" : "Cancel";
                 return (
                   <article key={row.id} className="p-4">
                     <div className="flex items-start justify-between gap-3">
@@ -904,14 +1040,20 @@ export default function NewBlogPage() {
                       <span className="shrink-0 rounded-full border px-2 py-1 text-[10px] font-bold" style={{ background: style.bg, color: style.fg, borderColor: style.bd }}>{row.status}</span>
                     </div>
                     <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] text-[var(--mut)]">
-                      <span>Category <strong className="ml-1 text-[var(--fg2)]">{row.category ?? "Uncategorized"}</strong></span>
+                      <span className="inline-flex min-w-0 items-center gap-[5px]">
+                        Category
+                        <strong className="inline-flex min-w-0 items-center gap-[5px] text-[var(--fg2)]">
+                          <span aria-hidden="true" className="size-[7px] shrink-0 rounded-full" style={{ backgroundColor: categoryDot }} />
+                          <span className="truncate">{categoryName}</span>
+                        </strong>
+                      </span>
                       <span>Priority <strong className="ml-1 font-mono text-[var(--fg2)]">{row.priority}</strong></span>
                       <span>Stage <strong className="ml-1 text-[var(--fg2)]">{row.currentStage ?? "-"}</strong></span>
                       <span>Created <strong className="ml-1 text-[var(--fg2)]">{formatDate(row.createdAt)}</strong></span>
                     </div>
                     {row.failureReason && <p className="mt-2 text-[11px] text-[var(--rose)]">{row.failureReason}</p>}
                     <div className="mt-4 flex gap-2">
-                      {primaryAction && <button type="button" onClick={() => rowAction(row.id, primaryAction)} className={`h-11 flex-1 rounded-[8px] border bg-[var(--card)] px-3 text-[11px] font-semibold ${primaryAction === "cancel" ? "border-[var(--rose)] text-[var(--rose)]" : "border-[var(--bd)] text-[var(--fg2)]"}`}>{primaryAction === "start" ? "Start" : primaryAction === "retry" ? "Retry" : "Cancel"}</button>}
+                      {primaryAction && <button type="button" onClick={() => rowAction(row.id, primaryAction)} className={`h-11 flex-1 rounded-[8px] border bg-[var(--card)] px-3 text-[11px] font-semibold ${primaryAction === "cancel" ? "border-[var(--rose)] text-[var(--rose)]" : "border-[var(--bd)] text-[var(--fg2)]"}`}>{primaryActionLabel}</button>}
                       <button type="button" aria-label={`Edit ${row.title}`} onClick={() => { setModalError(null); setEditTarget(row); setModalVersion((version) => version + 1); setModalOpen(true); }} className="inline-flex size-11 items-center justify-center rounded-[8px] border border-[var(--bd)] bg-[var(--card)] text-[var(--fg2)]"><Pencil className="size-[15px]" /></button>
                       <button type="button" aria-label={`Delete ${row.title}`} disabled={deletingId === row.id} onClick={() => setDeleteTarget(row)} className="inline-flex size-11 items-center justify-center rounded-[8px] border border-[var(--bd)] bg-[var(--card)] text-[var(--rose)] disabled:opacity-50"><Trash2 className="size-[15px]" /></button>
                     </div>
@@ -981,6 +1123,8 @@ export default function NewBlogPage() {
                 title: editTarget.title,
                 category: editTarget.category ?? "",
                 json: editableJsonForRow(editTarget),
+                status: editTarget.status,
+                priority: editTarget.priority,
               }
             : undefined
         }

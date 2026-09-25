@@ -447,7 +447,7 @@ export function BlogDetailModal({ blog, isOpen, onClose, initialTab, onActionCom
         {/* Content Body Grid */}
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden md:grid md:grid-cols-1 lg:grid-cols-[minmax(0,1fr)_400px]">
           {/* Left Pane - Markdown Source */}
-          <div className={`${mobilePanel === "article" ? "flex" : "hidden"} min-h-0 min-w-0 flex-1 flex-col border-b border-[var(--bd)] md:min-h-0 lg:border-r lg:border-b-0`}>
+          <div className={`${mobilePanel === "article" ? "flex" : "hidden"} min-h-0 min-w-0 flex-1 flex-col border-b border-[var(--bd)] md:flex md:min-h-0 lg:border-r lg:border-b-0`}>
             <div className="flex-none flex items-center gap-[6px] p-[8px_12px] border-b border-[var(--bd)] bg-[var(--card2)]">
               <span className="text-[10.5px] font-bold tracking-wider uppercase text-[var(--mut)]">
                 Markdown Source
@@ -462,7 +462,7 @@ export function BlogDetailModal({ blog, isOpen, onClose, initialTab, onActionCom
           </div>
 
           {/* Right Pane - Inspection Details */}
-          <div className={`${mobilePanel === "details" ? "flex" : "hidden"} min-h-0 min-w-0 flex-1 flex-col bg-[var(--card)]`}>
+          <div className={`${mobilePanel === "details" ? "flex" : "hidden"} min-h-0 min-w-0 flex-1 flex-col bg-[var(--card)] md:flex`}>
             {/* Inspector Tabs */}
             <label className="block border-b border-[var(--bd)] p-3 md:hidden">
               <span className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-[var(--mut)]">Detail section</span>
