@@ -218,6 +218,7 @@ export async function GET() {
     publishedCount,
     failedCount,
     todayPublishedCount,
+    blogInputStatusGroups,
     blogInputs,
     outlines,
     assets,
@@ -242,6 +243,7 @@ export async function GET() {
     prisma.blog.count({ where: { status: "PUBLISHED" } }),
     prisma.blog.count({ where: { status: "FAILED" } }),
     prisma.blog.count({ where: { status: "PUBLISHED", updatedAt: { gte: today } } }),
+    prisma.blogInput.groupBy({ by: ["status"], _count: { _all: true } }),
     prisma.blogInput.findMany({ orderBy: { createdAt: "desc" }, take: 50, include: { blog: { select: { id: true, slug: true, status: true } } } }),
     prisma.contentOutline.findMany({
       orderBy: { updatedAt: "desc" },
@@ -292,6 +294,27 @@ export async function GET() {
       })
     : [];
   const workflowsByBlogId = new Map(workflowRuns.filter((run) => run.blogId).map((run) => [run.blogId!, run]));
+  const blogInputStatusCounts = {
+    pending: 0,
+    processing: 0,
+    completed: 0,
+    failed: 0,
+    cancelled: 0,
+  };
+  for (const row of blogInputStatusGroups) {
+    const count = row._count._all;
+    if (row.status === "PENDING") blogInputStatusCounts.pending = count;
+    if (row.status === "PROCESSING") blogInputStatusCounts.processing = count;
+    if (row.status === "COMPLETED") blogInputStatusCounts.completed = count;
+    if (row.status === "FAILED") blogInputStatusCounts.failed = count;
+    if (row.status === "CANCELLED") blogInputStatusCounts.cancelled = count;
+  }
+  const totalSubmittedBlogs =
+    blogInputStatusCounts.pending +
+    blogInputStatusCounts.processing +
+    blogInputStatusCounts.completed +
+    blogInputStatusCounts.failed +
+    blogInputStatusCounts.cancelled;
 
   // ---------------------------------------------------------------------
   // Worker health (Queue & Worker Operations page): live consumer count +
@@ -857,6 +880,15 @@ export async function GET() {
       dailyTargetBacklogFailed: dailyTargetStatus.backlogFailed,
       behindPace,
       expectedPublishedByNow,
+    },
+    blogStatus: {
+      total: totalSubmittedBlogs,
+      published: publishedCount,
+      pending: blogInputStatusCounts.pending,
+      processing: blogInputStatusCounts.processing,
+      cancelled: blogInputStatusCounts.cancelled,
+      failed: blogInputStatusCounts.failed,
+      completed: blogInputStatusCounts.completed,
     },
     analytics: {
       cost: {
