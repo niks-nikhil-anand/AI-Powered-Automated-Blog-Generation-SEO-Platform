@@ -9,6 +9,7 @@ import { normalizeSubmission } from "./brief";
  */
 export const TONES = ["professional", "casual", "technical"] as const;
 export const PRIORITIES = ["LOW", "NORMAL", "HIGH", "URGENT"] as const;
+export const BLOG_INPUT_STATUSES = ["PENDING", "PROCESSING", "COMPLETED", "FAILED", "CANCELLED"] as const;
 
 export const CATEGORIES = [
   { value: "tech", label: "Technology" },
@@ -255,12 +256,13 @@ export const blogInputSchema = z.preprocess((raw: unknown) => {
 
   // Scheduling
   priority: z.enum(PRIORITIES).default("NORMAL"),
+  status: z.enum(BLOG_INPUT_STATUSES).default("PENDING"),
   /**
    * true  - dispatch to the planning queue immediately on submit.
    * false - leave the row PENDING so the next publish slot (or the
    *         daily-target reconcile tick) picks it up at its scheduled time.
    */
-  startNow: z.boolean().default(true),
+  startNow: z.boolean().default(false),
 }).passthrough());
 
 export type BlogInputFormData = z.infer<typeof blogInputSchema>;

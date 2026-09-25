@@ -1,8 +1,20 @@
 "use server";
 
+import { Prisma } from "@/app/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { dispatchBlogInput } from "@/workers/shared/daily-target";
 import { blogInputSchema, slugifyTitle, type BlogInputFormData, type SubmitResult } from "./types";
+
+async function uniqueInputTitle(base: string): Promise<string> {
+  const safeBase = base.trim() || "Untitled blog";
+  let title = safeBase;
+  for (let suffix = 1; suffix < 100; suffix += 1) {
+    const existing = await prisma.blogInput.findUnique({ where: { title }, select: { id: true } });
+    if (!existing) return title;
+    title = `${safeBase} (${suffix + 1})`;
+  }
+  throw new Error(`Failed to generate a unique title for "${safeBase}"`);
+}
 
 /**
  * Server action behind the submission form. It validates and persists
@@ -23,12 +35,8 @@ export async function submitBlogInput(data: BlogInputFormData): Promise<SubmitRe
   const validated = parsed.data;
 
   try {
-    const existing = await prisma.blogInput.findUnique({ where: { title: validated.title } });
-    if (existing) {
-      return { success: false, error: "A blog with this title has already been submitted" };
-    }
-
-    const base = slugifyTitle(validated.slug || validated.title) || "untitled";
+    const title = await uniqueInputTitle(validated.title);
+    const base = slugifyTitle(validated.slug || title) || "untitled";
     let slug = base;
     for (let suffix = 1; suffix < 100; suffix += 1) {
       const clash = await prisma.blogInput.findUnique({ where: { slug }, select: { id: true } });
@@ -58,7 +66,7 @@ export async function submitBlogInput(data: BlogInputFormData): Promise<SubmitRe
 
     const blogInput = await prisma.blogInput.create({
       data: {
-        title: validated.title,
+        title,
         slug,
         category: validated.category || (data as Record<string, unknown>).category as string || undefined,
         keywords: validated.primaryKeywords,
@@ -70,14 +78,14 @@ export async function submitBlogInput(data: BlogInputFormData): Promise<SubmitRe
         focusKeyword: validated.focusKeyword,
         metaTitle: validated.metaTitle,
         metaDescription: validated.metaDescription,
-        outlineJson: (validated.outlineJson as any) ?? undefined,
-        evidenceArticles: evidenceArticles.length > 0 ? (evidenceArticles as any) : undefined,
+        outlineJson: (validated.outlineJson as Prisma.InputJsonValue) ?? undefined,
+        evidenceArticles: evidenceArticles.length > 0 ? (evidenceArticles as Prisma.InputJsonValue) : undefined,
         evidenceSummary,
         priority: validated.priority,
         status: "PENDING",
         // Workers read the normalized submission; the original payload is kept
         // under `brief` (same contract as POST /api/blogs/input).
-        specs: { ...(validated as Record<string, unknown>), brief: (data as Record<string, unknown>) ?? null } as any,
+        specs: { ...(validated as Record<string, unknown>), title, brief: (data as Record<string, unknown>) ?? null } as Prisma.InputJsonValue,
       },
     });
 
