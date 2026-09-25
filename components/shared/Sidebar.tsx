@@ -179,9 +179,9 @@ export function Sidebar({ collapsed: externalCollapsed, onToggleCollapse, drawer
           href: "/dashboard/settings",
           badge: null,
           icon: (
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="12" cy="12" r="3" />
-              <path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1" strokeLinecap="round" />
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 3l1.4 2.7 3 .5.8 2.9 2.3 1.9-1.2 2.8.4 3-2.6 1.5-1.8 2.4H9.7l-1.8-2.4-2.6-1.5.4-3L4.5 11l2.3-1.9.8-2.9 3-.5L12 3z" />
+              <circle cx="12" cy="12" r="3.2" />
             </svg>
           ),
         },
@@ -193,21 +193,41 @@ export function Sidebar({ collapsed: externalCollapsed, onToggleCollapse, drawer
 
   return (
     <aside
-      className={`dashboard-sidebar flex-none border-r border-[var(--bd)] bg-[var(--card)] flex flex-col sticky top-0 h-dvh transition-all duration-200 motion-reduce:transition-none z-50 ${
-        drawer ? "w-full" : isCollapsed ? "w-[68px]" : "w-[252px]"
+      className={`dashboard-sidebar flex h-dvh flex-none flex-col border-r border-[var(--bd)] bg-[var(--card)] transition-all duration-200 motion-reduce:transition-none ${
+        drawer ? "w-full" : isCollapsed ? "w-[76px]" : "w-[252px]"
       }`}
     >
       {/* Brand Header */}
-      <div className={`flex-none flex items-center border-b border-[var(--bd)] ${isCollapsed ? "flex-col justify-center gap-[8px] py-[12px]" : "h-[56px] gap-[10px] px-[14px]"}`}>
-        <Image
-          src="/logo/logo.png"
-          alt="DevKit Market logo"
-          width={32}
-          height={32}
-          className="h-[32px] w-[32px] flex-none rounded-[8px] object-contain"
-          priority
-          unoptimized
-        />
+      <div className={`flex-none flex items-center border-b border-[var(--bd)] ${isCollapsed ? "h-[74px] justify-center px-[10px]" : "h-[56px] gap-[10px] px-[14px]"}`}>
+        <button
+          type="button"
+          onClick={handleToggle}
+          disabled={!isCollapsed}
+          aria-label={isCollapsed ? "Expand sidebar" : "DevKit Market"}
+          className={`group relative flex-none rounded-[12px] transition-colors ${
+            isCollapsed
+              ? "flex h-[50px] w-[50px] items-center justify-center hover:bg-[var(--card2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--indigo)]"
+              : "pointer-events-none disabled:opacity-100"
+          }`}
+          title={isCollapsed ? "Expand sidebar" : undefined}
+        >
+          <Image
+            src="/logo/logo.png"
+            alt="DevKit Market logo"
+            width={isCollapsed ? 40 : 32}
+            height={isCollapsed ? 40 : 32}
+            className={`${isCollapsed ? "h-[40px] w-[40px] rounded-[11px]" : "h-[32px] w-[32px] rounded-[8px]"} flex-none object-contain shadow-[0_0_20px_rgba(99,102,241,0.28)]`}
+            priority
+            unoptimized
+          />
+          {isCollapsed && (
+            <span className="absolute -right-[2px] top-1/2 hidden h-[20px] w-[20px] -translate-y-1/2 items-center justify-center rounded-full border border-[var(--bd)] bg-[var(--card)] text-[var(--mut)] shadow-[var(--shadow)] transition-colors group-hover:flex group-hover:text-[var(--fg)]">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M9 18l6-6-6-6" />
+              </svg>
+            </span>
+          )}
+        </button>
         {!isCollapsed && (
           <div className="min-w-0 overflow-hidden">
             <div className="font-bold text-[12.5px] tracking-tight whitespace-nowrap text-[var(--fg)]">
@@ -218,25 +238,26 @@ export function Sidebar({ collapsed: externalCollapsed, onToggleCollapse, drawer
             </div>
           </div>
         )}
-        <button
-          id={drawer ? "btn-drawer-close" : "btn-sidebar-toggle"}
-          aria-label={drawer ? "Close navigation" : isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-          onClick={handleToggle}
-          className={`${isCollapsed ? "" : "ml-auto"} flex-none w-[44px] h-[44px] rounded-[6px] border border-[var(--bd)] bg-transparent text-[var(--mut)] flex items-center justify-center hover:bg-[var(--card2)] hover:text-[var(--fg)] transition-colors`}
-        >
-          <svg
-            width="13"
-            height="13"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.2"
-            strokeLinecap="round"
-            className={`transition-transform duration-200 ${isCollapsed ? "rotate-180" : ""}`}
+        {!isCollapsed && (
+          <button
+            id={drawer ? "btn-drawer-close" : "btn-sidebar-toggle"}
+            aria-label={drawer ? "Close navigation" : "Collapse sidebar"}
+            onClick={handleToggle}
+            className="ml-auto flex h-[40px] w-[40px] flex-none items-center justify-center rounded-[8px] border border-[var(--bd)] bg-transparent text-[var(--mut)] transition-colors hover:bg-[var(--card2)] hover:text-[var(--fg)]"
           >
-            <path d={drawer ? "M6 6l12 12M18 6L6 18" : "M15 18l-6-6 6-6"} />
-          </svg>
-        </button>
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.2"
+              strokeLinecap="round"
+            >
+              <path d={drawer ? "M6 6l12 12M18 6L6 18" : "M15 18l-6-6 6-6"} />
+            </svg>
+          </button>
+        )}
       </div>
 
       {/* Pipeline Active Badge */}
@@ -296,14 +317,15 @@ export function Sidebar({ collapsed: externalCollapsed, onToggleCollapse, drawer
       )}
 
       {/* Navigation */}
-      <nav className="flex-1 overflow-y-auto p-[8px_10px_10px] flex flex-col gap-[2px]">
+      <nav className={`flex-1 overflow-y-auto flex flex-col ${isCollapsed ? "gap-[8px] p-[12px_10px]" : "gap-[2px] p-[8px_10px_10px]"}`}>
         {navGroups.map((group, idx) => (
-          <div key={idx} className="flex flex-col gap-[2px]">
+          <div key={idx} className={`flex flex-col ${isCollapsed ? "items-center gap-[8px]" : "gap-[2px]"}`}>
             {!isCollapsed && (
               <div className="text-[9.5px] font-bold tracking-widest uppercase text-[var(--faint)] p-[10px_9px_5px]">
                 {group.title}
               </div>
             )}
+            {isCollapsed && idx > 0 && <div className="my-[2px] h-px w-[30px] bg-[var(--bd)]" />}
             {group.items.map((item) => {
               // Exact match wins; prefix matching is only for genuine
               // sub-routes, and never for a sibling that shares the prefix
@@ -320,14 +342,18 @@ export function Sidebar({ collapsed: externalCollapsed, onToggleCollapse, drawer
                   aria-label={item.label}
                   aria-current={isActive ? "page" : undefined}
                   onClick={onNavigate}
-                  className={`flex min-h-[44px] items-center gap-[10px] w-full p-[8px_9px] rounded-[8px] border text-[12.5px] font-medium whitespace-nowrap overflow-hidden transition-all ${
+                  className={`relative flex items-center border font-medium whitespace-nowrap overflow-hidden transition-all ${
+                    isCollapsed
+                      ? "h-[52px] w-[52px] justify-center rounded-[12px] p-0"
+                      : "min-h-[44px] w-full gap-[10px] rounded-[8px] p-[8px_9px] text-[12.5px]"
+                  } ${
                     isActive
-                      ? "bg-[var(--tint)] text-[var(--indigo)] border-[rgba(99,102,241,0.25)] font-semibold"
+                      ? "bg-[var(--tint)] text-[var(--indigo)] border-[rgba(99,102,241,0.32)] font-semibold shadow-[inset_0_0_0_1px_rgba(99,102,241,0.06)]"
                       : "border-transparent bg-transparent text-[var(--fg2)] hover:bg-[var(--card2)] hover:text-[var(--fg)]"
                   }`}
                   title={isCollapsed ? item.label : undefined}
                 >
-                  <span className={isActive ? "text-[var(--indigo)]" : "text-[var(--mut)]"}>
+                  <span className={`${isActive ? "text-[var(--indigo)]" : "text-[var(--mut)]"} ${isCollapsed ? "[&_svg]:h-[22px] [&_svg]:w-[22px]" : "[&_svg]:h-[15px] [&_svg]:w-[15px]"}`}>
                     {item.icon}
                   </span>
                   {!isCollapsed && <span>{item.label}</span>}
@@ -340,6 +366,13 @@ export function Sidebar({ collapsed: externalCollapsed, onToggleCollapse, drawer
                       {item.badge}
                     </span>
                   )}
+                  {isCollapsed && item.badge && (
+                    <span
+                      aria-hidden="true"
+                      className="absolute right-[8px] top-[8px] h-[7px] w-[7px] rounded-full border border-[var(--card)]"
+                      style={{ background: isActive ? "var(--indigo)" : "var(--rose)" }}
+                    />
+                  )}
                 </Link>
               );
             })}
@@ -348,7 +381,7 @@ export function Sidebar({ collapsed: externalCollapsed, onToggleCollapse, drawer
       </nav>
 
       {/* Footer Profile & Theme Switch */}
-      <div className="flex-none border-t border-[var(--bd)] p-[10px] flex flex-col gap-[8px]">
+      <div className={`flex-none border-t border-[var(--bd)] ${isCollapsed ? "flex flex-col items-center gap-[10px] p-[12px_10px]" : "p-[10px] flex flex-col gap-[8px]"}`}>
         {!isCollapsed && (
           <div className="border border-[var(--bd)] rounded-[9px] p-[8px_9px] bg-[var(--card2)]">
             <div className="flex items-center justify-between mb-[6px]">
@@ -389,10 +422,42 @@ export function Sidebar({ collapsed: externalCollapsed, onToggleCollapse, drawer
           </div>
         )}
 
-        <div className="flex items-center gap-[9px] p-[5px_4px]">
-          <div className="w-[28px] h-[28px] flex-none rounded-full bg-gradient-to-br from-slate-700 to-slate-900 text-white flex items-center justify-center text-[11px] font-bold">
-            NA
+        {isCollapsed && workerHealth.length > 0 && (
+          <div className="flex w-[48px] justify-center gap-[3px]" title={`Worker health: ${workersUp}/${workersTotal} up`}>
+            {workerHealth.slice(0, 7).map((worker) => (
+              <span
+                key={worker.key}
+                className="h-[5px] w-[5px] rounded-full"
+                style={{
+                  background: worker.paused
+                    ? "var(--amber)"
+                    : worker.live
+                      ? worker.state === "failed"
+                        ? "var(--rose)"
+                        : "var(--emerald)"
+                      : "var(--bd2)",
+                }}
+              />
+            ))}
           </div>
+        )}
+
+        <div className={`${isCollapsed ? "flex flex-col items-center gap-[10px]" : "flex items-center gap-[9px] p-[5px_4px]"}`}>
+          {!isCollapsed && (
+            <div className="w-[28px] h-[28px] flex-none rounded-full bg-gradient-to-br from-slate-700 to-slate-900 text-white flex items-center justify-center text-[11px] font-bold">
+              NA
+            </div>
+          )}
+          {isCollapsed && (
+            <button
+              type="button"
+              aria-label="Nikhil Anand account"
+              title="Nikhil Anand"
+              className="flex h-[42px] w-[42px] items-center justify-center rounded-full border border-[var(--bd)] bg-gradient-to-br from-slate-700 to-slate-950 text-[13px] font-bold text-white shadow-[var(--shadow)] transition-transform hover:scale-[1.03]"
+            >
+              NA
+            </button>
+          )}
           {!isCollapsed && (
             <div className="min-w-0">
               <div className="text-[11.5px] font-semibold whitespace-nowrap overflow-hidden text-ellipsis text-[var(--fg)]">
@@ -405,15 +470,16 @@ export function Sidebar({ collapsed: externalCollapsed, onToggleCollapse, drawer
             id={drawer ? "btn-theme-drawer" : "btn-theme-sidebar"}
             aria-label="Toggle light and dark mode"
             onClick={toggleTheme}
-            className={`${isCollapsed ? "hidden" : "ml-auto"} flex-none w-[44px] h-[44px] rounded-[7px] border border-[var(--bd)] bg-[var(--card)] text-[var(--mut)] flex items-center justify-center hover:text-[var(--fg)] hover:border-[var(--bd2)] transition-colors`}
+            title={isCollapsed ? "Toggle theme" : undefined}
+            className={`${isCollapsed ? "h-[42px] w-[42px] rounded-[11px]" : "ml-auto h-[44px] w-[44px] rounded-[7px]"} flex flex-none items-center justify-center border border-[var(--bd)] bg-[var(--card)] text-[var(--mut)] transition-colors hover:border-[var(--bd2)] hover:bg-[var(--card2)] hover:text-[var(--fg)]`}
           >
             {theme === "dark" ? (
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <svg width={isCollapsed ? "19" : "13"} height={isCollapsed ? "19" : "13"} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
                 <circle cx="12" cy="12" r="4" />
                 <path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19" />
               </svg>
             ) : (
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round">
+              <svg width={isCollapsed ? "19" : "13"} height={isCollapsed ? "19" : "13"} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round">
                 <path d="M20 14.5A8.5 8.5 0 019.5 4a8.5 8.5 0 1010.5 10.5z" />
               </svg>
             )}
