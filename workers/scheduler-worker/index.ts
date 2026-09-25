@@ -5,9 +5,7 @@ import { withPipelineRetryPolicy } from "../shared/pipeline-retry-policy";
 import { env } from "../shared/env";
 import { workerOptions } from "../shared/worker-options";
 import {
-  dispatchBlogInput,
-  getDailyTargetStatus,
-  nextEligibleBlogInput,
+  dispatchOneEligibleBlogNow,
   reconcileDailyTarget,
 } from "../shared/daily-target";
 import { getSetting, getSettingFresh } from "../shared/settings";
@@ -17,7 +15,6 @@ import {
   getPublishSlotView,
   parseSlotTime,
   reconcilePublishSlots,
-  setPublishTarget,
   slotSettingKey,
 } from "../shared/publish-slots";
 import { failWorkerAttempt, passWorkerAttempt, startWorkerAttempt } from "../shared/recovery";
@@ -61,12 +58,15 @@ async function runScheduledSlot(slotNumber: number) {
 
     log.info(`Publish slot ${slotNumber} fired - starting one blog now (${env.TIMEZONE})`);
 
-    // The Daily Blog Goal is a ceiling as well as a floor: a slot that fires
-    // after the day is already covered leaves the backlog alone.
-    const status = await getDailyTargetStatus();
-    if (status.remaining <= 0) {
-      const output = { slot: slotNumber, dispatchedCount: 0, reason: "daily_target_already_met", ...status };
-      log.info(`Publish slot ${slotNumber}: daily target ${status.target} already met - nothing dispatched`, output);
+    const result = await dispatchOneEligibleBlogNow(targetPublishAt);
+    const output = { slot: slotNumber, dispatchedCount: result.dispatched, ...result };
+    if (result.dispatched === 0) {
+      const message =
+        result.reason === "daily_target_already_met"
+          ? `Publish slot ${slotNumber}: daily target ${result.target} already met - nothing dispatched`
+          : `Publish slot ${slotNumber}: no eligible blog submission in the backlog - queue one at /dashboard/blogs/new`;
+      if (result.reason === "daily_target_already_met") log.info(message, output);
+      else log.warn(message, output);
       await passWorkerAttempt({
         workflowRunId: attempt.workflow.id,
         attemptId: attempt.attempt.id,
@@ -76,31 +76,8 @@ async function runScheduledSlot(slotNumber: number) {
       return output;
     }
 
-    const input = await nextEligibleBlogInput();
-    if (!input) {
-      const output = { slot: slotNumber, dispatchedCount: 0, reason: "no_eligible_submission", ...status };
-      log.warn(
-        `Publish slot ${slotNumber}: no eligible blog submission in the backlog - queue one at /dashboard/blogs/new`,
-        output
-      );
-      await passWorkerAttempt({
-        workflowRunId: attempt.workflow.id,
-        attemptId: attempt.attempt.id,
-        output,
-        nextStage: "stopped",
-      });
-      return output;
-    }
-
-    // The slot's target publish time rides down the chain via Redis (keyed by
-    // blogInputId) - quality-worker reads it when queueing the publish job and
-    // holds the blog until then.
-    await setPublishTarget(input.id, targetPublishAt);
-    await dispatchBlogInput(input);
-
-    const output = { slot: slotNumber, dispatchedCount: 1, blogInputId: input.id, title: input.title, pickedStatus: input.status };
     log.info(
-      `Publish slot ${slotNumber}: dispatched "${input.title}" targeting ${new Date(targetPublishAt).toISOString()}`,
+      `Publish slot ${slotNumber}: dispatched "${result.title}" targeting ${new Date(targetPublishAt).toISOString()}`,
       output
     );
     await passWorkerAttempt({
@@ -111,10 +88,10 @@ async function runScheduledSlot(slotNumber: number) {
         stage: "scheduler-worker",
         score: 100,
         passed: true,
-        reasons: [`Dispatched submission "${input.title}" for slot ${slotNumber}`],
+        reasons: [`Dispatched submission "${result.title}" for slot ${slotNumber}`],
       },
       nextStage: "planning-worker",
-      blogInputId: input.id,
+      blogInputId: result.blogInputId,
     });
     return output;
   } catch (err) {

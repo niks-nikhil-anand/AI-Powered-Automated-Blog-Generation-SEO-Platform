@@ -1,4 +1,6 @@
 import pg from "pg";
+import fs from "fs";
+import path from "path";
 import { PrismaClient } from "../../app/generated/prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { env } from "./env";
@@ -24,6 +26,13 @@ function createClient() {
   if (env.DATABASE_URL) {
     try {
       const url = new URL(env.DATABASE_URL);
+      const sslRootCert = url.searchParams.get("sslrootcert");
+      if (sslRootCert && !fs.existsSync(sslRootCert)) {
+        const containerCertPath = path.join(process.cwd(), path.basename(sslRootCert));
+        if (fs.existsSync(containerCertPath)) {
+          url.searchParams.set("sslrootcert", containerCertPath);
+        }
+      }
       password = url.password || "";
       const sslMode = url.searchParams.get("sslmode");
       if (sslMode === "require" || sslMode === "no-verify") {
@@ -32,6 +41,7 @@ function createClient() {
         poolConnectionString = url.toString();
       } else if (sslMode === "verify-full" || sslMode === "verify-ca") {
         ssl = { rejectUnauthorized: true };
+        poolConnectionString = url.toString();
       }
     } catch (e) {
       console.warn("Warning: Failed to parse DATABASE_URL as URL. Using empty password fallback.", e);
