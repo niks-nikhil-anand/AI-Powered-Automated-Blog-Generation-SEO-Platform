@@ -4,6 +4,7 @@ import { schedulerQueue } from "@/workers/shared/queues";
 import { allQueueCounts, STAGE_ORDER } from "@/lib/queues";
 import { env } from "@/workers/shared/env";
 import { RECONCILE_SLOT_ID, getPublishSlotView } from "@/workers/shared/publish-slots";
+import { getDailyTargetStatus } from "@/workers/shared/daily-target";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +22,7 @@ export async function GET() {
   try {
     const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
 
-  const [schedulers, queues, workersConnected, lastAttempt, usageRows, passedRuns, slotView] =
+  const [schedulers, queues, workersConnected, lastAttempt, usageRows, passedRuns, slotView, dailyTarget] =
     await Promise.all([
       schedulerQueue.getJobSchedulers().catch(() => []),
       allQueueCounts(),
@@ -45,6 +46,7 @@ export async function GET() {
       // BullMQ. Unset slots come back with nulls so the UI can render the
       // empty "configure me" card.
       getPublishSlotView(),
+      getDailyTargetStatus(),
     ]);
 
   const schedules = slotView;
@@ -116,6 +118,7 @@ export async function GET() {
     // a job is actually running, or queued to run immediately.
     runInFlight: scheduler.active > 0 || scheduler.waiting > 0,
     workersConnected,
+    dailyTarget,
     estimate: {
       costUsd,
       costLabel: costUsd < 0.01 ? `~$${costUsd.toFixed(4)}` : `~$${costUsd.toFixed(2)}`,

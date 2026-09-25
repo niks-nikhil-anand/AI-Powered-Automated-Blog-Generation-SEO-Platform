@@ -26,4 +26,23 @@ if [ -n "${GCP_TYPE:-}" ] && [ -n "${GCP_PROJECT_ID:-}" ] && [ -n "${GCP_PRIVATE
   '
 fi
 
+# Local .env files can contain a macOS host path in DATABASE_URL, e.g.
+# sslrootcert=/Users/.../global-bundle.pem. Inside Docker the repo is copied
+# to /app, so normalize that path before Prisma/pg opens the certificate.
+if [ -n "${DATABASE_URL:-}" ] && [ -f "/app/global-bundle.pem" ]; then
+  export DATABASE_URL="$(node -e '
+    const url = process.env.DATABASE_URL;
+    if (!url) process.exit(0);
+    try {
+      const parsed = new URL(url);
+      if (parsed.searchParams.has("sslrootcert")) {
+        parsed.searchParams.set("sslrootcert", "/app/global-bundle.pem");
+      }
+      process.stdout.write(parsed.toString());
+    } catch {
+      process.stdout.write(url);
+    }
+  ')"
+fi
+
 exec "$@"
