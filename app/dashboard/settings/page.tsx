@@ -9,7 +9,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { WorldClocks, useLiveNow } from "@/components/shared/WorldClocks";
+import { useLiveNow } from "@/components/shared/WorldClocks";
 import { ScheduleTimeline, type TimelineSlot } from "@/components/shared/ScheduleTimeline";
 import { ScheduleSlotCard, type ScheduleSlot } from "@/components/shared/ScheduleSlotCard";
 import { formatCountdown } from "@/lib/utils";
@@ -26,6 +26,10 @@ const SLOT_PALETTE = [
 function slotColor(index: number) {
   return SLOT_PALETTE[index % SLOT_PALETTE.length];
 }
+
+const cardClass = "overflow-hidden rounded-[12px] border border-[var(--bd)] bg-[var(--card)] shadow-[var(--shadow)]";
+const cardHeaderClass = "flex flex-col gap-[6px] border-b border-[var(--bd)] p-[12px_14px] sm:flex-row sm:items-center sm:justify-between";
+const cardTitleClass = "text-[13px] font-bold text-[var(--fg)]";
 
 /**
  * The six workers that run reactively rather than on a schedule - the
@@ -126,6 +130,9 @@ type GoalProgress = {
   inFlight: number;
   remaining: number;
   backlog: number;
+  pending: number;
+  cancelled: number;
+  failed: number;
 };
 
 type ReconcileInfo = { pattern: string | null; next: number | null } | null;
@@ -212,6 +219,9 @@ export default function SettingsPage() {
               inFlight: data.metrics.dailyTargetInFlight ?? 0,
               remaining: data.metrics.dailyTargetRemaining ?? 0,
               backlog: data.metrics.dailyTargetBacklogAvailable ?? 0,
+              pending: data.metrics.dailyTargetBacklogPending ?? 0,
+              cancelled: data.metrics.dailyTargetBacklogCancelled ?? 0,
+              failed: data.metrics.dailyTargetBacklogFailed ?? 0,
             });
           }
         })
@@ -303,9 +313,9 @@ export default function SettingsPage() {
   };
 
   return (
-    <div className="flex flex-col gap-[13px]">
+    <div className="mx-auto flex w-full max-w-[1720px] flex-col gap-[13px] px-0 sm:gap-[14px] lg:gap-[16px]">
       {/* Header */}
-      <div>
+      <div className="max-w-[980px]">
         <h1 className="margin-0 text-[19px] font-extrabold tracking-tight text-[var(--fg)]">
           Settings
         </h1>
@@ -316,13 +326,13 @@ export default function SettingsPage() {
       </div>
 
       {/* Publish Schedule */}
-      <div className="bg-[var(--card)] border border-[var(--bd)] rounded-[12px] shadow-[var(--shadow)] overflow-hidden">
-        <div className="p-[12px_14px] border-b border-[var(--bd)] flex items-center justify-between flex-wrap gap-[6px]">
-          <span className="text-[13px] font-bold text-[var(--fg)]">Publish Schedule</span>
-          <span className="flex items-center gap-[8px]">
+      <section className={cardClass}>
+        <div className={cardHeaderClass}>
+          <span className={cardTitleClass}>Publish Schedule</span>
+          <div className="flex min-w-0 flex-col gap-[6px] sm:items-end">
             {workersConnected !== null && (
               <span
-                className="flex items-center gap-[5px] text-[10px] font-semibold px-[7px] py-[2px] rounded-[6px]"
+                className="inline-flex w-fit items-center gap-[5px] rounded-[6px] px-[7px] py-[2px] text-[10px] font-semibold"
                 style={{
                   background: workersConnected > 0 ? "rgba(16,185,129,0.12)" : "rgba(244,63,94,0.12)",
                   color: workersConnected > 0 ? "var(--emerald)" : "var(--rose)",
@@ -335,16 +345,14 @@ export default function SettingsPage() {
                 {workersConnected > 0 ? "worker connected" : "no consumer - schedules won’t fire"}
               </span>
             )}
-            <span className="text-[11px] text-[var(--mut)]">
+            <span className="max-w-[900px] text-[11px] leading-relaxed text-[var(--mut)] sm:text-right">
               One slot per blog in the Daily Blog Goal. The time you set is when the blog goes live - generation
-              starts ~{slotLeadMinutes}m earlier and an early finish is held until the publish time. Edits apply
-              instantly and survive restarts.
+              starts ~{slotLeadMinutes}m earlier. Edits apply instantly and survive restarts.
             </span>
-          </span>
+          </div>
         </div>
-        <div className="p-[14px] flex flex-col gap-[20px]">
-          <WorldClocks layout="horizontal" size={120} />
-          <div>
+        <div className="flex flex-col gap-[16px] p-[12px] sm:p-[14px] lg:gap-[20px]">
+          <div className="min-w-0 overflow-x-auto pb-[2px]">
             {isLoadingSlots ? (
               <Skeleton className="h-[60px] w-full" />
             ) : timelineSlots.length > 0 ? (
@@ -358,7 +366,7 @@ export default function SettingsPage() {
             )}
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-[10px]">
+          <div className="grid grid-cols-1 gap-[10px] sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
             {isLoadingSlots ? (
               Array.from({ length: 3 }).map((_, idx) => (
                 <Skeleton key={idx} className="h-[128px] rounded-[12px]" />
@@ -385,24 +393,24 @@ export default function SettingsPage() {
             <div className="text-[10.5px] text-[var(--faint)] -mt-[6px]">
               System tick: daily-target reconcile runs <span className="font-mono">{reconcile.pattern ?? "*/30 * * * *"}</span>
               {reconcile.next ? ` · next ${formatCountdown(reconcile.next, now)}` : ""} - it tops today&rsquo;s
-              pipeline up to the Daily Blog Goal from the queued submission backlog.
+              pipeline up to the Daily Blog Goal from eligible submissions: pending first, cancelled next, failed last.
             </div>
           )}
         </div>
-      </div>
+      </section>
 
       {/* Worker Activity */}
-      <div className="bg-[var(--card)] border border-[var(--bd)] rounded-[12px] shadow-[var(--shadow)] overflow-hidden">
-        <div className="p-[12px_14px] border-b border-[var(--bd)] flex items-center justify-between flex-wrap gap-[6px]">
-          <span className="text-[13px] font-bold text-[var(--fg)]">Worker Activity</span>
-          <span className="text-[11px] text-[var(--mut)]">
+      <section className={cardClass}>
+        <div className={cardHeaderClass}>
+          <span className={cardTitleClass}>Worker Activity</span>
+          <span className="text-[11px] leading-relaxed text-[var(--mut)] sm:text-right">
             Event-driven - each runs the instant the previous stage hands it a job. Live consumer state included.
           </span>
         </div>
         <div className="flex flex-col">
           {isLoadingActivity ? (
             Array.from({ length: 6 }).map((_, idx) => (
-              <div key={idx} className="flex items-center gap-[12px] p-[10px_14px] border-b border-[var(--bd)] last:border-b-0">
+              <div key={idx} className="flex flex-col gap-[8px] border-b border-[var(--bd)] p-[12px] last:border-b-0 sm:flex-row sm:items-center sm:gap-[12px] sm:p-[10px_14px]">
                 <Skeleton className="h-[8px] w-[8px] rounded-full" />
                 <Skeleton className="h-[13px] w-[90px]" />
                 <Skeleton className="h-[12px] flex-1" />
@@ -434,27 +442,27 @@ export default function SettingsPage() {
               return (
                 <div
                   key={worker.key}
-                  className="flex items-center gap-[12px] p-[10px_14px] border-b border-[var(--bd)] last:border-b-0"
+                  className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-[10px] gap-y-[6px] border-b border-[var(--bd)] p-[12px] last:border-b-0 sm:grid-cols-[auto_120px_minmax(0,1fr)_auto] sm:items-center sm:gap-[12px] sm:p-[10px_14px] xl:grid-cols-[auto_120px_minmax(0,1fr)_auto_auto]"
                 >
                   <span
-                    className={`w-[8px] h-[8px] rounded-full flex-none ${pulsing ? "animate-dkpulse" : ""}`}
+                    className={`mt-[4px] size-[8px] rounded-full sm:mt-0 ${pulsing ? "animate-dkpulse" : ""}`}
                     style={{ background: dot }}
                   />
-                  <span className="w-[90px] flex-none text-[12px] font-semibold text-[var(--fg)]">
+                  <span className="min-w-0 text-[12px] font-semibold text-[var(--fg)]">
                     {worker.label}
                   </span>
                   <span
-                    className="flex-1 text-[11px]"
+                    className="col-span-2 text-[11px] sm:col-auto"
                     style={{ color: down ? "var(--rose)" : "var(--mut)" }}
                   >
                     {statusText}
                   </span>
-                  <span className="flex-none font-mono text-[10.5px] text-[var(--faint)]">
+                  <span className="col-span-2 font-mono text-[10.5px] text-[var(--faint)] sm:col-auto sm:text-right">
                     {health?.avgDurationMs
                       ? `avg ${formatDuration(health.avgDurationMs)}${health.p95DurationMs ? ` · p95 ${formatDuration(health.p95DurationMs)}` : ""}`
                       : "-"}
                   </span>
-                  <span className="flex-none font-mono text-[10px] px-[6px] py-[2px] rounded-[5px] bg-[var(--card2)] text-[var(--mut)]">
+                  <span className="col-span-2 w-fit rounded-[5px] bg-[var(--card2)] px-[6px] py-[2px] font-mono text-[10px] text-[var(--mut)] sm:col-auto xl:justify-self-end">
                     {queue ? `${queue.active} active · ${queue.waiting} queued` : "-"}
                   </span>
                 </div>
@@ -462,15 +470,15 @@ export default function SettingsPage() {
             })
           )}
         </div>
-      </div>
+      </section>
 
       {/* AI Model + Daily Goal */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px] items-start">
-        <div className="bg-[var(--card)] border border-[var(--bd)] rounded-[12px] shadow-[var(--shadow)] overflow-hidden">
-          <div className="p-[12px_14px] border-b border-[var(--bd)] text-[13px] font-bold text-[var(--fg)]">
+      <div className="grid grid-cols-1 gap-[12px] items-start xl:grid-cols-[minmax(0,1.05fr)_minmax(360px,0.95fr)]">
+        <section className={cardClass}>
+          <div className={`border-b border-[var(--bd)] p-[12px_14px] ${cardTitleClass}`}>
             AI Model Per Pipeline Stage
           </div>
-          <div className="p-[8px_14px_14px] flex flex-col">
+          <div className="flex flex-col p-[8px_12px_14px] sm:p-[8px_14px_14px]">
             {isLoadingSettings ? (
               <div className="flex flex-col gap-[10px] py-[8px]">
                 {Array.from({ length: 3 }).map((_, idx) => (
@@ -481,9 +489,9 @@ export default function SettingsPage() {
               MODEL_STAGES.map((stage) => (
                 <div
                   key={stage.key}
-                  className="flex items-center gap-[10px] py-[8px] border-b border-[var(--bd)]"
+                  className="grid grid-cols-1 gap-[6px] border-b border-[var(--bd)] py-[10px] sm:grid-cols-[150px_minmax(0,1fr)_52px] sm:items-center sm:gap-[10px] sm:py-[8px]"
                 >
-                  <span className="w-[118px] flex-none text-[11.5px] font-semibold text-[var(--fg)]">
+                  <span className="text-[11.5px] font-semibold text-[var(--fg)]">
                     {stage.label}
                   </span>
                   <Select
@@ -496,17 +504,17 @@ export default function SettingsPage() {
                       );
                     }}
                   >
-                    <SelectTrigger className="flex-1 h-[29px] text-[11.5px] font-semibold font-mono border-[var(--bd)] bg-[var(--card2)] text-[var(--fg)] outline-none rounded-[8px]">
+                    <SelectTrigger className="h-[34px] min-w-0 rounded-[8px] border-[var(--bd)] bg-[var(--card2)] font-mono text-[11.5px] font-semibold text-[var(--fg)] outline-none sm:h-[29px]">
                       <SelectValue placeholder="Select model" />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent className="max-h-[260px] min-w-[260px]">
                       {optionsFor(stage.key).map((opt) => (
                         <SelectItem key={opt} value={opt}>{MODEL_LABELS[opt] ?? opt}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                   {savingKey === `model:${stage.key}` ? (
-                    <span className="text-[10px] text-[var(--mut)] flex-none">Saving…</span>
+                    <span className="text-[10px] text-[var(--mut)] sm:text-right">Saving…</span>
                   ) : modelOverridden[stage.key] ? (
                     <button
                       type="button"
@@ -516,7 +524,7 @@ export default function SettingsPage() {
                           setModelOverridden((current) => ({ ...current, [stage.key]: false }));
                         })
                       }
-                      className="text-[10px] font-semibold text-[var(--faint)] hover:text-[var(--indigo)] flex-none cursor-pointer bg-transparent border-0 p-0"
+                      className="w-fit cursor-pointer border-0 bg-transparent p-0 text-[10px] font-semibold text-[var(--faint)] hover:text-[var(--indigo)] sm:justify-self-end"
                     >
                       Reset
                     </button>
@@ -527,12 +535,12 @@ export default function SettingsPage() {
             {!isLoadingSettings && flags && noModelStages(flags).map((stage) => (
               <div
                 key={stage.label}
-                className="flex items-center gap-[10px] py-[8px] border-b border-[var(--bd)] last:border-0"
+                className="grid grid-cols-1 gap-[4px] border-b border-[var(--bd)] py-[9px] last:border-0 sm:grid-cols-[150px_minmax(0,1fr)] sm:gap-[10px]"
               >
-                <span className="w-[118px] flex-none text-[11.5px] font-semibold text-[var(--faint)]">
+                <span className="text-[11.5px] font-semibold text-[var(--faint)]">
                   {stage.label}
                 </span>
-                <span className="flex-1 text-[10.5px] text-[var(--faint)] italic">{stage.note}</span>
+                <span className="text-[10.5px] leading-relaxed text-[var(--faint)] italic">{stage.note}</span>
               </div>
             ))}
             <div className="text-[10px] text-[var(--faint)] mt-[8px]">
@@ -548,11 +556,11 @@ export default function SettingsPage() {
               </div>
             )}
           </div>
-        </div>
+        </section>
 
-        <div className="bg-[var(--card)] border border-[var(--bd)] rounded-[12px] shadow-[var(--shadow)] overflow-hidden">
-          <div className="p-[12px_14px] border-b border-[var(--bd)] flex items-center justify-between">
-            <span className="text-[13px] font-bold text-[var(--fg)]">Daily Blog Goal</span>
+        <section className={cardClass}>
+          <div className="flex flex-col gap-[6px] border-b border-[var(--bd)] p-[12px_14px] sm:flex-row sm:items-center sm:justify-between">
+            <span className={cardTitleClass}>Daily Blog Goal</span>
             {dailyOverridden && !isLoadingSettings && (
               <button
                 type="button"
@@ -570,8 +578,8 @@ export default function SettingsPage() {
               </button>
             )}
           </div>
-          <div className="p-[14px] flex flex-col gap-[8px]">
-            <div className="flex items-center justify-between mb-[4px]">
+          <div className="flex flex-col gap-[8px] p-[12px] sm:p-[14px]">
+            <div className="mb-[4px] flex items-center justify-between gap-[10px]">
               <label htmlFor="input-daily-limit" className="text-[12px] font-semibold text-[var(--fg2)]">
                 Steers the Daily Target Controller
               </label>
@@ -621,12 +629,21 @@ export default function SettingsPage() {
                   <span className="text-[var(--fg)] font-bold">{goalProgress.remaining}</span> to go
                 </span>
                 <span className="px-[6px] py-[2px] rounded-[5px] bg-[var(--card2)]">
-                  <span className="text-[var(--fg)] font-bold">{goalProgress.backlog}</span> backlog
+                  <span className="text-[var(--fg)] font-bold">{goalProgress.backlog}</span> eligible backlog
+                </span>
+                <span className="px-[6px] py-[2px] rounded-[5px] bg-[var(--card2)]">
+                  <span className="text-[var(--fg)] font-bold">{goalProgress.pending}</span> pending
+                </span>
+                <span className="px-[6px] py-[2px] rounded-[5px] bg-[var(--card2)]">
+                  <span className="text-[var(--fg)] font-bold">{goalProgress.cancelled}</span> cancelled
+                </span>
+                <span className="px-[6px] py-[2px] rounded-[5px] bg-[var(--card2)]">
+                  <span className="text-[var(--fg)] font-bold">{goalProgress.failed}</span> failed fallback
                 </span>
               </div>
             )}
             {/* Retry Attempts - drives BullMQ attempts + QA regeneration budget (workers/shared/retry-config.ts) */}
-            <div className="flex items-center justify-between gap-[10px] border-t border-[var(--bd)] pt-[10px] mt-[4px]">
+            <div className="mt-[4px] flex flex-col gap-[10px] border-t border-[var(--bd)] pt-[10px] sm:flex-row sm:items-center sm:justify-between">
               <div className="flex-1">
                 <div className="text-[12px] font-semibold text-[var(--fg2)]">Retry attempts per blog</div>
                 <div className="text-[10px] text-[var(--faint)] mt-[1px]">
@@ -635,7 +652,7 @@ export default function SettingsPage() {
                   time.
                 </div>
               </div>
-              <div className="flex items-center gap-[6px] flex-none">
+              <div className="flex flex-none items-center gap-[6px] sm:justify-end">
                 {retryOverridden && (
                   <button
                     type="button"
@@ -686,10 +703,8 @@ export default function SettingsPage() {
             <div className="text-[10.5px] text-[var(--faint)] mt-[4px]">
               Sets how many publish slots the schedule above has - one independent pipeline run per slot
               (Planning → Outline → Writing → Image → QA → Publish), published at its configured
-              time. A blog only counts once it is PUBLISHED: every stage retries automatically ({retryAttempts}{" "}
-              retr{retryAttempts === 1 ? "y" : "ies"} after the first attempt), QA failures regenerate the draft,
-              and anything permanently failed is backfilled from the submission backlog so the day still reaches the
-              goal.
+              time. A slot runs only when the daily goal still has room and an eligible row exists: pending first,
+              cancelled next, failed last. If nothing is eligible, the scheduler records a clean no-op.
             </div>
             {goalMessage && (
               <div
@@ -700,7 +715,7 @@ export default function SettingsPage() {
               </div>
             )}
           </div>
-        </div>
+        </section>
       </div>
     </div>
   );

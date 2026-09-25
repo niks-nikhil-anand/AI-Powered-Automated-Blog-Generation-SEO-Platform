@@ -35,7 +35,7 @@ export function ScheduleTimeline({ slots, tz }: ScheduleTimelineProps) {
   const nowPct = pct(nowParts[0] ?? 0, nowParts[1] ?? 0);
 
   return (
-    <div className="pt-[26px] pb-[6px]">
+    <div className="min-w-[560px] pt-[26px] pb-[6px] sm:min-w-0">
       <div className="relative h-[6px] rounded-full bg-[var(--card2)]">
         {slots.map((slot) => {
           const parsed = parseDailyCron(slot.pattern);
