@@ -13,15 +13,14 @@ type RouteContext = {
 };
 
 /**
- * Edits one publish slot's TARGET PUBLISH time (blog-slot-<n>, n = 1..20,
- * one per Daily Blog Goal). The time the user picks is when the blog goes
- * live - the BullMQ scheduler actually fires generation earlier by
- * SLOT_GENERATION_LEAD_MINUTES, and quality-worker holds the finished blog
- * until the publish time (publishes immediately if retries already ran
- * past it). The publish time persists in AppSetting, so edits survive
- * worker restarts; Redis stays the live scheduling truth for reads.
+ * Edits one publish slot's RUN time (blog-slot-<n>, n = 1..20,
+ * one per Daily Blog Goal). The time the user picks is when the scheduler
+ * starts a blog pipeline. A future time later today runs today; a time that
+ * already passed runs tomorrow at the same wall-clock time. The run time
+ * persists in AppSetting, so edits survive worker restarts; Redis stays the
+ * live scheduling truth for reads.
  *
- * Body: { hour, minute } = publish time, or { reset: true } to clear the
+ * Body: { hour, minute } = run time, or { reset: true } to clear the
  * slot (unsets it - the card returns to "--:--" until a new time is set).
  */
 export async function PATCH(request: Request, context: RouteContext) {
