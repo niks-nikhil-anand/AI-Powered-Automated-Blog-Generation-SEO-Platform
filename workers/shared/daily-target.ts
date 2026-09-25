@@ -4,6 +4,7 @@ import { logger } from "./logger";
 import { JOB_IDS, planningQueue, outlineQueue, writingQueue } from "./queues";
 import { getSetting, DAILY_TARGET_KEY } from "./settings";
 import { ELIGIBLE_BACKLOG_STATUSES, compareBacklogCandidates } from "./backlog-selection";
+import { setPublishTarget } from "./publish-slots";
 
 const log = logger.child({ worker: "daily-target" });
 
@@ -101,6 +102,48 @@ export async function nextEligibleBlogInput() {
     orderBy: { createdAt: "asc" },
   });
   return inputs.sort(compareBacklogCandidates)[0] ?? null;
+}
+
+export type DispatchOneResult = DailyTargetStatus & {
+  dispatched: number;
+  reason:
+    | "dispatched"
+    | "daily_target_already_met"
+    | "no_eligible_submission";
+  blogInputId?: string;
+  title?: string;
+  pickedStatus?: string;
+  targetPublishAt?: string;
+};
+
+/**
+ * Starts exactly one eligible BlogInput now using the same picker that
+ * scheduled publish slots use: daily-goal ceiling first, then backlog status
+ * order PENDING -> CANCELLED -> FAILED, with priority/age tie-breakers.
+ */
+export async function dispatchOneEligibleBlogNow(targetPublishAtMs = Date.now()): Promise<DispatchOneResult> {
+  const status = await getDailyTargetStatus();
+  if (status.remaining <= 0) {
+    return { ...status, dispatched: 0, reason: "daily_target_already_met" };
+  }
+
+  const input = await nextEligibleBlogInput();
+  if (!input) {
+    return { ...status, dispatched: 0, reason: "no_eligible_submission" };
+  }
+
+  await setPublishTarget(input.id, targetPublishAtMs);
+  await dispatchBlogInput(input);
+
+  return {
+    ...status,
+    dispatched: 1,
+    reason: "dispatched",
+    blogInputId: input.id,
+    title: input.title,
+    pickedStatus: input.status,
+    targetPublishAt: new Date(targetPublishAtMs).toISOString(),
+  };
 }
 
 async function nextEligibleBlogInputs(take: number) {

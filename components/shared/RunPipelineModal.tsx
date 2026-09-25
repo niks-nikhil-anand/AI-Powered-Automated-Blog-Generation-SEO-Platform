@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useState } from "react";
-import { WorldClocks, useLiveNow } from "./WorldClocks";
+import { useLiveNow } from "./WorldClocks";
 
 type Schedule = {
   id: string;
@@ -37,6 +37,16 @@ type RunContext = {
   stageOrder: string[];
   runInFlight: boolean;
   workersConnected: number;
+  dailyTarget: {
+    target: number;
+    publishedToday: number;
+    inFlight: number;
+    remaining: number;
+    backlogAvailable: number;
+    backlogPending: number;
+    backlogCancelled: number;
+    backlogFailed: number;
+  };
   estimate: {
     costUsd: number;
     costLabel: string;
@@ -46,13 +56,40 @@ type RunContext = {
   };
 };
 
+type RunResult = {
+  dispatched: number;
+  reason: string;
+  blogInputId?: string;
+  title?: string;
+  pickedStatus?: string;
+  targetPublishAt?: string;
+  target: number;
+  publishedToday: number;
+  inFlight: number;
+  remaining: number;
+  backlogAvailable: number;
+};
+
 interface RunPipelineModalProps {
   onClose: () => void;
 }
 
-function shortTimeIn(ms: number, tz: string) {
-  return new Date(ms).toLocaleTimeString("en-GB", {
+function currentTimeIn(tz: string, now: number) {
+  return new Date(now).toLocaleTimeString("en-GB", {
     timeZone: tz,
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+}
+
+function fullScheduleTime(ms: number, tz: string) {
+  return new Date(ms).toLocaleString("en-GB", {
+    timeZone: tz,
+    weekday: "short",
+    day: "2-digit",
+    month: "short",
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
@@ -100,7 +137,7 @@ export function RunPipelineModal({ onClose }: RunPipelineModalProps) {
   const [context, setContext] = useState<RunContext | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [queued, setQueued] = useState<{ jobId: string; queue: string } | null>(null);
+  const [runResult, setRunResult] = useState<RunResult | null>(null);
   const [error, setError] = useState("");
   const now = useLiveNow();
 
@@ -138,13 +175,16 @@ export function RunPipelineModal({ onClose }: RunPipelineModalProps) {
   const handleRun = useCallback(async () => {
     setSubmitting(true);
     setError("");
+    setRunResult(null);
     try {
       const res = await fetch("/api/pipeline/run", { method: "POST" });
       const data = await res.json();
-      if (!res.ok || !data.ok) throw new Error(data.error || "Failed to queue the pipeline");
-      setQueued({ jobId: String(data.jobId ?? "?"), queue: String(data.queue ?? "scheduler_queue") });
+      if (!res.ok || !data.ok) throw new Error(data.error || "Failed to run the pipeline");
+      setRunResult(data as RunResult);
+      const nextContext = await fetch("/api/pipeline/run-context", { cache: "no-store" }).then((response) => response.json());
+      setContext(nextContext);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to queue the pipeline");
+      setError(err instanceof Error ? err.message : "Failed to run the pipeline");
     } finally {
       setSubmitting(false);
     }
@@ -159,6 +199,10 @@ export function RunPipelineModal({ onClose }: RunPipelineModalProps) {
   const configuredSchedules = (context?.schedules ?? []).filter(
     (schedule): schedule is Schedule & { next: number } => schedule.next !== null
   );
+  const nextSchedule = configuredSchedules
+    .slice()
+    .sort((a, b) => a.next - b.next)[0];
+  const dailyTarget = context?.dailyTarget;
 
   return (
     <div
@@ -193,47 +237,54 @@ export function RunPipelineModal({ onClose }: RunPipelineModalProps) {
           </button>
         </div>
 
-        {/* World clocks */}
+        {/* Dispatch status */}
         <div className="p-[12px_16px] border-b border-[var(--bd)]">
-          <WorldClocks />
-        </div>
+          <div className={LABEL_CLASS}>Run status</div>
+          <div className="mt-[9px] grid grid-cols-1 gap-[8px]">
+            <div className="rounded-[9px] border border-[var(--bd)] bg-[var(--card2)] p-[10px]">
+              <div className="flex items-center justify-between gap-[12px]">
+                <span className="text-[11px] text-[var(--mut)]">Current time</span>
+                <span className="font-mono text-[13px] font-bold text-[var(--fg)]">
+                  {currentTimeIn("Asia/Kolkata", now)} IST
+                </span>
+              </div>
+              <div className="mt-[7px] flex items-center justify-between gap-[12px]">
+                <span className="text-[11px] text-[var(--mut)]">Next scheduled run</span>
+                <span className="text-right text-[11.5px] text-[var(--fg2)]">
+                  {loading
+                    ? "Loading..."
+                    : nextSchedule
+                      ? `${nextSchedule.label} · ${fullScheduleTime(nextSchedule.next, "Asia/Kolkata")} IST (${countdown(nextSchedule.next, now)})`
+                      : "No schedule configured"}
+                </span>
+              </div>
+            </div>
 
-        {/* Next scheduled runs */}
-        <div className="p-[12px_16px] border-b border-[var(--bd)]">
-          <div className={LABEL_CLASS}>Next scheduled runs</div>
-          <div className="flex flex-col gap-[7px] mt-[9px]">
-            {loading && <div className="text-[11.5px] text-[var(--faint)]">Loading…</div>}
-            {!loading && configuredSchedules.length === 0 && (
-              <div className="text-[11.5px] text-[var(--amber)]">
-                No publish slots configured right now — the worker may not have booted, or no target
-                times are set. Configure them in Settings → Publish Schedule.
-              </div>
-            )}
-            {configuredSchedules.map((schedule, index) => (
-              <div key={schedule.id} className="flex items-center gap-[10px]">
-                <span
-                  className="w-[5px] h-[5px] rounded-full flex-none"
-                  style={{ background: index === 0 ? "var(--indigo)" : "var(--bd2)" }}
-                />
-                <span
-                  className="text-[12px] flex-1"
-                  style={{ color: index === 0 ? "var(--fg)" : "var(--fg2)" }}
-                >
-                  {schedule.label}
+            <div className="rounded-[9px] border border-[var(--bd)] bg-[var(--card2)] p-[10px]">
+              <div className="flex flex-wrap gap-[6px]">
+                <span className="rounded-[5px] bg-[rgba(99,102,241,0.14)] px-[7px] py-[3px] text-[10.5px] font-semibold text-[var(--indigo)]">
+                  goal {dailyTarget?.target ?? "—"}/day
                 </span>
-                <span
-                  className="font-mono text-[11.5px]"
-                  style={{ color: index === 0 ? "var(--indigo)" : "var(--mut)" }}
-                >
-                  {countdown(schedule.next, now)}
+                <span className="rounded-[5px] bg-[var(--card)] px-[7px] py-[3px] text-[10.5px] text-[var(--fg2)]">
+                  {dailyTarget?.publishedToday ?? "—"} published
                 </span>
-                {/* City names, not CET/CEST - the abbreviation flips with EU DST. */}
-                <span className="text-[10.5px] text-[var(--faint)] w-[138px] text-right">
-                  {shortTimeIn(schedule.next, "Asia/Kolkata")} IST ·{" "}
-                  {shortTimeIn(schedule.next, "Europe/Berlin")} Berlin
+                <span className="rounded-[5px] bg-[var(--card)] px-[7px] py-[3px] text-[10.5px] text-[var(--fg2)]">
+                  {dailyTarget?.inFlight ?? "—"} in flight
+                </span>
+                <span className="rounded-[5px] bg-[var(--card)] px-[7px] py-[3px] text-[10.5px] text-[var(--fg2)]">
+                  {dailyTarget?.remaining ?? "—"} can start
                 </span>
               </div>
-            ))}
+              <div className="mt-[8px] text-[11px] text-[var(--mut)]">
+                Manual run uses scheduled picker logic: pending first, cancelled next,
+                failed last. Eligible backlog:{" "}
+                <span className="text-[var(--fg2)]">
+                  {dailyTarget
+                    ? `${dailyTarget.backlogPending} pending · ${dailyTarget.backlogCancelled} cancelled · ${dailyTarget.backlogFailed} failed`
+                    : "loading..."}
+                </span>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -350,17 +401,20 @@ export function RunPipelineModal({ onClose }: RunPipelineModalProps) {
         </div>
 
         {/* Result banners */}
-        {(queued || error) && (
+        {(runResult || error) && (
           <div className="p-[12px_16px] border-b border-[var(--bd)]">
             {error && (
               <div className="text-[11.5px] text-[var(--rose)] bg-[rgba(244,63,94,0.10)] border border-[rgba(244,63,94,0.25)] rounded-[8px] p-[9px_10px]">
                 {error}
               </div>
             )}
-            {queued && (
+            {runResult && (
               <div className="text-[11.5px] text-[var(--emerald)] bg-[rgba(16,185,129,0.10)] border border-[rgba(16,185,129,0.25)] rounded-[8px] p-[9px_10px]">
-                Queued on {queued.queue} · job {queued.jobId}. Watch the pipeline strip on the
-                dashboard.
+                {runResult.dispatched > 0
+                  ? `Dispatched "${runResult.title}" from ${runResult.pickedStatus?.toLowerCase() ?? "eligible"} backlog.`
+                  : runResult.reason === "daily_target_already_met"
+                    ? `Nothing dispatched — daily goal is already covered (${runResult.publishedToday} published, ${runResult.inFlight} in flight).`
+                    : "Nothing dispatched — no eligible blog is available."}
               </div>
             )}
           </div>
@@ -377,9 +431,9 @@ export function RunPipelineModal({ onClose }: RunPipelineModalProps) {
             onClick={onClose}
             className="h-[31px] px-[12px] rounded-[8px] border border-[var(--bd)] bg-[var(--card)] text-[var(--fg2)] text-[11.5px] font-semibold hover:border-[var(--bd2)] disabled:opacity-60"
           >
-            {queued ? "Close" : "Cancel"}
+            {runResult ? "Close" : "Cancel"}
           </button>
-          {!queued && (
+          {!runResult && (
             <button
               type="button"
               disabled={runDisabled}
