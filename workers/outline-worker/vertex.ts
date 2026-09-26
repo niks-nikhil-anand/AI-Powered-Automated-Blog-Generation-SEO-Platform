@@ -1,6 +1,5 @@
-import { env, isVertexConfigured } from "../shared/env";
-import { generateVertexJson, slugify } from "../shared/vertex";
-import { getSetting, MODEL_SETTING_KEYS } from "../shared/settings";
+import { generateStageJson } from "../shared/ai-router";
+import { slugify } from "../shared/vertex";
 import { logger } from "../shared/logger";
 import { OutlineResult, OutlineResultSchema } from "./types";
 import { cleanBriefText, containsKeyword, ensureKeywordInTitle } from "../shared/seo-keyword";
@@ -185,7 +184,13 @@ export async function generateContentOutline(
   plan: PlanInput,
   spec: OutlineSpec
 ): Promise<{ outline: OutlineResult; usage: { promptTokens: number; completionTokens: number }; model: string }> {
-  if (!isVertexConfigured) {
+  let result: Awaited<ReturnType<typeof generateStageJson<unknown>>>;
+  try {
+    result = await generateStageJson<unknown>("outline", buildPrompt(topic, category, plan, spec));
+  } catch (error) {
+    log.warn("Outline model unavailable, using fallback", {
+      error: error instanceof Error ? error.message : String(error),
+    });
     return {
       outline: enforceFocusKeyword(fallbackOutline(topic, plan, spec), spec.focusKeyword),
       usage: { promptTokens: 0, completionTokens: 0 },
@@ -193,8 +198,6 @@ export async function generateContentOutline(
     };
   }
 
-  const model = await getSetting(MODEL_SETTING_KEYS.outline, env.VERTEX_FLASH);
-  const result = await generateVertexJson<unknown>(model, buildPrompt(topic, category, plan, spec));
   const parsed = OutlineResultSchema.safeParse(result.data);
   if (!parsed.success) {
     log.warn(`Outline response failed schema validation, using fallback: ${parsed.error.message}`);
@@ -207,6 +210,6 @@ export async function generateContentOutline(
   return {
     outline: enforceFocusKeyword({ ...parsed.data, slug: parsed.data.slug || slugify(parsed.data.title) }, spec.focusKeyword),
     usage: result.usage,
-    model,
+    model: result.model,
   };
 }
