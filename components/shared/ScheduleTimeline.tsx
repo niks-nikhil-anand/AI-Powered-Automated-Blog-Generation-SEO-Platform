@@ -3,6 +3,7 @@
 import React from "react";
 import { useHydrated, useLiveNow } from "./WorldClocks";
 import { parseDailyCron } from "@/lib/utils";
+import { formatTime12 } from "@/lib/time-display";
 
 export interface TimelineSlot {
   id: string;
@@ -48,7 +49,7 @@ export function ScheduleTimeline({ slots, tz }: ScheduleTimelineProps) {
               style={{ left: `${left}%`, transform: "translateX(-50%)" }}
             >
               <span className="text-[9px] font-mono font-semibold text-[var(--faint)] whitespace-nowrap">
-                {String(parsed.hour).padStart(2, "0")}:{String(parsed.minute).padStart(2, "0")}
+                {formatTime12(parsed.hour, parsed.minute)}
               </span>
               <span
                 className="mt-[2px] w-[10px] h-[10px] rounded-full border-2 border-[var(--card)]"
@@ -68,11 +69,11 @@ export function ScheduleTimeline({ slots, tz }: ScheduleTimelineProps) {
         )}
       </div>
       <div className="flex justify-between font-mono text-[9px] text-[var(--faint)] mt-[6px]">
-        <span>00:00</span>
-        <span>06:00</span>
-        <span>12:00</span>
-        <span>18:00</span>
-        <span>24:00</span>
+        <span>12 AM</span>
+        <span>6 AM</span>
+        <span>12 PM</span>
+        <span>6 PM</span>
+        <span>12 AM</span>
       </div>
     </div>
   );
