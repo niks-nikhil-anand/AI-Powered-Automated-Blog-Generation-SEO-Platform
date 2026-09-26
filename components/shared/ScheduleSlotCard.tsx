@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import { formatCountdown, formatHourMinute, parseDailyCron } from "@/lib/utils";
 import { useLiveNow } from "./WorldClocks";
+import { formatTime12 } from "@/lib/time-display";
 
 export interface ScheduleSlot {
   id: string;
@@ -68,7 +69,7 @@ export function ScheduleSlotCard({ slot, color, onUpdated }: ScheduleSlotCardPro
     const [hourStr, minuteStr] = timeValue.split(":");
     const hour = Number(hourStr);
     const minute = Number(minuteStr);
-    if (!Number.isInteger(hour) || !Number.isInteger(minute)) {
+    if (!Number.isInteger(hour) || !Number.isInteger(minute) || hour < 0 || hour > 23 || minute < 0 || minute > 59) {
       setMessage({ text: "Enter a valid time.", tone: "error" });
       return;
     }
@@ -87,8 +88,8 @@ export function ScheduleSlotCard({ slot, color, onUpdated }: ScheduleSlotCardPro
       setMessage({
         text:
           savedNextLabel === "tomorrow"
-            ? `Saved - ${formatHourMinute(hour, minute)} already passed today, so the next start is tomorrow. Pick the next minute to run today.`
-            : `Saved - starts daily at ${formatHourMinute(hour, minute)} (survives restarts).`,
+            ? `Saved - ${formatTime12(hour, minute)} already passed today, so the next start is tomorrow. Pick the next minute to run today.`
+            : `Saved - starts daily at ${formatTime12(hour, minute)} (survives restarts).`,
         tone: "ok",
       });
       setEditing(false);
@@ -130,13 +131,26 @@ export function ScheduleSlotCard({ slot, color, onUpdated }: ScheduleSlotCardPro
 
       {editing ? (
         <div className="flex flex-col gap-[8px]">
-          <input
-            type="time"
-            aria-label={`Set run time for ${slot.label}`}
-            value={timeValue}
-            onChange={(e) => setTimeValue(e.target.value)}
-            className="h-[34px] px-[10px] rounded-[8px] border border-[var(--bd)] bg-[var(--card)] text-[var(--fg)] font-mono font-bold text-[15px] outline-none focus:border-[var(--indigo)]"
-          />
+          <div className="grid grid-cols-3 gap-2">
+            <select aria-label={`Hour for ${slot.label}`} disabled={saving}
+              value={Number(timeValue.split(":")[0]) % 12 || 12}
+              onChange={(e) => setTimeValue(formatHourMinute(Number(e.target.value) % 12 + (Number(timeValue.split(":")[0]) >= 12 ? 12 : 0), Number(timeValue.split(":")[1])))}
+              className="h-10 min-w-0 rounded-md border border-[var(--bd)] bg-[var(--card)] px-2 text-[var(--fg)]">
+              {Array.from({ length: 12 }, (_, i) => <option key={i + 1} value={i + 1}>{String(i + 1).padStart(2, "0")}</option>)}
+            </select>
+            <select aria-label={`Minute for ${slot.label}`} disabled={saving}
+              value={Number(timeValue.split(":")[1])}
+              onChange={(e) => setTimeValue(formatHourMinute(Number(timeValue.split(":")[0]), Number(e.target.value)))}
+              className="h-10 min-w-0 rounded-md border border-[var(--bd)] bg-[var(--card)] px-2 text-[var(--fg)]">
+              {Array.from({ length: 60 }, (_, i) => <option key={i} value={i}>{String(i).padStart(2, "0")}</option>)}
+            </select>
+            <select aria-label={`AM or PM for ${slot.label}`} disabled={saving}
+              value={Number(timeValue.split(":")[0]) >= 12 ? "PM" : "AM"}
+              onChange={(e) => setTimeValue(formatHourMinute(Number(timeValue.split(":")[0]) % 12 + (e.target.value === "PM" ? 12 : 0), Number(timeValue.split(":")[1])))}
+              className="h-10 min-w-0 rounded-md border border-[var(--bd)] bg-[var(--card)] px-2 text-[var(--fg)]">
+              <option value="AM">AM</option><option value="PM">PM</option>
+            </select>
+          </div>
           <div className="flex flex-wrap gap-[7px]">
             <button
               type="button"
@@ -162,7 +176,7 @@ export function ScheduleSlotCard({ slot, color, onUpdated }: ScheduleSlotCardPro
             className="rounded-[7px] px-[10px] py-[3px] font-mono text-[24px] font-extrabold tracking-wider sm:text-[26px]"
             style={{ background: "var(--card)", color }}
           >
-            {parsed ? formatHourMinute(parsed.hour, parsed.minute) : "--:--"}
+            {parsed ? formatTime12(parsed.hour, parsed.minute) : "--:--"}
           </div>
           <button
             type="button"
@@ -179,8 +193,8 @@ export function ScheduleSlotCard({ slot, color, onUpdated }: ScheduleSlotCardPro
           {!parsed
             ? "Not set - Edit to pick a run time"
             : slot.next
-              ? `Starts ${nextLabel === "tomorrow" ? "tomorrow " : ""}${formatCountdown(slot.next, now)} · run time ${slot.publishTime ?? formatHourMinute(parsed.hour, parsed.minute)}`
-              : `Starts daily at ${slot.publishTime ?? formatHourMinute(parsed.hour, parsed.minute)}`}
+              ? `Starts ${nextLabel === "tomorrow" ? "tomorrow " : ""}${formatCountdown(slot.next, now)} · run time ${formatTime12(parsed.hour, parsed.minute)}`
+              : `Starts daily at ${formatTime12(parsed.hour, parsed.minute)}`}
         </span>
         {parsed && !editing && (
           <button
