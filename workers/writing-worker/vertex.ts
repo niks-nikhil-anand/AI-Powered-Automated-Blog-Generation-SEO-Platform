@@ -1,7 +1,8 @@
-import { env, isVertexConfigured } from "../shared/env";
+import { env } from "../shared/env";
 import { logger } from "../shared/logger";
-import { generateVertexText, slugify, VertexQuotaError, type VertexTextResult } from "../shared/vertex";
-import { getSetting, MODEL_SETTING_KEYS } from "../shared/settings";
+import { generateStageText } from "../shared/ai-router";
+import { slugify } from "../shared/vertex";
+import type { VertexTextResult } from "../shared/vertex";
 import { buildSectionPlan, clearSectionCache, generateAllSections, generateSection, type SectionArticleContext, type SectionSpec, DEFAULT_MUST_FOLLOW_RULES } from "./sections";
 import type { GroundedSource } from "./citations";
 import { cleanBriefText, containsKeyword, ensureKeywordInTitle, ensureKeywordInH1, extractH1 } from "../shared/seo-keyword";
@@ -13,38 +14,24 @@ import { articleWordRange, countWords, validateArticleContract } from "../shared
 const log = logger.child({ worker: "writing-worker" });
 
 /**
- * Task 10 (docs/VERTEX_429_RESILIENCE_PLAN.md): when the Pro-class writing
- * model is persistently quota-exhausted (VertexQuotaError after the
- * call-level retries in shared/vertex.ts), rerun the same prompt once on
- * VERTEX_FLASH instead of failing the whole job. The returned model is the
- * one that ACTUALLY produced the text - callers record/report that
- * (BlogDraft.model already flows into AIUsage, so the fallback is visible
- * in cost/model rollups, and the error log makes it greppable).
+ * Route writing calls through the stage model resolver. The returned model is
+ * the one that ACTUALLY produced the text - callers record/report that
+ * (BlogDraft.model already flows into AIUsage, so provider fallback is visible
+ * in cost/model rollups).
  */
 async function generateTextWithQuotaFallback(
-  configuredModel: string,
   prompt: string,
   options: { maxOutputTokens: number; temperature: number }
 ): Promise<{ result: VertexTextResult; model: string }> {
-  try {
-    return {
-      result: await generateVertexText(configuredModel, prompt, { ...options, timeoutMs: env.WRITING_TIMEOUT_MS }),
-      model: configuredModel,
-    };
-  } catch (error) {
-    if (!env.VERTEX_MODEL_FALLBACK_ENABLED || !(error instanceof VertexQuotaError) || configuredModel === env.VERTEX_FLASH) {
-      throw error;
-    }
-    log.error("Writing model quota exhausted - falling back to Flash for this call", {
-      model: configuredModel,
-      fallbackModel: env.VERTEX_FLASH,
-      fallback: true,
+  const result = await generateStageText("writing", prompt, { ...options, timeoutMs: env.WRITING_TIMEOUT_MS });
+  if (result.fallbackReasons.length > 0) {
+    log.warn("Writing model fallback used", {
+      model: result.model,
+      provider: result.provider,
+      fallbackReasons: result.fallbackReasons,
     });
-    return {
-      result: await generateVertexText(env.VERTEX_FLASH, prompt, { ...options, timeoutMs: env.WRITING_TIMEOUT_MS }),
-      model: env.VERTEX_FLASH,
-    };
   }
+  return { result, model: result.model };
 }
 
 export type BlogDraft = {
@@ -470,7 +457,7 @@ let warnedMock = false;
 async function generateMock(topic: string, description: string, context: WritingContext = {}): Promise<BlogDraft> {
   if (!warnedMock) {
     log.warn(
-      "Vertex AI is not configured - using local writer fallback. Set GOOGLE_CLOUD_PROJECT and VERTEX_LOCATION, and authenticate with GOOGLE_APPLICATION_CREDENTIALS or ADC."
+      "No configured AI text model is available - using local writer fallback. Set a provider key/credentials or choose an available backup model in Settings."
     );
     warnedMock = true;
   }
@@ -478,7 +465,7 @@ async function generateMock(topic: string, description: string, context: Writing
   const title = context.outline?.title ?? topic;
   const markdown = `## Draft unavailable\n\nWriter credentials are not configured for this environment.${
     description ? `\n\nTopic note: ${description}` : ""
-  }\n\nSet \`GOOGLE_CLOUD_PROJECT\`, \`VERTEX_LOCATION\`, and \`GOOGLE_APPLICATION_CREDENTIALS\` in \`.env\` to generate a full ${wordRange(context.targetWords).min}-${wordRange(context.targetWords).max} word article with Vertex AI.`;
+  }\n\nSet provider credentials in \`.env\` or configure an available model in Settings to generate a full ${wordRange(context.targetWords).min}-${wordRange(context.targetWords).max} word article.`;
 
   return {
     title,
@@ -494,9 +481,8 @@ async function generateMock(topic: string, description: string, context: Writing
 }
 
 async function generateWithVertex(topic: string, description: string, context: WritingContext = {}): Promise<BlogDraft> {
-  const configuredModel = await getSetting(MODEL_SETTING_KEYS.writing, env.VERTEX_MODEL);
   const prompt = buildPrompt(topic, description, context);
-  const { result, model } = await generateTextWithQuotaFallback(configuredModel, prompt, {
+  const { result, model } = await generateTextWithQuotaFallback(prompt, {
     maxOutputTokens: 8192,
     temperature: 0.35,
   });
@@ -759,9 +745,7 @@ async function generateSectionedDraft(topic: string, description: string, contex
   await runFinalRepairLoop();
 
   if (range.max > 0 && (context.wordBounds ?? brief.wordBounds)?.max && countWords(markdown) > range.max) {
-    const configuredModel = await getSetting(MODEL_SETTING_KEYS.writing, env.VERTEX_MODEL);
     const compressed = await generateTextWithQuotaFallback(
-      configuredModel,
       `You are editing a technical article to fit a hard briefed maximum of ${range.max} words.
 
 Current word count: ${countWords(markdown)}.
@@ -796,24 +780,19 @@ ${markdown}`,
   // SKIPPED and the assembled sections ship as-is, rather than failing
   // the whole draft or burning the scarce Pro pool on a nice-to-have.
   if (env.EDITOR_PASS_ENABLED) {
-    const editorModel = await getSetting(MODEL_SETTING_KEYS.writing, env.VERTEX_MODEL);
     try {
-      const edited = await generateVertexText(
-        editorModel,
+      const edited = await generateStageText(
+        "writing",
         `You are the editor of a developer blog. Polish this assembled article for voice cohesion and transitions between sections; remove any sentence duplicated across sections. Do not add, remove, or alter any specific claim (numbers, dates, versions, capabilities) - polish transitions and voice only. Preserve every "## " heading, every [S1]-style citation marker, every table, and every code block exactly as-is. Return ONLY the full article Markdown.\n\n${markdown}`,
         { maxOutputTokens: 8192, temperature: 0.2, timeoutMs: env.WRITING_TIMEOUT_MS, priority: "deferrable" }
       );
       markdown = ensureBriefedFaqs(ensureFocusKeywordInH2(enforceSingleH1(edited.text, title, focusKeyword), focusKeyword), faqQuestions);
       usage.promptTokens += edited.usage.promptTokens;
       usage.completionTokens += edited.usage.completionTokens;
-      usageRecords.push({ model: editorModel, usage: edited.usage });
-      models.push(editorModel);
+      usageRecords.push({ model: edited.model, usage: edited.usage });
+      models.push(edited.model);
     } catch (error) {
-      if (error instanceof VertexQuotaError) {
-        log.warn("Editor pass skipped - quota exhausted (circuit breaker)", { model: editorModel });
-      } else {
-        throw error;
-      }
+      log.warn("Editor pass skipped - model unavailable", { error: error instanceof Error ? error.message : String(error) });
     }
     await runFinalRepairLoop();
   }
@@ -846,13 +825,19 @@ export async function generateBlogDraft(
   description: string,
   context: WritingContext = {}
 ): Promise<BlogDraft> {
-  if (!isVertexConfigured) return generateMock(topic, description, context);
   // Task 5 flag: sectioned writing replaces the monolithic draft. Off =
   // the exact pre-Task-5 single-call behavior. A brief's
   // generationConfig.generationMode overrides the flag for that submission.
   const mode = readBriefSpecs(context.specs).generationMode;
-  if (mode === "section_by_section") return generateSectionedDraft(topic, description, context);
-  if (mode === "single_pass" || mode === "monolithic") return generateWithVertex(topic, description, context);
-  if (env.SECTIONED_WRITING_ENABLED) return generateSectionedDraft(topic, description, context);
-  return generateWithVertex(topic, description, context);
+  try {
+    if (mode === "section_by_section") return generateSectionedDraft(topic, description, context);
+    if (mode === "single_pass" || mode === "monolithic") return generateWithVertex(topic, description, context);
+    if (env.SECTIONED_WRITING_ENABLED) return generateSectionedDraft(topic, description, context);
+    return generateWithVertex(topic, description, context);
+  } catch (error) {
+    log.warn("Writing model unavailable, using local fallback", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return generateMock(topic, description, context);
+  }
 }
