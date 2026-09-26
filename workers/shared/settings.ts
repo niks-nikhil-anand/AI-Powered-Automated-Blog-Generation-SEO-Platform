@@ -1,4 +1,5 @@
 import { prisma } from "./prisma";
+import { STAGE_MODEL_KEYS, type ModelStage } from "./model-registry";
 
 /**
  * Key/value settings backed by the AppSetting table. Shared by both the
@@ -17,19 +18,17 @@ import { prisma } from "./prisma";
  * text model is, so it stays an env var rather than a dashboard dropdown.
  * scheduler-worker and publish-worker call no AI model at all.
  */
-export const MODEL_SETTING_KEYS = {
-  planning: "model:planning",
-  outline: "model:outline",
-  writing: "model:writing",
-  /** Quality-worker's LLM editorial judge (Task 4). */
-  judge: "model:judge",
-  /** Per-section draft generation when sectioned writing is on (Task 5). */
-  writingSections: "model:writingSections",
-  /** Write-time claim self-check verification batches (Task 6). */
-  writingSelfcheck: "model:writingSelfcheck",
-} as const;
+export const MODEL_SETTING_KEYS = Object.fromEntries(
+  Object.entries(STAGE_MODEL_KEYS).map(([stage, config]) => [stage, config.legacy])
+) as Record<ModelStage, string>;
 
-export type ModelStage = keyof typeof MODEL_SETTING_KEYS;
+export const MODEL_PRIMARY_SETTING_KEYS = Object.fromEntries(
+  Object.entries(STAGE_MODEL_KEYS).map(([stage, config]) => [stage, config.primary])
+) as Record<ModelStage, string>;
+
+export const MODEL_BACKUP_SETTING_KEYS = Object.fromEntries(
+  Object.entries(STAGE_MODEL_KEYS).map(([stage, config]) => [stage, config.backup])
+) as Record<ModelStage, string>;
 
 export const DAILY_TARGET_KEY = "dailyBlogTarget";
 
