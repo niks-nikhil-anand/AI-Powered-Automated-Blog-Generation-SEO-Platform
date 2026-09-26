@@ -2,69 +2,105 @@ import { NextResponse } from "next/server";
 import { env } from "@/workers/shared/env";
 import {
   DAILY_TARGET_KEY,
+  MODEL_BACKUP_SETTING_KEYS,
+  MODEL_PRIMARY_SETTING_KEYS,
   MODEL_SETTING_KEYS,
   RETRY_ATTEMPTS_KEY,
   deleteSetting,
   getAllSettings,
   setSetting,
 } from "@/workers/shared/settings";
+import {
+  MODEL_REGISTRY,
+  STAGE_MODEL_KEYS,
+  envModelValue,
+  modelById,
+  modelStatus,
+  modelsForStage,
+  supportsCapabilities,
+  type ModelStage,
+} from "@/workers/shared/model-registry";
 import { reconcilePublishSlots } from "@/workers/shared/publish-slots";
 import { getRetryAttempts, refreshRetryAttempts } from "@/workers/shared/retry-config";
 
 export const dynamic = "force-dynamic";
 
-/**
- * planning/outline/writing/judge/writingSections/writingSelfcheck are the
- * stages that actually call an LLM (see the comment in
- * workers/shared/settings.ts) - image/publish have no dashboard-editable
- * model, so there's nothing to expose or accept for them here. "judge" is
- * quality-worker's editorial pass (Task 4), "writingSections" is per-section
- * drafting (Task 5), "writingSelfcheck" the write-time claim check (Task 6).
- */
-const MODEL_DEFAULTS: Record<keyof typeof MODEL_SETTING_KEYS, string> = {
-  planning: env.VERTEX_FLASH,
-  outline: env.VERTEX_FLASH,
-  writing: env.VERTEX_MODEL,
-  judge: env.VERTEX_FLASH,
-  writingSections: env.VERTEX_FLASH,
-  writingSelfcheck: env.VERTEX_FLASH,
-};
+const MODEL_STAGES = Object.keys(STAGE_MODEL_KEYS) as ModelStage[];
+const MODEL_DEFAULTS = Object.fromEntries(
+  MODEL_STAGES.map((stage) => [stage, envModelValue(STAGE_MODEL_KEYS[stage].envFallback)])
+) as Record<ModelStage, string>;
 
-const MODEL_STAGES = Object.keys(MODEL_SETTING_KEYS) as (keyof typeof MODEL_SETTING_KEYS)[];
+function visibleModel(modelId: string) {
+  const entry = modelById(modelId);
+  return entry
+    ? { ...entry, status: modelStatus(modelId) }
+    : { id: modelId, label: modelId, provider: "google" as const, capabilities: [], status: { ok: false, reason: "unknown_model" } };
+}
 
-/**
- * Every text model this deployment plausibly runs - the three known 2.5
- * variants plus whatever VERTEX_MODEL/VERTEX_FLASH are configured to. The
- * settings page renders its dropdowns from this list (appending a saved
- * custom value if one exists) instead of a hardcoded client-side list that
- * could render blank when the effective value wasn't in it.
- */
-const MODEL_OPTIONS = [
-  ...new Set(["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite", env.VERTEX_MODEL, env.VERTEX_FLASH]),
-];
-
-/**
- * Rejects obvious typos before they reach the queue - an invalid model name
- * used to save fine and then fail every job at Vertex call time. Loose
- * enough to allow dated/future Gemini ids, strict enough to catch "gpt-4o".
- */
-const MODEL_NAME_PATTERN = /^gemini-[a-z0-9][\w.:-]*$/i;
+function validateStageModel(stage: ModelStage, value: unknown) {
+  if (typeof value !== "string" || !value.trim()) {
+    return { ok: false as const, error: "Model name must be a non-empty string." };
+  }
+  const model = value.trim();
+  const entry = modelById(model);
+  if (!entry) return { ok: false as const, error: `"${model}" is not in the model registry.` };
+  if (!supportsCapabilities(entry, STAGE_MODEL_KEYS[stage].capabilities)) {
+    return { ok: false as const, error: `"${model}" cannot be used for ${stage}; it does not support the required capability.` };
+  }
+  return { ok: true as const, model };
+}
 
 export async function GET() {
   try {
     const stored = await getAllSettings([
-      ...MODEL_STAGES.map((stage) => MODEL_SETTING_KEYS[stage]),
+      ...MODEL_STAGES.flatMap((stage) => [
+        MODEL_PRIMARY_SETTING_KEYS[stage],
+        MODEL_BACKUP_SETTING_KEYS[stage],
+        MODEL_SETTING_KEYS[stage],
+      ]),
       DAILY_TARGET_KEY,
       RETRY_ATTEMPTS_KEY,
     ]);
 
     const models: Record<string, string> = {};
     const modelOverridden: Record<string, boolean> = {};
+    const stageModels: Record<string, {
+      primary: string | null;
+      backup: string | null;
+      envDefault: string;
+      effective: string;
+      primaryKey: string;
+      backupKey: string;
+      primaryOverridden: boolean;
+      backupOverridden: boolean;
+    }> = {};
+    const modelOptionsByStage: Record<string, ReturnType<typeof visibleModel>[]> = {};
     for (const stage of MODEL_STAGES) {
-      const key = MODEL_SETTING_KEYS[stage];
-      const value = stored.get(key);
-      models[stage] = typeof value === "string" && value.trim() ? value : MODEL_DEFAULTS[stage];
-      modelOverridden[stage] = value !== undefined;
+      const legacy = stored.get(MODEL_SETTING_KEYS[stage]);
+      const primaryValue = stored.get(MODEL_PRIMARY_SETTING_KEYS[stage]) ?? legacy;
+      const backupValue = stored.get(MODEL_BACKUP_SETTING_KEYS[stage]);
+      const primary = typeof primaryValue === "string" && primaryValue.trim() ? primaryValue : null;
+      const backup = typeof backupValue === "string" && backupValue.trim() ? backupValue : null;
+      const envDefault = MODEL_DEFAULTS[stage];
+      models[stage] = primary ?? envDefault;
+      modelOverridden[stage] = primary !== null;
+      stageModels[stage] = {
+        primary,
+        backup,
+        envDefault,
+        effective: primary ?? backup ?? envDefault,
+        primaryKey: MODEL_PRIMARY_SETTING_KEYS[stage],
+        backupKey: MODEL_BACKUP_SETTING_KEYS[stage],
+        primaryOverridden: primary !== null,
+        backupOverridden: backup !== null,
+      };
+      const optionIds = new Set([
+        ...modelsForStage(stage).map((entry) => entry.id),
+        envDefault,
+        ...(primary ? [primary] : []),
+        ...(backup ? [backup] : []),
+      ]);
+      modelOptionsByStage[stage] = Array.from(optionIds).map(visibleModel);
     }
 
     const storedTarget = stored.get(DAILY_TARGET_KEY);
@@ -77,7 +113,10 @@ export async function GET() {
       models,
       modelDefaults: MODEL_DEFAULTS,
       modelOverridden,
-      modelOptions: MODEL_OPTIONS,
+      stageModels,
+      modelOptions: MODEL_REGISTRY.map((entry) => entry.id),
+      modelRegistry: MODEL_REGISTRY.map((entry) => ({ ...entry, status: modelStatus(entry.id) })),
+      modelOptionsByStage,
       dailyBlogTarget,
       dailyBlogTargetDefault: Number(env.DAILY_BLOG_TARGET),
       dailyBlogTargetOverridden: storedTarget !== undefined,
@@ -182,25 +221,30 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ ok: true, key, value: num, overridden: true });
     }
 
-    const stage = MODEL_STAGES.find((s) => MODEL_SETTING_KEYS[s] === key);
+    const stage = MODEL_STAGES.find((s) =>
+      MODEL_SETTING_KEYS[s] === key ||
+      MODEL_PRIMARY_SETTING_KEYS[s] === key ||
+      MODEL_BACKUP_SETTING_KEYS[s] === key
+    );
     if (stage) {
-      // value === null resets the stage to its env default.
+      const targetKey = key === MODEL_BACKUP_SETTING_KEYS[stage]
+        ? MODEL_BACKUP_SETTING_KEYS[stage]
+        : key === MODEL_SETTING_KEYS[stage]
+          ? MODEL_SETTING_KEYS[stage]
+          : MODEL_PRIMARY_SETTING_KEYS[stage];
       if (value === null) {
-        await deleteSetting(MODEL_SETTING_KEYS[stage]);
-        return NextResponse.json({ ok: true, key, value: MODEL_DEFAULTS[stage], overridden: false });
+        await deleteSetting(targetKey);
+        return NextResponse.json({
+          ok: true,
+          key: targetKey,
+          value: targetKey === MODEL_BACKUP_SETTING_KEYS[stage] ? null : MODEL_DEFAULTS[stage],
+          overridden: false,
+        });
       }
-      if (typeof value !== "string" || !value.trim()) {
-        return NextResponse.json({ ok: false, error: "Model name must be a non-empty string." }, { status: 422 });
-      }
-      const model = value.trim();
-      if (!MODEL_NAME_PATTERN.test(model)) {
-        return NextResponse.json(
-          { ok: false, error: `"${model}" doesn't look like a Gemini model id (e.g. gemini-2.5-flash).` },
-          { status: 422 }
-        );
-      }
-      await setSetting(MODEL_SETTING_KEYS[stage], model);
-      return NextResponse.json({ ok: true, key, value: model, overridden: true });
+      const validated = validateStageModel(stage, value);
+      if (!validated.ok) return NextResponse.json({ ok: false, error: validated.error }, { status: 422 });
+      await setSetting(targetKey, validated.model);
+      return NextResponse.json({ ok: true, key: targetKey, value: validated.model, overridden: true });
     }
 
     return NextResponse.json(
