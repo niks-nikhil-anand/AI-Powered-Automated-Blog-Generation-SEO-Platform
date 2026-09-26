@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
+import { Minus, Plus, Save } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -9,6 +10,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { FlipClock } from "@/components/shared/FlipClock";
 import { useLiveNow } from "@/components/shared/WorldClocks";
 import { ScheduleTimeline, type TimelineSlot } from "@/components/shared/ScheduleTimeline";
 import { ScheduleSlotCard, type ScheduleSlot } from "@/components/shared/ScheduleSlotCard";
@@ -46,10 +48,8 @@ const REACTIVE_WORKERS: { key: string; label: string }[] = [
 ];
 
 /**
- * Every stage that actually calls an LLM through a dashboard-editable
- * setting (workers/shared/settings.ts MODEL_SETTING_KEYS). The API returns
- * exactly these keys; the page used to show only four of them, leaving
- * judge/writingSections/writingSelfcheck writable-but-invisible.
+ * Every stage with dashboard-editable primary/backup model routing. The
+ * workers resolve these as primary -> backup -> env fallback per job.
  */
 const MODEL_STAGES: { key: string; label: string }[] = [
   { key: "planning", label: "Planning" },
@@ -58,6 +58,7 @@ const MODEL_STAGES: { key: string; label: string }[] = [
   { key: "writingSections", label: "Writing · sections" },
   { key: "writingSelfcheck", label: "Writing · self-check" },
   { key: "judge", label: "Quality · judge" },
+  { key: "image", label: "Image" },
 ];
 
 /** Display names for the models the API advertises; unknown/custom ids render as the raw id. */
@@ -65,7 +66,62 @@ const MODEL_LABELS: Record<string, string> = {
   "gemini-2.5-pro": "Gemini 2.5 Pro",
   "gemini-2.5-flash": "Gemini 2.5 Flash",
   "gemini-2.5-flash-lite": "Gemini 2.5 Flash-Lite",
+  "gemini-2.5-flash-image": "Gemini 2.5 Flash Image",
+  "gpt-5": "GPT-5",
+  "gpt-5-mini": "GPT-5 mini",
+  "gpt-5-nano": "GPT-5 nano",
+  "gpt-4.1": "GPT-4.1",
+  "gpt-4.1-mini": "GPT-4.1 mini",
+  "claude-opus-4.1": "Claude Opus 4.1",
+  "claude-sonnet-4.5": "Claude Sonnet 4.5",
+  "claude-haiku-4.5": "Claude Haiku 4.5",
+  "claude-3-5-sonnet-latest": "Claude 3.5 Sonnet",
+  "claude-3-5-haiku-latest": "Claude 3.5 Haiku",
+  "flux-pro-1.1": "FLUX Pro 1.1",
+  "flux-dev": "FLUX Dev",
+  "flux-schnell": "FLUX Schnell",
 };
+
+type ModelOption = {
+  id: string;
+  label: string;
+  provider: string;
+  status?: { ok: boolean; reason: string };
+};
+
+type StageModelConfig = {
+  primary: string | null;
+  backup: string | null;
+  envDefault: string;
+  effective: string;
+  primaryKey: string;
+  backupKey: string;
+  primaryOverridden: boolean;
+  backupOverridden: boolean;
+};
+
+function modelLabel(modelId: string | null | undefined) {
+  if (!modelId) return "Not set";
+  return MODEL_LABELS[modelId] ?? modelId;
+}
+
+function modelStatusLabel(option: ModelOption) {
+  const reason = option.status?.reason;
+  if (!reason || option.status?.ok) return "ready";
+  if (reason.endsWith("_credentials_missing")) return "missing key";
+  return reason.replace(/_/g, " ");
+}
+
+function ModelOptionRow({ option }: { option: ModelOption }) {
+  return (
+    <span className="flex min-w-0 flex-col leading-tight">
+      <span className="truncate">{option.label ?? modelLabel(option.id)}</span>
+      <span className="truncate text-[10px] font-normal text-[var(--faint)]">
+        {option.provider} · {modelStatusLabel(option)}
+      </span>
+    </span>
+  );
+}
 
 type SettingsFlags = {
   imageAiEnabled: boolean;
@@ -87,10 +143,10 @@ function noModelStages(flags: SettingsFlags): { label: string; note: string }[] 
       note: "Dispatches queued blog submissions on the publish-slot schedule - no AI model call.",
     },
     {
-      label: "Image",
+      label: "Image fallback",
       note: flags.imageAiEnabled
-        ? "Generates the hero image with the image model from VERTEX_IMAGE_MODEL (env-only) - not a like-for-like text model, so no dropdown here."
-        : "Draws an SVG hero image locally - no AI model call (IMAGE_AI_GENERATION_ENABLED is off).",
+        ? "Uses the Image stage model settings above when AI generation is enabled."
+        : "Draws an SVG hero image locally because IMAGE_AI_GENERATION_ENABLED is off.",
     },
     {
       label: "Quality · scorer",
@@ -169,6 +225,8 @@ export default function SettingsPage() {
   const [models, setModels] = useState<Record<string, string>>({});
   const [modelOverridden, setModelOverridden] = useState<Record<string, boolean>>({});
   const [modelOptions, setModelOptions] = useState<string[]>([]);
+  const [stageModels, setStageModels] = useState<Record<string, StageModelConfig>>({});
+  const [modelOptionsByStage, setModelOptionsByStage] = useState<Record<string, ModelOption[]>>({});
   const [flags, setFlags] = useState<SettingsFlags | null>(null);
   const [dailyTarget, setDailyTarget] = useState(3);
   const [dailyOverridden, setDailyOverridden] = useState(false);
@@ -180,6 +238,7 @@ export default function SettingsPage() {
   // model card because both shared one settingsMessage state.
   const [modelMessage, setModelMessage] = useState<Message>(null);
   const [goalMessage, setGoalMessage] = useState<Message>(null);
+  const [savingGoal, setSavingGoal] = useState(false);
 
   // Extracted so a Daily Blog Goal save can refresh the schedule cards
   // immediately (a goal change clears the scheduler schedule server-side)
@@ -245,6 +304,8 @@ export default function SettingsPage() {
         setModels(data.models ?? {});
         setModelOverridden(data.modelOverridden ?? {});
         setModelOptions(Array.isArray(data.modelOptions) ? data.modelOptions : []);
+        setStageModels(data.stageModels ?? {});
+        setModelOptionsByStage(data.modelOptionsByStage ?? {});
         setFlags(data.flags ?? null);
         setDailyTarget(data.dailyBlogTarget ?? 3);
         setDailyOverridden(Boolean(data.dailyBlogTargetOverridden));
@@ -294,6 +355,33 @@ export default function SettingsPage() {
   const goalSlotsMessage = (data: { publishSlots?: unknown }, prefix: string) =>
     `${prefix} - publish schedule now has ${Number(data.publishSlots ?? 0)} slot(s); set each target time above.`;
 
+  const saveGoal = async () => {
+    setSavingGoal(true);
+    setGoalMessage(null);
+    let savedCount = 0;
+    try {
+      for (const [key, value] of [["dailyBlogTarget", dailyTarget], ["retryAttempts", retryAttempts]] as const) {
+        const response = await fetch("/api/settings", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ key, value }),
+        });
+        const data = await response.json();
+        if (!response.ok || !data.ok) throw new Error(data.error || "Failed to save settings.");
+        savedCount++;
+        if (key === "dailyBlogTarget") {
+          setDailyOverridden(true);
+          loadRunContext();
+        } else setRetryOverridden(true);
+      }
+      setGoalMessage({ text: "Daily blog goal and retry attempts saved.", tone: "ok" });
+    } catch (error) {
+      setGoalMessage({ text: `${savedCount ? "Blog goal saved; retry attempts could not be saved. " : ""}${error instanceof Error ? error.message : "Failed to save settings."}`, tone: "error" });
+    } finally {
+      setSavingGoal(false);
+    }
+  };
+
   const timelineSlots: TimelineSlot[] = slots.map((slot, index) => ({
     id: slot.id,
     label: slot.label,
@@ -303,17 +391,29 @@ export default function SettingsPage() {
 
   const queueByName = new Map(queues.map((q) => [q.name, q]));
 
-  /** Dropdown options for one stage: server's known list + the current value if it's a custom id. */
+  /** Dropdown options for one stage: server-filtered by capability, plus saved fallback values. */
   const optionsFor = (stageKey: string) => {
-    const current = models[stageKey];
-    const base = modelOptions.length > 0 ? modelOptions : Object.keys(MODEL_LABELS);
-    return current && !base.includes(current) ? [...base, current] : base;
+    const current = stageModels[stageKey];
+    const base = modelOptionsByStage[stageKey]?.length
+      ? modelOptionsByStage[stageKey]
+      : (modelOptions.length > 0 ? modelOptions : Object.keys(MODEL_LABELS)).map((id) => ({
+          id,
+          label: MODEL_LABELS[id] ?? id,
+          provider: "google",
+          status: { ok: true, reason: "ready" },
+        }));
+    const byId = new Map(base.map((option) => [option.id, option]));
+    [current?.primary, current?.backup, current?.envDefault].filter(Boolean).forEach((id) => {
+      if (id && !byId.has(id)) byId.set(id, { id, label: MODEL_LABELS[id] ?? id, provider: "custom", status: { ok: false, reason: "unknown_model" } });
+    });
+    return Array.from(byId.values());
   };
 
   return (
     <div className="mx-auto flex w-full max-w-[1720px] flex-col gap-[13px] px-0 sm:gap-[14px] lg:gap-[16px]">
       {/* Header */}
-      <div className="max-w-[980px]">
+      <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
+        <div className="max-w-[980px]">
         <h1 className="margin-0 text-[19px] font-extrabold tracking-tight text-[var(--fg)]">
           Settings
         </h1>
@@ -321,6 +421,8 @@ export default function SettingsPage() {
           Only scheduler-worker runs on a schedule - the other six workers fire reactively. Schedule edits apply
           instantly and persist across restarts; model and goal changes reach running workers within ~15s.
         </p>
+        </div>
+        <FlipClock timeZone={slots[0]?.tz ?? "Asia/Kolkata"} />
       </div>
 
       {/* Publish Schedule */}
@@ -487,46 +589,107 @@ export default function SettingsPage() {
               MODEL_STAGES.map((stage) => (
                 <div
                   key={stage.key}
-                  className="grid grid-cols-1 gap-[6px] border-b border-[var(--bd)] py-[10px] sm:grid-cols-[150px_minmax(0,1fr)_52px] sm:items-center sm:gap-[10px] sm:py-[8px]"
+                  className="grid grid-cols-1 gap-[8px] border-b border-[var(--bd)] py-[11px] lg:grid-cols-[150px_minmax(0,1fr)_minmax(0,1fr)_78px] lg:items-center lg:gap-[10px]"
                 >
-                  <span className="text-[11.5px] font-semibold text-[var(--fg)]">
-                    {stage.label}
-                  </span>
+                  <div className="min-w-0">
+                    <span className="text-[11.5px] font-semibold text-[var(--fg)]">{stage.label}</span>
+                    <div className="mt-[2px] truncate font-mono text-[9.5px] text-[var(--faint)]">
+                      env: {stageModels[stage.key]?.envDefault ?? models[stage.key] ?? "not set"}
+                    </div>
+                  </div>
                   <Select
-                    value={models[stage.key] ?? ""}
+                    value={stageModels[stage.key]?.primary ?? "__env__"}
                     onValueChange={(val) => {
-                      if (!val) return;
-                      setModels((current) => ({ ...current, [stage.key]: val }));
-                      saveSetting(`model:${stage.key}`, val, setModelMessage, () =>
-                        setModelOverridden((current) => ({ ...current, [stage.key]: true }))
-                      );
+                      const key = stageModels[stage.key]?.primaryKey ?? `model:${stage.key}:primary`;
+                      const value = val === "__env__" ? null : val;
+                      saveSetting(key, value, setModelMessage, (data) => {
+                        setStageModels((current) => ({
+                          ...current,
+                          [stage.key]: {
+                            ...(current[stage.key] ?? { envDefault: String(data.value ?? ""), backup: null, effective: String(data.value ?? ""), primaryKey: key, backupKey: `model:${stage.key}:backup`, primaryOverridden: false, backupOverridden: false }),
+                            primary: value === null ? null : String(data.value),
+                            primaryOverridden: value !== null,
+                            effective: value === null
+                              ? (current[stage.key]?.backup ?? current[stage.key]?.envDefault ?? String(data.value ?? ""))
+                              : String(data.value),
+                          },
+                        }));
+                        setModels((current) => ({ ...current, [stage.key]: value === null ? String(data.value) : String(data.value) }));
+                        setModelOverridden((current) => ({ ...current, [stage.key]: value !== null }));
+                      });
                     }}
                   >
-                    <SelectTrigger className="h-[34px] min-w-0 rounded-[8px] border-[var(--bd)] bg-[var(--card2)] font-mono text-[11.5px] font-semibold text-[var(--fg)] outline-none sm:h-[29px]">
-                      <SelectValue placeholder="Select model" />
+                    <SelectTrigger className="h-[34px] w-full min-w-0 rounded-[8px] border-[var(--bd)] bg-[var(--card2)] font-mono text-[11.5px] font-semibold text-[var(--fg)] outline-none sm:h-[29px]">
+                      <SelectValue placeholder="Primary model">
+                        <span className="truncate">
+                          {stageModels[stage.key]?.primary
+                            ? modelLabel(stageModels[stage.key]?.primary)
+                            : `Env default (${modelLabel(stageModels[stage.key]?.envDefault)})`}
+                        </span>
+                      </SelectValue>
                     </SelectTrigger>
-                    <SelectContent className="max-h-[260px] min-w-[260px]">
+                    <SelectContent align="start" alignItemWithTrigger={false} className="max-h-[300px] w-[min(520px,calc(100vw-32px))] min-w-[340px]">
+                      <SelectItem value="__env__">
+                        <span className="flex min-w-0 flex-col leading-tight">
+                          <span className="truncate">Env default</span>
+                          <span className="truncate text-[10px] font-normal text-[var(--faint)]">
+                            {modelLabel(stageModels[stage.key]?.envDefault)}
+                          </span>
+                        </span>
+                      </SelectItem>
                       {optionsFor(stage.key).map((opt) => (
-                        <SelectItem key={opt} value={opt}>{MODEL_LABELS[opt] ?? opt}</SelectItem>
+                        <SelectItem key={opt.id} value={opt.id}>
+                          <ModelOptionRow option={opt} />
+                        </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
-                  {savingKey === `model:${stage.key}` ? (
-                    <span className="text-[10px] text-[var(--mut)] sm:text-right">Saving…</span>
-                  ) : modelOverridden[stage.key] ? (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        saveSetting(`model:${stage.key}`, null, setModelMessage, (data) => {
-                          setModels((current) => ({ ...current, [stage.key]: String(data.value) }));
-                          setModelOverridden((current) => ({ ...current, [stage.key]: false }));
-                        })
-                      }
-                      className="w-fit cursor-pointer border-0 bg-transparent p-0 text-[10px] font-semibold text-[var(--faint)] hover:text-[var(--indigo)] sm:justify-self-end"
-                    >
-                      Reset
-                    </button>
-                  ) : null}
+                  <Select
+                    value={stageModels[stage.key]?.backup ?? "__none__"}
+                    onValueChange={(val) => {
+                      const key = stageModels[stage.key]?.backupKey ?? `model:${stage.key}:backup`;
+                      const value = val === "__none__" ? null : val;
+                      saveSetting(key, value, setModelMessage, (data) => {
+                        setStageModels((current) => ({
+                          ...current,
+                          [stage.key]: {
+                            ...(current[stage.key] ?? { envDefault: "", primary: null, effective: "", primaryKey: `model:${stage.key}:primary`, backupKey: key, primaryOverridden: false, backupOverridden: false }),
+                            backup: value === null ? null : String(data.value),
+                            backupOverridden: value !== null,
+                          },
+                        }));
+                      });
+                    }}
+                  >
+                    <SelectTrigger className="h-[34px] w-full min-w-0 rounded-[8px] border-[var(--bd)] bg-[var(--card2)] font-mono text-[11.5px] font-semibold text-[var(--fg)] outline-none sm:h-[29px]">
+                      <SelectValue placeholder="Backup model">
+                        <span className="truncate">
+                          {stageModels[stage.key]?.backup ? modelLabel(stageModels[stage.key]?.backup) : "No backup"}
+                        </span>
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent align="start" alignItemWithTrigger={false} className="max-h-[300px] w-[min(520px,calc(100vw-32px))] min-w-[340px]">
+                      <SelectItem value="__none__">
+                        <span className="flex min-w-0 flex-col leading-tight">
+                          <span className="truncate">No backup</span>
+                          <span className="truncate text-[10px] font-normal text-[var(--faint)]">Use env fallback after primary</span>
+                        </span>
+                      </SelectItem>
+                      {optionsFor(stage.key).map((opt) => (
+                        <SelectItem key={opt.id} value={opt.id}>
+                          <ModelOptionRow option={opt} />
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <span className="text-[10px] text-[var(--mut)] lg:text-right">
+                    {savingKey === (stageModels[stage.key]?.primaryKey ?? `model:${stage.key}:primary`) ||
+                    savingKey === (stageModels[stage.key]?.backupKey ?? `model:${stage.key}:backup`)
+                      ? "Saving..."
+                      : modelOverridden[stage.key] || stageModels[stage.key]?.backupOverridden
+                        ? "Custom"
+                        : "Env"}
+                  </span>
                 </div>
               ))
             )}
@@ -542,8 +705,8 @@ export default function SettingsPage() {
               </div>
             ))}
             <div className="text-[10px] text-[var(--faint)] mt-[8px]">
-              Applies to new jobs within ~15s (workers re-read per job, behind a short cache). Reset restores the
-              env default (VERTEX_MODEL / VERTEX_FLASH).
+              Applies to new jobs within ~15s. Each worker tries primary first, then backup, then the env fallback
+              shown on the row.
             </div>
             {modelMessage && (
               <div
@@ -562,6 +725,7 @@ export default function SettingsPage() {
             {dailyOverridden && !isLoadingSettings && (
               <button
                 type="button"
+                disabled={savingGoal}
                 onClick={() =>
                   saveSetting("dailyBlogTarget", null, setGoalMessage, (data) => {
                     setDailyTarget(Number(data.value));
@@ -577,43 +741,23 @@ export default function SettingsPage() {
             )}
           </div>
           <div className="flex flex-col gap-[8px] p-[12px] sm:p-[14px]">
-            <div className="mb-[4px] flex items-center justify-between gap-[10px]">
-              <label htmlFor="input-daily-limit" className="text-[12px] font-semibold text-[var(--fg2)]">
-                Steers the Daily Target Controller
-              </label>
-              <span className="font-mono font-bold text-[13px] p-[2px_8px] rounded-[7px] bg-[var(--tint)] text-[var(--indigo)]">
-                {dailyTarget}/day
-              </span>
-            </div>
-            <input
-              id="input-daily-limit"
-              type="range"
-              min="1"
-              max="20"
-              aria-label="Daily blog goal"
-              value={dailyTarget}
-              onChange={(e) => setDailyTarget(Number(e.target.value))}
-              onMouseUp={() =>
-                saveSetting("dailyBlogTarget", dailyTarget, setGoalMessage, (data) => {
-                  setDailyOverridden(true);
-                  loadRunContext();
-                  setGoalMessage({ text: goalSlotsMessage(data, "Saved"), tone: "ok" });
-                })
-              }
-              onTouchEnd={() =>
-                saveSetting("dailyBlogTarget", dailyTarget, setGoalMessage, (data) => {
-                  setDailyOverridden(true);
-                  loadRunContext();
-                  setGoalMessage({ text: goalSlotsMessage(data, "Saved"), tone: "ok" });
-                })
-              }
-              disabled={isLoadingSettings}
-              className="w-full accent-[var(--indigo)] cursor-pointer"
-            />
-            <div className="flex justify-between font-mono text-[9.5px] text-[var(--faint)]">
-              <span>1</span>
-              <span>10</span>
-              <span>20</span>
+            <div className="flex flex-wrap items-center justify-between gap-3 py-2">
+              <span className="text-[12px] font-semibold text-[var(--fg2)]">Blogs per day</span>
+              <div className="flex items-center gap-2">
+                <button type="button" aria-label="Fewer blogs per day" title="Fewer blogs per day"
+                  disabled={isLoadingSettings || savingGoal || dailyTarget <= 1}
+                  onClick={() => { setDailyTarget((value) => Math.max(1, value - 1)); setGoalMessage(null); }}
+                  className="flex h-10 w-10 items-center justify-center rounded-md border border-[var(--bd)] text-[var(--fg2)] hover:border-[var(--indigo)] disabled:opacity-40">
+                  <Minus size={16} />
+                </button>
+                <output aria-label="Blogs per day" className="w-16 text-center font-mono text-[15px] font-bold tabular-nums text-[var(--indigo)]">{dailyTarget}</output>
+                <button type="button" aria-label="More blogs per day" title="More blogs per day"
+                  disabled={isLoadingSettings || savingGoal || dailyTarget >= 20}
+                  onClick={() => { setDailyTarget((value) => Math.min(20, value + 1)); setGoalMessage(null); }}
+                  className="flex h-10 w-10 items-center justify-center rounded-md border border-[var(--bd)] text-[var(--fg2)] hover:border-[var(--indigo)] disabled:opacity-40">
+                  <Plus size={16} />
+                </button>
+              </div>
             </div>
             {goalProgress && (
               <div className="flex items-center gap-[6px] flex-wrap font-mono text-[10px] text-[var(--mut)]">
@@ -654,6 +798,7 @@ export default function SettingsPage() {
                 {retryOverridden && (
                   <button
                     type="button"
+                    disabled={savingGoal}
                     onClick={() =>
                       saveSetting("retryAttempts", null, setGoalMessage, (data) => {
                         setRetryAttempts(Number(data.value));
@@ -668,33 +813,21 @@ export default function SettingsPage() {
                 <button
                   type="button"
                   aria-label="Fewer retry attempts"
-                  disabled={isLoadingSettings || retryAttempts <= 0 || savingKey === "retryAttempts"}
-                  onClick={() =>
-                    saveSetting("retryAttempts", retryAttempts - 1, setGoalMessage, () => {
-                      setRetryAttempts((current) => Math.max(0, current - 1));
-                      setRetryOverridden(true);
-                    })
-                  }
-                  className="w-[26px] h-[26px] rounded-[7px] border border-[var(--bd)] bg-[var(--card)] text-[var(--fg2)] text-[14px] font-bold leading-none hover:border-[var(--indigo)] hover:text-[var(--indigo)] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                  disabled={isLoadingSettings || savingGoal || retryAttempts <= 0}
+                  onClick={() => { setRetryAttempts((value) => Math.max(0, value - 1)); setGoalMessage(null); }}
+                  className="flex h-10 w-10 items-center justify-center rounded-md border border-[var(--bd)] text-[var(--fg2)] hover:border-[var(--indigo)] disabled:opacity-40"
                 >
-                  −
+                  <Minus size={16} />
                 </button>
-                <span className="font-mono font-bold text-[13px] min-w-[44px] text-center p-[2px_8px] rounded-[7px] bg-[var(--tint)] text-[var(--indigo)]">
-                  ×{retryAttempts}
-                </span>
+                <output aria-label="Retry attempts" className="w-16 text-center font-mono text-[15px] font-bold tabular-nums text-[var(--indigo)]">{retryAttempts}</output>
                 <button
                   type="button"
                   aria-label="More retry attempts"
-                  disabled={isLoadingSettings || retryAttempts >= 10 || savingKey === "retryAttempts"}
-                  onClick={() =>
-                    saveSetting("retryAttempts", retryAttempts + 1, setGoalMessage, () => {
-                      setRetryAttempts((current) => Math.min(10, current + 1));
-                      setRetryOverridden(true);
-                    })
-                  }
-                  className="w-[26px] h-[26px] rounded-[7px] border border-[var(--bd)] bg-[var(--card)] text-[var(--fg2)] text-[14px] font-bold leading-none hover:border-[var(--indigo)] hover:text-[var(--indigo)] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                  disabled={isLoadingSettings || savingGoal || retryAttempts >= 10}
+                  onClick={() => { setRetryAttempts((value) => Math.min(10, value + 1)); setGoalMessage(null); }}
+                  className="flex h-10 w-10 items-center justify-center rounded-md border border-[var(--bd)] text-[var(--fg2)] hover:border-[var(--indigo)] disabled:opacity-40"
                 >
-                  +
+                  <Plus size={16} />
                 </button>
               </div>
             </div>
@@ -712,6 +845,12 @@ export default function SettingsPage() {
                 {goalMessage.text}
               </div>
             )}
+            <div className="mt-3 flex justify-end border-t border-[var(--bd)] pt-3">
+              <button type="button" onClick={saveGoal} disabled={isLoadingSettings || savingGoal || savingKey !== null}
+                className="flex h-10 items-center gap-2 rounded-md bg-[var(--indigo)] px-4 text-[12px] font-semibold text-white disabled:opacity-50">
+                <Save size={16} />{savingGoal ? "Saving..." : "Save"}
+              </button>
+            </div>
           </div>
         </section>
       </div>
