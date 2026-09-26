@@ -71,6 +71,9 @@ export const env = {
   VERTEX_MODEL: optional("VERTEX_MODEL", "gemini-2.5-pro"),
   VERTEX_FLASH: optional("VERTEX_FLASH", "gemini-2.5-flash"),
   VERTEX_IMAGE_MODEL: optional("VERTEX_IMAGE_MODEL", "gemini-2.5-flash-image"),
+  OPENAI_API_KEY: required("OPENAI_API_KEY"),
+  ANTHROPIC_API_KEY: required("ANTHROPIC_API_KEY"),
+  FLUX_API_KEY: required("FLUX_API_KEY"),
 
   /**
    * Vertex call-level resilience (docs/VERTEX_429_RESILIENCE_PLAN.md
