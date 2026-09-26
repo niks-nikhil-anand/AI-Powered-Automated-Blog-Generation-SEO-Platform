@@ -1,5 +1,4 @@
-import { env } from "../shared/env";
-import { generateVertexImage } from "../shared/vertex";
+import { generateStageImage } from "../shared/ai-router";
 import { hashString } from "./generator";
 import { ImageJobPayload } from "../shared/queues";
 
@@ -45,7 +44,7 @@ export async function generateAIHeroImage(
   style: StyleDirection
 ): Promise<{ buffer: Buffer; mimeType: string }> {
   const prompt = buildHeroPrompt(payload, subject, style);
-  return generateVertexImage(env.VERTEX_IMAGE_MODEL, prompt, {
+  return generateStageImage("image", prompt, {
     aspectRatio: "16:9",
     negativePrompt: "text, watermark, logo, signature, blurry, low quality",
   });
