@@ -1,7 +1,5 @@
 import { z } from "zod";
-import { env, isVertexConfigured } from "../shared/env";
-import { generateVertexJson } from "../shared/vertex";
-import { getSetting, MODEL_SETTING_KEYS } from "../shared/settings";
+import { generateStageJson } from "../shared/ai-router";
 import { logger } from "../shared/logger";
 
 const log = logger.child({ worker: "quality-worker", stage: "judge" });
@@ -122,12 +120,9 @@ Return ONLY JSON in this exact shape:
 }
 
 export async function judgeBlog(blog: JudgeableBlog): Promise<JudgeResult | null> {
-  if (!isVertexConfigured) return null;
-
   try {
-    const model = await getSetting(MODEL_SETTING_KEYS.judge, env.VERTEX_FLASH);
     // Deferrable: the judge is a degradable score dimension, not a gate.
-    const result = await generateVertexJson<unknown>(model, buildJudgePrompt(blog), { temperature: 0.2, priority: "deferrable" });
+    const result = await generateStageJson<unknown>("judge", buildJudgePrompt(blog), { temperature: 0.2, priority: "deferrable" });
     const parsed = JudgeResponseSchema.safeParse(result.data);
     if (!parsed.success) {
       log.warn("Judge response failed schema validation, skipping judge dimension", { error: parsed.error.message });
@@ -152,7 +147,7 @@ export async function judgeBlog(blog: JudgeableBlog): Promise<JudgeResult | null
       critique: parsed.data.critique,
       fixes: parsed.data.fixes,
       usage: result.usage,
-      model,
+      model: result.model,
     };
   } catch (error) {
     log.warn("Judge call failed, skipping judge dimension", { error: error instanceof Error ? error.message : String(error) });
