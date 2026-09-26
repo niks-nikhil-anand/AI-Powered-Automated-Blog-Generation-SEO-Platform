@@ -16,7 +16,7 @@ export const MODEL_REGISTRY: ModelRegistryEntry[] = [
   { id: "gemini-2.5-pro", label: "Gemini 2.5 Pro", provider: "google", capabilities: ["text", "json", "vision"], requiresEnv: "GOOGLE_VERTEX" },
   { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash", provider: "google", capabilities: ["text", "json", "vision"], requiresEnv: "GOOGLE_VERTEX" },
   { id: "gemini-2.5-flash-lite", label: "Gemini 2.5 Flash-Lite", provider: "google", capabilities: ["text", "json"], requiresEnv: "GOOGLE_VERTEX" },
-  { id: "gemini-2.5-flash-image", label: "Gemini 2.5 Flash Image", provider: "google", capabilities: ["image"], requiresEnv: "GOOGLE_VERTEX" },
+  { id: "gemini-2.5-flash-image", label: "Nano Banana (Gemini 2.5 Flash Image)", provider: "google", capabilities: ["image"], requiresEnv: "GOOGLE_VERTEX" },
 
   { id: "gpt-5", label: "GPT-5", provider: "openai", capabilities: ["text", "json", "vision"], requiresEnv: "OPENAI_API_KEY" },
   { id: "gpt-5-mini", label: "GPT-5 mini", provider: "openai", capabilities: ["text", "json"], requiresEnv: "OPENAI_API_KEY" },
