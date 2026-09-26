@@ -1,6 +1,4 @@
-import { env, isVertexConfigured } from "../shared/env";
-import { generateVertexJson } from "../shared/vertex";
-import { getSetting, MODEL_SETTING_KEYS } from "../shared/settings";
+import { generateStageJson } from "../shared/ai-router";
 import { logger } from "../shared/logger";
 import { PlanningResult, PlanningResultSchema } from "./types";
 
@@ -142,16 +140,19 @@ export async function generateContentPlan(
   evidenceSummary: string,
   evidenceSources: unknown[] = []
 ): Promise<{ plan: PlanningResult; usage: { promptTokens: number; completionTokens: number }; model: string }> {
-  if (!isVertexConfigured) {
+  let result: Awaited<ReturnType<typeof generateStageJson<unknown>>>;
+  try {
+    result = await generateStageJson<unknown>("planning", buildPrompt(spec, evidenceSummary, evidenceSources));
+  } catch (error) {
+    log.warn("Planning model unavailable, using fallback", {
+      error: error instanceof Error ? error.message : String(error),
+    });
     return {
       plan: applySpecOverrides(fallbackPlan(spec, evidenceSummary), spec),
       usage: { promptTokens: 0, completionTokens: 0 },
       model: "fallback",
     };
   }
-
-  const model = await getSetting(MODEL_SETTING_KEYS.planning, env.VERTEX_FLASH);
-  const result = await generateVertexJson<unknown>(model, buildPrompt(spec, evidenceSummary, evidenceSources));
   const parsed = PlanningResultSchema.safeParse(result.data);
   if (!parsed.success) {
     log.warn(`Planning response failed schema validation, using fallback: ${parsed.error.message}`);
@@ -161,5 +162,5 @@ export async function generateContentPlan(
       model: "fallback",
     };
   }
-  return { plan: applySpecOverrides(parsed.data, spec), usage: result.usage, model };
+  return { plan: applySpecOverrides(parsed.data, spec), usage: result.usage, model: result.model };
 }
