@@ -1,0 +1,20 @@
+.clock { --digit-height: 52px; flex-shrink: 0; color: var(--fg); }
+.caption { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; font-size: 11px; font-weight: 600; }
+.caption span { color: var(--mut); font-weight: 400; }
+.digits, .position { display: flex; align-items: center; gap: 4px; }
+.tile { position: relative; display: block; width: 34px; height: var(--digit-height); perspective: 200px; font: 700 34px/var(--digit-height) monospace; border-radius: 6px; box-shadow: 0 2px 3px #0003; }
+.top, .bottom, .fallingTop, .fallingBottom { position: absolute; left: 0; width: 100%; height: 50%; overflow: hidden; background: var(--card2); backface-visibility: hidden; }
+.top, .fallingTop { top: 0; border-radius: 6px 6px 0 0; transform-origin: bottom; border-bottom: 1px solid var(--bd); }
+.bottom, .fallingBottom { bottom: 0; border-radius: 0 0 6px 6px; transform-origin: top; }
+.top > span, .bottom > span, .fallingTop > span, .fallingBottom > span { position: absolute; left: 0; width: 100%; height: var(--digit-height); text-align: center; }
+.top > span, .fallingTop > span { top: 0; }
+.bottom > span, .fallingBottom > span { bottom: 0; }
+.tile .animation { position: absolute; inset: 0; }
+.fallingTop { z-index: 2; animation: fold .25s ease-in both; }
+.fallingBottom { z-index: 3; animation: unfold .25s .25s ease-out both; }
+.colon { font-size: 24px; color: var(--mut); }
+.period { margin-left: 4px; font-size: 12px; font-weight: 700; color: var(--indigo); }
+@keyframes fold { to { transform: rotateX(-90deg); } }
+@keyframes unfold { from { transform: rotateX(90deg); } to { transform: rotateX(0); } }
+@media (prefers-reduced-motion: reduce) { .animation { display: none; } }
+@media (max-width: 380px) { .clock { --digit-height: 44px; } .tile { width: 28px; font-size: 28px; } .digits, .position { gap: 3px; } }
