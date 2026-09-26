@@ -1,7 +1,6 @@
 import { createHash } from "crypto";
-import { env, isVertexConfigured } from "../shared/env";
-import { generateVertexText } from "../shared/vertex";
-import { getSetting, MODEL_SETTING_KEYS } from "../shared/settings";
+import { env } from "../shared/env";
+import { generateStageText } from "../shared/ai-router";
 import { logger } from "../shared/logger";
 import { redis } from "../shared/redis";
 import { QualityGateError } from "../shared/recovery";
@@ -620,12 +619,10 @@ export async function generateSection(
   context: SectionArticleContext,
   options: GenerateSectionOptions = {}
 ): Promise<SectionDraft> {
-  if (!isVertexConfigured) throw new Error("Vertex AI is not configured");
-  const model = options.modelOverride ?? (await getSetting(MODEL_SETTING_KEYS.writingSections, env.VERTEX_FLASH));
   const maxTokens = Math.max(3072, Math.ceil(spec.wordTarget * 8));
   const prompt = buildSectionPrompt(spec, context, options.repairNote);
 
-  let result = await generateVertexText(model, prompt, {
+  let result = await generateStageText("writingSections", prompt, {
     maxOutputTokens: maxTokens,
     temperature: sectionTemperature(spec.kind),
     timeoutMs: env.WRITING_TIMEOUT_MS,
@@ -642,8 +639,8 @@ export async function generateSection(
       { heading: spec.heading, generatedWords, wordTarget: spec.wordTarget, endsComplete }
     );
     try {
-      const expandedResult = await generateVertexText(
-        model,
+      const expandedResult = await generateStageText(
+        "writingSections",
         `${prompt}\n\nIMPORTANT: The previous attempt was ${generatedWords} words and ${endsComplete ? "too brief" : "ended mid-thought"}. Return a complete replacement section with thorough technical analysis, architectural details, security implications, examples, and trade-offs. Reach at least ${minimumWords} words, include every assigned primary keyword exactly once in natural body prose, and end with a full sentence.`,
         {
           maxOutputTokens: maxTokens,
@@ -664,7 +661,7 @@ export async function generateSection(
     heading: spec.heading,
     markdown: result.text.trim(),
     usage: result.usage,
-    model,
+    model: result.model,
     fromCache: false,
   };
 }
