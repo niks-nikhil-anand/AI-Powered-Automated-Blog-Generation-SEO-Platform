@@ -1,9 +1,8 @@
 import { z } from "zod";
-import { env, isVertexConfigured } from "../shared/env";
-import { batchStagger, generateVertexJson } from "../shared/vertex";
+import { batchStagger } from "../shared/vertex";
+import { generateStageJson } from "../shared/ai-router";
 import { logger } from "../shared/logger";
 import { recordAIUsage } from "../shared/pricing";
-import { getSetting, MODEL_SETTING_KEYS } from "../shared/settings";
 import { extractClaimsDeterministic, MAX_CLAIMS } from "../shared/claims";
 import { splitIntoSections } from "./sections";
 import type { GroundedSource } from "./citations";
@@ -144,14 +143,12 @@ export async function selfCheckClaims(
   evidenceSummary: string | null,
   blogInputId?: string
 ): Promise<SelfCheckResult | null> {
-  if (!isVertexConfigured) return null;
   if (sources.length === 0 && !evidenceSummary?.trim()) return null;
 
   try {
     const claims = extractClaimsDeterministic(markdown).slice(0, MAX_CLAIMS);
     if (claims.length === 0) return null;
 
-    const model = await getSetting(MODEL_SETTING_KEYS.writingSelfcheck, env.VERTEX_FLASH);
     const claimTexts = claims.map((claim) => claim.text);
     const batches: string[][] = [];
     for (let i = 0; i < claimTexts.length; i += VERIFY_BATCH_SIZE) {
@@ -159,13 +156,14 @@ export async function selfCheckClaims(
     }
 
     const startedAt = Date.now();
+    const usedModels: string[] = [];
     // Staggered starts - docs/VERTEX_429_RESILIENCE_PLAN.md Task 9.
     const results = await Promise.allSettled(
       batches.map(async (batch, index) => {
         await batchStagger(index);
         // Deferrable: self-check is pre-publication enrichment - a quota
         // breaker skips it and the writing gate fails open.
-        return generateVertexJson<unknown>(model, buildVerifyPrompt(batch, sources, evidenceSummary ?? null), { priority: "deferrable" });
+        return generateStageJson<unknown>("writingSelfcheck", buildVerifyPrompt(batch, sources, evidenceSummary ?? null), { priority: "deferrable" });
       })
     );
 
@@ -184,11 +182,12 @@ export async function selfCheckClaims(
       // evenly across the parallel batches.
       void recordAIUsage({
         worker: "writing-worker",
-        model,
+        model: result.value.model,
         usage: result.value.usage,
         latencyMs: Math.round((Date.now() - startedAt) / batches.length),
         blogInputId,
       }).catch((error) => log.warn("Self-check usage recording failed (non-fatal)", { error: String(error) }));
+      usedModels.push(result.value.model);
 
       const parsed = SelfCheckBatchSchema.safeParse(result.value.data);
       if (!parsed.success) {
@@ -224,7 +223,7 @@ export async function selfCheckClaims(
       passScore: SELFCHECK_PASS_SCORE,
     });
 
-    return { score, issues, totalClaims: verified.length, model };
+    return { score, issues, totalClaims: verified.length, model: Array.from(new Set(usedModels)).join("+") || "fallback" };
   } catch (error) {
     log.warn("Claim self-check failed, proceeding without it", {
       error: error instanceof Error ? error.message : String(error),
